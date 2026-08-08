@@ -11,12 +11,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENES = [1, 2, 18, 20, 36, 42, 53, 91]
+MACOS_APP_BINARY = Path("/Applications/ScummVM.app/Contents/MacOS/scummvm")
 
 
 def find_scummvm(explicit: str | None) -> str | None:
     if explicit:
         return explicit
-    return shutil.which("scummvm")
+    path_scummvm = shutil.which("scummvm")
+    if path_scummvm:
+        return path_scummvm
+    if MACOS_APP_BINARY.exists():
+        return str(MACOS_APP_BINARY)
+    return None
 
 
 def command_for(scummvm: str, data_dir: Path, save_dir: Path, screenshot_dir: Path) -> list[str]:
@@ -84,6 +90,7 @@ def main() -> None:
     if not scummvm:
         print("\nNo scummvm executable found on PATH.")
         print("Install ScummVM or pass --scummvm /path/to/scummvm.")
+        print("On macOS this is often /Applications/ScummVM.app/Contents/MacOS/scummvm.")
         return
 
     cmd = command_for(scummvm, data_dir, save_dir, screenshot_dir)
