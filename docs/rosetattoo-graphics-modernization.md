@@ -61,6 +61,7 @@ The runner writes:
 - `background_4x_lanczos.png` per scene
 - `report.json` with dimensions, blank-image checks, and source-delta metrics
 - `contact_sheet.jpg` for quick visual QA
+- `comparison_sheet.jpg` with original/enhanced pairs
 
 For model-based enhancement, use the external command hook:
 
@@ -94,6 +95,22 @@ scene 18
 This lets us jump to representative rooms and visually compare original versus
 enhanced-background engine builds. `showall` exposes all map locations, which is
 useful when validating scene availability and navigation.
+
+Use the local validation helper to prepare paths and launch ScummVM when an
+executable is available:
+
+```sh
+python3 tools/run_rosetattoo_validation.py --scenes 1 2 18
+```
+
+If ScummVM is not on `PATH`, pass it explicitly:
+
+```sh
+python3 tools/run_rosetattoo_validation.py --scummvm /path/to/scummvm
+```
+
+The helper stores screenshots under `validation/screenshots/`, which is ignored
+by the repository.
 
 ## Current Limits
 

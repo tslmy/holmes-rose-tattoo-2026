@@ -38,6 +38,12 @@ python3 tools/upscale_rosetattoo_backgrounds.py \
 The upscaler can also call an external model runner with `--method external` and
 an `--external-command` template.
 
+Launch ScummVM for scene-jump validation:
+
+```sh
+python3 tools/run_rosetattoo_validation.py --scenes 1 2 18
+```
+
 ## ScummVM Strategy
 
 The clean default is to keep this as a game-modernization/modding repository and

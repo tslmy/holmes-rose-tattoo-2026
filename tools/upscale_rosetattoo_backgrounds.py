@@ -40,6 +40,12 @@ class SceneResult:
     rms_delta_from_scaled_source: float
 
 
+def draw_label(img: Image.Image, text: str) -> None:
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((0, 0, img.width, 18), fill=(255, 255, 255))
+    draw.text((4, 3), text, fill=(0, 0, 0))
+
+
 def scene_dirs(root: Path, selected: list[int] | None) -> list[Path]:
     if selected:
         return [root / f"scene_{scene_id:02d}" for scene_id in selected]
@@ -163,6 +169,48 @@ def make_contact_sheet(results: Iterable[SceneResult], output_path: Path) -> Non
     sheet.save(output_path, quality=90)
 
 
+def make_comparison_sheet(results: Iterable[SceneResult], output_path: Path) -> None:
+    results = list(results)
+    if not results:
+        return
+
+    thumb_w, thumb_h, label_h = 220, 140, 28
+    pair_w = thumb_w * 2
+    cols = min(2, len(results))
+    rows = math.ceil(len(results) / cols)
+    sheet = Image.new("RGB", (cols * pair_w, rows * (thumb_h + label_h)), "white")
+    draw = ImageDraw.Draw(sheet)
+
+    for idx, result in enumerate(results):
+        x0 = (idx % cols) * pair_w
+        y0 = (idx // cols) * (thumb_h + label_h)
+        with Image.open(result.input).convert("RGB") as source:
+            source_thumb = ImageOps.contain(source, (thumb_w, thumb_h), Image.Resampling.LANCZOS)
+        with Image.open(result.output).convert("RGB") as enhanced:
+            enhanced_thumb = ImageOps.contain(enhanced, (thumb_w, thumb_h), Image.Resampling.LANCZOS)
+
+        source_canvas = Image.new("RGB", (thumb_w, thumb_h), "white")
+        enhanced_canvas = Image.new("RGB", (thumb_w, thumb_h), "white")
+        source_canvas.paste(
+            source_thumb,
+            ((thumb_w - source_thumb.width) // 2, (thumb_h - source_thumb.height) // 2),
+        )
+        enhanced_canvas.paste(
+            enhanced_thumb,
+            ((thumb_w - enhanced_thumb.width) // 2, (thumb_h - enhanced_thumb.height) // 2),
+        )
+        draw_label(source_canvas, "original")
+        draw_label(enhanced_canvas, f"{result.method} {result.scale}x")
+
+        sheet.paste(source_canvas, (x0, y0))
+        sheet.paste(enhanced_canvas, (x0 + thumb_w, y0))
+        label = f"{result.scene_id:02d} {result.scene_name[:44]}"
+        draw.text((x0 + 4, y0 + thumb_h + 4), label, fill=(0, 0, 0))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path, quality=90)
+
+
 def process_scene(
     scene_dir: Path,
     input_root: Path,
@@ -269,6 +317,7 @@ def main() -> None:
         encoding="utf-8",
     )
     make_contact_sheet(results, args.output_dir / "contact_sheet.jpg")
+    make_comparison_sheet(results, args.output_dir / "comparison_sheet.jpg")
 
 
 if __name__ == "__main__":
