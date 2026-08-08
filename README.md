@@ -25,6 +25,19 @@ python3 tools/extract_rosetattoo_assets.py --data-dir scummvm
 Outputs are written to `extracted/rosetattoo/`, which is ignored because it
 contains derived game artwork and extracted game text.
 
+Create baseline enhanced outputs:
+
+```sh
+python3 tools/upscale_rosetattoo_backgrounds.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir enhanced/rosetattoo \
+  --scale 4 \
+  --method lanczos
+```
+
+The upscaler can also call an external model runner with `--method external` and
+an `--external-command` template.
+
 ## ScummVM Strategy
 
 The clean default is to keep this as a game-modernization/modding repository and

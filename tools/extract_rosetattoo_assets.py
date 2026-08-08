@@ -3,7 +3,7 @@
 
 This follows ScummVM's Sherlock/Rose Tattoo room loader closely enough to pull
 the base 8-bit room image, scene title, object fields, embedded examine text,
-walk zones, and prompt notes from RESxx.RRM files.
+and prompt notes from RESxx.RRM files.
 """
 
 from __future__ import annotations
