@@ -41,8 +41,11 @@ an `--external-command` template.
 Launch ScummVM for scene-jump validation:
 
 ```sh
-python3 tools/run_rosetattoo_validation.py --scenes 1 2 18
+python3 tools/run_rosetattoo_validation.py --save-slot 1 --scenes 1 2 18
 ```
+
+On macOS the helper auto-detects `/Applications/ScummVM.app/Contents/MacOS/scummvm`
+when ScummVM is installed as an app bundle.
 
 ## ScummVM Strategy
 

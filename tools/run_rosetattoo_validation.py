@@ -25,19 +25,32 @@ def find_scummvm(explicit: str | None) -> str | None:
     return None
 
 
-def command_for(scummvm: str, data_dir: Path, save_dir: Path, screenshot_dir: Path) -> list[str]:
-    return [
+def command_for(
+    scummvm: str,
+    data_dir: Path,
+    save_dir: Path,
+    screenshot_dir: Path,
+    *,
+    save_slot: int | None,
+    window_size: str,
+    fullscreen: bool,
+) -> list[str]:
+    cmd = [
         scummvm,
-        "--path",
-        str(data_dir),
-        "--savepath",
-        str(save_dir),
-        "--screenshotpath",
-        str(screenshot_dir),
+        f"--path={data_dir}",
+        f"--savepath={save_dir}",
+        f"--screenshotpath={screenshot_dir}",
         "--aspect-ratio",
         "--stretch-mode=pixel-perfect",
-        "sherlock:rosetattoo",
     ]
+    if fullscreen:
+        cmd.append("--fullscreen")
+    else:
+        cmd.extend(["--no-fullscreen", f"--window-size={window_size}"])
+    if save_slot is not None:
+        cmd.append(f"--save-slot={save_slot}")
+    cmd.append("sherlock:rosetattoo")
+    return cmd
 
 
 def print_scene_commands(scenes: list[int]) -> None:
@@ -68,6 +81,13 @@ def main() -> None:
         default=ROOT / "validation" / "screenshots",
     )
     parser.add_argument("--scenes", type=int, nargs="*", default=DEFAULT_SCENES)
+    parser.add_argument("--save-slot", type=int, help="Load a numbered ScummVM save slot on start")
+    parser.add_argument(
+        "--window-size",
+        default="1280,960",
+        help="Window size passed to ScummVM when not using --fullscreen.",
+    )
+    parser.add_argument("--fullscreen", action="store_true", help="Start ScummVM fullscreen")
     parser.add_argument(
         "--print-only",
         action="store_true",
@@ -93,7 +113,15 @@ def main() -> None:
         print("On macOS this is often /Applications/ScummVM.app/Contents/MacOS/scummvm.")
         return
 
-    cmd = command_for(scummvm, data_dir, save_dir, screenshot_dir)
+    cmd = command_for(
+        scummvm,
+        data_dir,
+        save_dir,
+        screenshot_dir,
+        save_slot=args.save_slot,
+        window_size=args.window_size,
+        fullscreen=args.fullscreen,
+    )
     print("\nLaunch command:")
     print("  " + " ".join(cmd))
 
