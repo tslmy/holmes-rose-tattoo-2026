@@ -1,0 +1,26 @@
+# Start asset-safe: ignore everything, then allow only project scaffolding.
+/*
+
+!/.gitignore
+!/README.md
+!/docs/
+!/docs/**
+!/tools/
+!/tools/**
+!/thor-package/
+!/thor-package/**
+
+# Common local/generated noise within allowed directories.
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# These are intentionally left local even if the root allow-list changes later.
+/scummvm/
+/scummvm-src/
+/cd/
+/extracted/
+/enhanced/
+/generated/
+/models/
+/tmp/
