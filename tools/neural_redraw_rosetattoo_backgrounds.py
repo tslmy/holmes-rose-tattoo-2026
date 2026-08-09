@@ -37,6 +37,9 @@ class RedrawResult:
     denoising_strength: float
     steps: int
     cfg_scale: float
+    tile_count: int
+    skipped: bool
+    drift_warning: bool
     input_size: tuple[int, int]
     output_size: tuple[int, int]
     expected_size: tuple[int, int]
@@ -224,6 +227,96 @@ def automatic1111_img2img(
     return base64_to_image(images[0])
 
 
+def tile_positions(length: int, tile_length: int, overlap: int) -> list[int]:
+    if length <= tile_length:
+        return [0]
+    stride = max(1, tile_length - overlap)
+    positions = list(range(0, max(1, length - tile_length + 1), stride))
+    final_position = length - tile_length
+    if positions[-1] != final_position:
+        positions.append(final_position)
+    return positions
+
+
+def horizontal_alpha(width: int) -> Image.Image:
+    if width <= 1:
+        return Image.new("L", (width, 1), 255)
+    return Image.linear_gradient("L").resize((width, 1))
+
+
+def paste_horizontal_tile(
+    canvas: Image.Image,
+    tile: Image.Image,
+    x: int,
+    covered_right: int,
+) -> int:
+    if x >= covered_right:
+        canvas.paste(tile, (x, 0))
+        return max(covered_right, x + tile.width)
+
+    overlap_width = min(covered_right - x, tile.width)
+    if overlap_width > 0:
+        existing = canvas.crop((x, 0, x + overlap_width, tile.height))
+        incoming = tile.crop((0, 0, overlap_width, tile.height))
+        alpha = horizontal_alpha(overlap_width).resize((overlap_width, tile.height))
+        canvas.paste(Image.composite(incoming, existing, alpha), (x, 0))
+
+    if overlap_width < tile.width:
+        canvas.paste(
+            tile.crop((overlap_width, 0, tile.width, tile.height)),
+            (x + overlap_width, 0),
+        )
+    return max(covered_right, x + tile.width)
+
+
+def redraw_image(
+    args: argparse.Namespace,
+    init_image: Image.Image,
+    edge_path: Path,
+    prompt: str,
+    seed: int,
+    scene_output_dir: Path,
+) -> tuple[Image.Image, int]:
+    if init_image.width <= args.tile_width:
+        return automatic1111_img2img(args, init_image, edge_path, prompt, seed), 1
+
+    positions = tile_positions(init_image.width, args.tile_width, args.tile_overlap)
+    canvas = Image.new("RGB", init_image.size)
+    covered_right = 0
+    with Image.open(edge_path) as edge_source:
+        edge_image = edge_source.convert("RGB")
+        for idx, x in enumerate(positions):
+            tile_box = (
+                x,
+                0,
+                min(x + args.tile_width, init_image.width),
+                init_image.height,
+            )
+            init_tile = init_image.crop(tile_box)
+            edge_tile = edge_image.crop(tile_box)
+            tile_edge_path = (
+                scene_output_dir / "control" / f"edges_tile_{idx:02d}@{args.scale}x.png"
+            )
+            tile_output_path = (
+                scene_output_dir / "tiles" / f"tile_{idx:02d}@{args.scale}x.png"
+            )
+            tile_edge_path.parent.mkdir(parents=True, exist_ok=True)
+            tile_output_path.parent.mkdir(parents=True, exist_ok=True)
+            edge_tile.save(tile_edge_path)
+            output_tile = automatic1111_img2img(
+                args,
+                init_tile,
+                tile_edge_path,
+                prompt,
+                seed + idx if seed >= 0 else -1,
+            )
+            if output_tile.size != init_tile.size:
+                output_tile = output_tile.resize(init_tile.size, Image.Resampling.LANCZOS)
+            output_tile.save(tile_output_path)
+            covered_right = paste_horizontal_tile(canvas, output_tile, x, covered_right)
+    return canvas, len(positions)
+
+
 def copy_sidecars(scene_dir: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("prompt.txt", "metadata.json"):
@@ -248,6 +341,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
     edge_path = scene_output_dir / "control" / f"edges@{args.scale}x.png"
     output_path = scene_output_dir / f"background@{args.scale}x.png"
     prompt_output_path = scene_output_dir / "neural_prompt.txt"
+    result_path = scene_output_dir / "result.json"
     seed = args.seed + scene_id if args.seed >= 0 else -1
 
     with Image.open(input_path).convert("RGB") as source:
@@ -264,9 +358,50 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
     prompt_output_path.write_text(prompt + "\n", encoding="utf-8")
     copy_sidecars(scene_dir, scene_output_dir)
 
+    if args.skip_existing and output_path.exists():
+        with Image.open(output_path).convert("RGB") as output_image:
+            output_size = output_image.size
+            blank = is_blank(output_image)
+            delta = rms_delta(output_image, init_image)
+        if output_size != expected_size:
+            raise ValueError(f"{output_path} is {output_size}, expected {expected_size}")
+        if blank:
+            raise ValueError(f"{output_path} appears blank")
+        override_path = copy_to_override(args, scene_dir, scene_id, output_path, prompt_output_path)
+        return RedrawResult(
+            scene_id=scene_id,
+            scene_name=scene_name,
+            input=str(input_path),
+            init_image=str(init_path),
+            edge_image=str(edge_path),
+            prompt=str(prompt_output_path),
+            output=str(output_path),
+            scummvm_override=str(override_path) if override_path else None,
+            scale=args.scale,
+            seed=seed,
+            denoising_strength=args.denoising_strength,
+            steps=args.steps,
+            cfg_scale=args.cfg_scale,
+            tile_count=len(tile_positions(expected_size[0], args.tile_width, args.tile_overlap)),
+            skipped=True,
+            drift_warning=delta > args.warn_rms_delta,
+            input_size=input_size,
+            output_size=output_size,
+            expected_size=expected_size,
+            blank=blank,
+            rms_delta_from_init=round(delta, 3),
+        )
+
     if args.backend != "automatic1111":
         raise ValueError(f"Unsupported backend: {args.backend}")
-    output_image = automatic1111_img2img(args, init_image, edge_path, prompt, seed)
+    output_image, tile_count = redraw_image(
+        args,
+        init_image,
+        edge_path,
+        prompt,
+        seed,
+        scene_output_dir,
+    )
     if output_image.size != expected_size:
         output_image = output_image.resize(expected_size, Image.Resampling.LANCZOS)
     output_image.save(output_path)
@@ -276,16 +411,8 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
         raise ValueError(f"{output_path} appears blank")
     delta = rms_delta(output_image, init_image)
 
-    override_path = None
-    if args.scummvm_overrides:
-        override_dir = args.scummvm_overrides / f"scene_{scene_id:03d}"
-        override_dir.mkdir(parents=True, exist_ok=True)
-        override_path = override_dir / f"background@{args.scale}x.png"
-        shutil.copy2(output_path, override_path)
-        copy_sidecars(scene_dir, override_dir)
-        shutil.copy2(prompt_output_path, override_dir / "neural_prompt.txt")
-
-    return RedrawResult(
+    override_path = copy_to_override(args, scene_dir, scene_id, output_path, prompt_output_path)
+    result = RedrawResult(
         scene_id=scene_id,
         scene_name=scene_name,
         input=str(input_path),
@@ -299,12 +426,38 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
         denoising_strength=args.denoising_strength,
         steps=args.steps,
         cfg_scale=args.cfg_scale,
+        tile_count=tile_count,
+        skipped=False,
+        drift_warning=delta > args.warn_rms_delta,
         input_size=input_size,
         output_size=output_image.size,
         expected_size=expected_size,
         blank=blank,
         rms_delta_from_init=round(delta, 3),
     )
+    result_path.write_text(
+        json.dumps(asdict(result), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return result
+
+
+def copy_to_override(
+    args: argparse.Namespace,
+    scene_dir: Path,
+    scene_id: int,
+    output_path: Path,
+    prompt_output_path: Path,
+) -> Path | None:
+    if not args.scummvm_overrides:
+        return None
+    override_dir = args.scummvm_overrides / f"scene_{scene_id:03d}"
+    override_dir.mkdir(parents=True, exist_ok=True)
+    override_path = override_dir / f"background@{args.scale}x.png"
+    shutil.copy2(output_path, override_path)
+    copy_sidecars(scene_dir, override_dir)
+    shutil.copy2(prompt_output_path, override_dir / "neural_prompt.txt")
+    return override_path
 
 
 def main() -> None:
@@ -337,6 +490,24 @@ def main() -> None:
     parser.add_argument("--scummvm-overrides", type=Path)
     parser.add_argument("--scenes", type=int, nargs="*")
     parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Reuse existing scene outputs and refresh override copies.",
+    )
+    parser.add_argument(
+        "--tile-width",
+        type=int,
+        default=1536,
+        help="Maximum generated tile width after scaling; wider scenes are stitched.",
+    )
+    parser.add_argument("--tile-overlap", type=int, default=160)
+    parser.add_argument(
+        "--warn-rms-delta",
+        type=float,
+        default=18.0,
+        help="Flag scene results whose RGB RMS drift from the init image is higher.",
+    )
     parser.add_argument("--seed", type=int, default=36000)
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--cfg-scale", type=float, default=5.5)
@@ -362,6 +533,10 @@ def main() -> None:
 
     if args.scale < 1:
         raise ValueError("--scale must be >= 1")
+    if args.tile_width < 256:
+        raise ValueError("--tile-width must be >= 256")
+    if args.tile_overlap < 0 or args.tile_overlap >= args.tile_width:
+        raise ValueError("--tile-overlap must be between 0 and --tile-width")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     if args.wait:
         wait_for_api(args.api_url, args.wait_timeout)
@@ -375,7 +550,8 @@ def main() -> None:
             f"scene {result.scene_id:03d}: {result.scene_name} "
             f"{result.input_size[0]}x{result.input_size[1]} -> "
             f"{result.output_size[0]}x{result.output_size[1]} "
-            f"delta={result.rms_delta_from_init} output={result.output}"
+            f"delta={result.rms_delta_from_init} tiles={result.tile_count} "
+            f"{'DRIFT ' if result.drift_warning else ''}output={result.output}"
         )
 
     manifest = {

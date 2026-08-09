@@ -123,7 +123,16 @@ python3 tools/neural_redraw_rosetattoo_backgrounds.py \
 The neural redraw tool creates a 2x init image, an edge-control image, a
 resource-pinned realism prompt, and a generated `background@2x.png` for each
 scene. Outputs remain ignored under `generated/` and `mods/`; the tracked code
-only stores the repeatable pipeline.
+only stores the repeatable pipeline. Use `--skip-existing` to resume long
+batches. Wide scrolling rooms are split into overlapping horizontal tiles by
+default so panoramic backgrounds do not need to be generated in one enormous
+diffusion request.
+
+For a resumable full-room pass, point `--output-dir` and `--scummvm-overrides`
+at stable ignored directories and rerun with `--skip-existing` whenever the
+local model runner is interrupted. The batch validator rejects blank captures,
+which helps catch early macOS window-capture misses during unattended scene
+checks.
 
 Launch ScummVM for scene-jump validation:
 

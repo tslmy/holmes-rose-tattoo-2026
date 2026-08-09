@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageOps, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,6 +87,13 @@ def run_scene_capture(
 
     subprocess.run(cmd, check=True)
     return output
+
+
+def is_blank_capture(path: Path) -> bool:
+    with Image.open(path) as source:
+        image = source.convert("RGB")
+        stat = ImageStat.Stat(image)
+    return max(stat.stddev) < 0.5
 
 
 def make_contact_sheet(captures: list[tuple[int, Path]], output_path: Path) -> None:
@@ -188,8 +195,23 @@ def main() -> None:
             if args.fail_fast:
                 raise
         else:
-            captures.append((scene_id, capture))
-            print(f"captured scene {scene_id:03d}: capture_after={capture_after} {capture}")
+            if is_blank_capture(capture):
+                failure = {
+                    "scene_id": scene_id,
+                    "returncode": 0,
+                    "command": " ".join(str(part) for part in [capture]),
+                    "error": "blank capture",
+                }
+                failures.append(failure)
+                print(
+                    f"failed scene {scene_id:03d}: "
+                    f"capture_after={capture_after} blank capture {capture}"
+                )
+                if args.fail_fast:
+                    raise SystemExit(1)
+            else:
+                captures.append((scene_id, capture))
+                print(f"captured scene {scene_id:03d}: capture_after={capture_after} {capture}")
 
     contact_sheet = args.contact_sheet or args.output_dir / "contact-sheet.jpg"
     make_contact_sheet(captures, contact_sheet)
