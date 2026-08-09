@@ -106,8 +106,9 @@ python3 tools/batch_validate_rosetattoo.py \
   --scummvm scummvm-src/scummvm \
   --asset-overrides generated/overrides-2x \
   --hires-scale 2 \
-  --scenes 2 18 36 \
+  --scenes 1 2 18 36 \
   --capture-after 4 \
+  --scene-capture-after 1=8 \
   --output-dir validation/screenshots/batch-hires-2x
 ```
 

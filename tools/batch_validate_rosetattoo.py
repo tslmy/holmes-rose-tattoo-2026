@@ -29,10 +29,29 @@ def screenshot_path(
     return output_dir / f"scene-{scene_id:03d}{suffix}.png"
 
 
+def parse_scene_capture_after(values: list[str] | None) -> dict[int, float]:
+    overrides: dict[int, float] = {}
+    for value in values or []:
+        if "=" not in value:
+            raise ValueError(
+                f"Expected SCENE=SECONDS for --scene-capture-after, got {value!r}"
+            )
+        scene_text, seconds_text = value.split("=", 1)
+        scene_id = int(scene_text)
+        seconds = float(seconds_text)
+        if scene_id <= 0:
+            raise ValueError(f"Scene id must be positive: {scene_id}")
+        if seconds < 0:
+            raise ValueError(f"Capture delay must be non-negative: {seconds}")
+        overrides[scene_id] = seconds
+    return overrides
+
+
 def run_scene_capture(
     scene_id: int,
     args: argparse.Namespace,
     script_path: Path,
+    capture_after: float,
 ) -> Path:
     output = screenshot_path(args.output_dir, scene_id, args.hires_scale, args.hires_debug)
     cmd = [
@@ -41,7 +60,7 @@ def run_scene_capture(
         "--start-scene",
         str(scene_id),
         "--capture-after",
-        str(args.capture_after),
+        str(capture_after),
         "--capture-output",
         str(output),
         "--capture-mode",
@@ -111,6 +130,15 @@ def main() -> None:
     )
     parser.add_argument("--capture-after", type=float, default=5)
     parser.add_argument(
+        "--scene-capture-after",
+        action="append",
+        metavar="SCENE=SECONDS",
+        help=(
+            "Override the capture delay for a specific scene. May be repeated, "
+            "for example --scene-capture-after 1=8."
+        ),
+    )
+    parser.add_argument(
         "--capture-mode",
         choices=["window", "screen"],
         default="window",
@@ -132,12 +160,14 @@ def main() -> None:
     args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     script_path = ROOT / "tools" / "run_rosetattoo_validation.py"
+    scene_capture_after = parse_scene_capture_after(args.scene_capture_after)
 
     captures: list[tuple[int, Path]] = []
     failures: list[dict[str, str | int]] = []
     for scene_id in args.scenes:
+        capture_after = scene_capture_after.get(scene_id, args.capture_after)
         try:
-            capture = run_scene_capture(scene_id, args, script_path)
+            capture = run_scene_capture(scene_id, args, script_path, capture_after)
         except subprocess.CalledProcessError as err:
             failure = {
                 "scene_id": scene_id,
@@ -145,12 +175,15 @@ def main() -> None:
                 "command": " ".join(str(part) for part in err.cmd),
             }
             failures.append(failure)
-            print(f"failed scene {scene_id:03d}: returncode={err.returncode}")
+            print(
+                f"failed scene {scene_id:03d}: "
+                f"capture_after={capture_after} returncode={err.returncode}"
+            )
             if args.fail_fast:
                 raise
         else:
             captures.append((scene_id, capture))
-            print(f"captured scene {scene_id:03d}: {capture}")
+            print(f"captured scene {scene_id:03d}: capture_after={capture_after} {capture}")
 
     contact_sheet = args.contact_sheet or args.output_dir / "contact-sheet.jpg"
     make_contact_sheet(captures, contact_sheet)
@@ -162,6 +195,10 @@ def main() -> None:
         "asset_overrides": str(args.asset_overrides) if args.asset_overrides else None,
         "hires_scale": args.hires_scale,
         "hires_debug": args.hires_debug,
+        "capture_after": args.capture_after,
+        "scene_capture_after": {
+            str(scene_id): seconds for scene_id, seconds in sorted(scene_capture_after.items())
+        },
         "captures": [
             {"scene_id": scene_id, "path": str(path)}
             for scene_id, path in captures
