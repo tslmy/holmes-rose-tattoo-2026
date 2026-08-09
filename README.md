@@ -115,6 +115,24 @@ The batch helper records successful screenshots and failures in
 `validation/screenshots/batch-hires-2x/report.json`; failed scene launches do
 not prevent later scenes from being attempted unless `--fail-fast` is passed.
 
+Inspect high-resolution renderer layers with `--hires-debug`:
+
+```sh
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --asset-overrides generated/overrides-2x \
+  --hires-scale 2 \
+  --hires-debug mask \
+  --capture-after 4 \
+  --capture-output validation/screenshots/scene-036-mask.png
+```
+
+Debug modes are `composite` (default), `background`, `mask`, and `native`.
+`mask` highlights the native pixels currently being drawn over the high-res
+background; this is the fastest way to find overlay or palette-animation
+mistakes.
+
 ## ScummVM Strategy
 
 The clean default is to keep this as a game-modernization/modding repository and

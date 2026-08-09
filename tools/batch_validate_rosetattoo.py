@@ -17,8 +17,15 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENES = [1, 2, 18, 20, 36, 42, 53, 91]
 
 
-def screenshot_path(output_dir: Path, scene_id: int, scale: int | None) -> Path:
+def screenshot_path(
+    output_dir: Path,
+    scene_id: int,
+    scale: int | None,
+    debug_mode: str | None,
+) -> Path:
     suffix = f"-{scale}x" if scale else ""
+    if debug_mode:
+        suffix += f"-{debug_mode}"
     return output_dir / f"scene-{scene_id:03d}{suffix}.png"
 
 
@@ -27,7 +34,7 @@ def run_scene_capture(
     args: argparse.Namespace,
     script_path: Path,
 ) -> Path:
-    output = screenshot_path(args.output_dir, scene_id, args.hires_scale)
+    output = screenshot_path(args.output_dir, scene_id, args.hires_scale, args.hires_debug)
     cmd = [
         sys.executable,
         str(script_path),
@@ -52,6 +59,8 @@ def run_scene_capture(
         cmd.extend(["--asset-overrides", str(args.asset_overrides)])
     if args.hires_scale:
         cmd.extend(["--hires-scale", str(args.hires_scale)])
+    if args.hires_debug:
+        cmd.extend(["--hires-debug", args.hires_debug])
     if args.fullscreen:
         cmd.append("--fullscreen")
 
@@ -90,6 +99,10 @@ def main() -> None:
     parser.add_argument("--save-dir", type=Path, default=ROOT / "validation" / "saves")
     parser.add_argument("--asset-overrides", type=Path)
     parser.add_argument("--hires-scale", type=int)
+    parser.add_argument(
+        "--hires-debug",
+        choices=["composite", "background", "mask", "native"],
+    )
     parser.add_argument("--scenes", type=int, nargs="*", default=DEFAULT_SCENES)
     parser.add_argument(
         "--output-dir",
@@ -148,6 +161,7 @@ def main() -> None:
         "data_dir": str(args.data_dir),
         "asset_overrides": str(args.asset_overrides) if args.asset_overrides else None,
         "hires_scale": args.hires_scale,
+        "hires_debug": args.hires_debug,
         "captures": [
             {"scene_id": scene_id, "path": str(path)}
             for scene_id, path in captures

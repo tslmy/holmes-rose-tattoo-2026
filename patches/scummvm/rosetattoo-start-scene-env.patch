@@ -106,10 +106,10 @@ index 22618bc9..3ac3fcfa 100644
  
  			// Read in the shapes header info
 diff --git a/engines/sherlock/screen.cpp b/engines/sherlock/screen.cpp
-index 8fc20f09..09bbffbd 100644
+index 8fc20f09..608f4cda 100644
 --- a/engines/sherlock/screen.cpp
 +++ b/engines/sherlock/screen.cpp
-@@ -19,14 +19,22 @@
+@@ -19,17 +19,33 @@
   *
   */
  
@@ -129,10 +129,21 @@ index 8fc20f09..09bbffbd 100644
 +#include "image/png.h"
 +
 +#include <cstdlib>
++#include <cstring>
  
  namespace Sherlock {
  
-@@ -39,10 +47,46 @@ Screen *Screen::init(SherlockEngine *vm) {
++enum RoseTattooHiresDebugMode {
++	kRoseTattooHiresComposite = 0,
++	kRoseTattooHiresBackground,
++	kRoseTattooHiresMask,
++	kRoseTattooHiresNative
++};
++
+ Screen *Screen::init(SherlockEngine *vm) {
+ 	if (vm->getGameID() == GType_RoseTattoo)
+ 		return new Tattoo::TattooScreen(vm);
+@@ -39,10 +55,62 @@ Screen *Screen::init(SherlockEngine *vm) {
  		return new Scalpel::ScalpelScreen(vm);
  }
  
@@ -146,6 +157,21 @@ index 8fc20f09..09bbffbd 100644
 +
 +	int scale = atoi(scaleEnv);
 +	return scale > 1 ? scale : 1;
++}
++
++static int roseTattooHiresDebugModeFromEnv() {
++	const char *mode = getenv("SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG");
++	if (!mode || !*mode || !strcmp(mode, "composite"))
++		return kRoseTattooHiresComposite;
++	if (!strcmp(mode, "background"))
++		return kRoseTattooHiresBackground;
++	if (!strcmp(mode, "mask"))
++		return kRoseTattooHiresMask;
++	if (!strcmp(mode, "native"))
++		return kRoseTattooHiresNative;
++
++	warning("Unknown Rose Tattoo hires debug mode '%s'; using composite", mode);
++	return kRoseTattooHiresComposite;
 +}
 +
 +static int closestPaletteEntry(const byte *palette, byte r, byte g, byte b) {
@@ -178,11 +204,12 @@ index 8fc20f09..09bbffbd 100644
 +			vm->getGameID() == GType_RoseTattoo ? 480 : 200, Graphics::PixelFormat::createFormatCLUT8()) {
  	_transitionSeed = 1;
 +	_roseTattooHiresScale = vm->getGameID() == GType_RoseTattoo ? roseTattooHiresScaleFromEnv() : 1;
++	_roseTattooHiresDebugMode = vm->getGameID() == GType_RoseTattoo ? roseTattooHiresDebugModeFromEnv() : kRoseTattooHiresComposite;
 +	_roseTattooHiresFormat = Graphics::PixelFormat::createFormatCLUT8();
  	_fadeStyle = false;
  	Common::fill(&_cMap[0], &_cMap[Graphics::PALETTE_SIZE], 0);
  	Common::fill(&_sMap[0], &_sMap[Graphics::PALETTE_SIZE], 0);
-@@ -55,8 +99,6 @@ Screen::Screen(SherlockEngine *vm) : BaseSurface(), _vm(vm),
+@@ -55,8 +123,6 @@ Screen::Screen(SherlockEngine *vm) : BaseSurface(), _vm(vm),
  	_fadeBytesRead = _fadeBytesToRead = 0;
  	_oldFadePercent = 0;
  	_flushScreen = false;
@@ -191,7 +218,7 @@ index 8fc20f09..09bbffbd 100644
  	_backBuffer.create(_backBuffer1, _backBuffer1.getBounds());
  }
  
-@@ -64,6 +106,124 @@ Screen::~Screen() {
+@@ -64,6 +130,142 @@ Screen::~Screen() {
  	Fonts::freeFont();
  }
  
@@ -270,16 +297,32 @@ index 8fc20f09..09bbffbd 100644
 +	const int outHeight = SHERLOCK_SCREEN_HEIGHT * scale;
 +	const int bgOffsetX = _currentScroll.x * scale;
 +	const int bgOffsetY = _currentScroll.y * scale;
++	const byte maskOff = closestPaletteEntry(_cMap, 0, 0, 0);
++	const byte maskOn = closestPaletteEntry(_cMap, 255, 0, 255);
 +
-+	for (int y = 0; y < outHeight; ++y) {
-+		for (int x = 0; x < outWidth; ++x) {
-+			uint32 color = 0;
-+			const int bgX = bgOffsetX + x;
-+			const int bgY = bgOffsetY + y;
-+			if (bgX >= 0 && bgY >= 0 && bgX < _roseTattooHiresBackground.w && bgY < _roseTattooHiresBackground.h)
-+				color = _roseTattooHiresBackground.getPixel(bgX, bgY);
-+			_roseTattooHiresComposite.setPixel(x, y, color);
++	if (_roseTattooHiresDebugMode == kRoseTattooHiresMask) {
++		_roseTattooHiresComposite.clear(maskOff);
++	} else if (_roseTattooHiresDebugMode == kRoseTattooHiresNative) {
++		_roseTattooHiresComposite.clear(maskOff);
++	} else {
++		for (int y = 0; y < outHeight; ++y) {
++			for (int x = 0; x < outWidth; ++x) {
++				uint32 color = 0;
++				const int bgX = bgOffsetX + x;
++				const int bgY = bgOffsetY + y;
++				if (bgX >= 0 && bgY >= 0 && bgX < _roseTattooHiresBackground.w && bgY < _roseTattooHiresBackground.h)
++					color = _roseTattooHiresBackground.getPixel(bgX, bgY);
++				_roseTattooHiresComposite.setPixel(x, y, color);
++			}
 +		}
++	}
++
++	if (_roseTattooHiresDebugMode == kRoseTattooHiresBackground) {
++		g_system->copyRectToScreen((const byte *)_roseTattooHiresComposite.getPixels(),
++			_roseTattooHiresComposite.pitch, 0, 0, outWidth, outHeight);
++		updateScreen();
++		_dirtyRects.clear();
++		return;
 +	}
 +
 +	const byte *screenPixels = (const byte *)getPixels();
@@ -297,12 +340,14 @@ index 8fc20f09..09bbffbd 100644
 +				continue;
 +
 +			const byte nativePixel = screenRow[x];
-+			if (nativePixel == bgRow[bgNativeX])
++			const bool overlayPixel = _roseTattooHiresDebugMode == kRoseTattooHiresNative || nativePixel != bgRow[bgNativeX];
++			if (!overlayPixel)
 +				continue;
 +
++			const byte outputPixel = _roseTattooHiresDebugMode == kRoseTattooHiresMask ? maskOn : nativePixel;
 +			for (int yy = 0; yy < scale; ++yy) {
 +				for (int xx = 0; xx < scale; ++xx)
-+					_roseTattooHiresComposite.setPixel(x * scale + xx, y * scale + yy, nativePixel);
++					_roseTattooHiresComposite.setPixel(x * scale + xx, y * scale + yy, outputPixel);
 +			}
 +		}
 +	}
@@ -317,7 +362,7 @@ index 8fc20f09..09bbffbd 100644
  	_backBuffer.create(_backBuffer1, _backBuffer1.getBounds());
  }
 diff --git a/engines/sherlock/screen.h b/engines/sherlock/screen.h
-index 922efd18..26854774 100644
+index 922efd18..0b472c73 100644
 --- a/engines/sherlock/screen.h
 +++ b/engines/sherlock/screen.h
 @@ -24,6 +24,7 @@
@@ -328,18 +373,19 @@ index 922efd18..26854774 100644
  #include "sherlock/image_file.h"
  #include "sherlock/surface.h"
  #include "sherlock/resources.h"
-@@ -43,6 +44,10 @@ private:
+@@ -43,6 +44,11 @@ private:
  	// Rose Tattoo fields
  	int _fadeBytesRead, _fadeBytesToRead;
  	int _oldFadePercent;
 +	int _roseTattooHiresScale;
++	int _roseTattooHiresDebugMode;
 +	Graphics::PixelFormat _roseTattooHiresFormat;
 +	Graphics::ManagedSurface _roseTattooHiresBackground;
 +	Graphics::ManagedSurface _roseTattooHiresComposite;
  protected:
  	SherlockEngine *_vm;
  	Surface _backBuffer;
-@@ -60,6 +65,8 @@ public:
+@@ -60,6 +66,8 @@ public:
  	Screen(SherlockEngine *vm);
  	~Screen() override;
  
@@ -348,7 +394,7 @@ index 922efd18..26854774 100644
  	/**
  	 * Obtain the currently active back buffer.
  	 */
-@@ -196,6 +203,10 @@ public:
+@@ -196,6 +204,10 @@ public:
  	 * to the underlying palette manager
  	 */
  	static void translatePalette(byte palette[Graphics::PALETTE_SIZE]);
