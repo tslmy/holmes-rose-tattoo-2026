@@ -105,31 +105,36 @@ def wait_for_api(base_url: str, timeout: int) -> None:
     raise RuntimeError(f"API did not become ready at {base_url}: {last_error}")
 
 
-def make_realism_prompt(scene_prompt: str, scene_name: str) -> str:
-    return "\n".join(
+def make_realism_prompt(scene_prompt: str, scene_name: str, style_prompt: str) -> str:
+    parts = [
+        (
+            "Photorealistic faithful redraw of a Victorian London detective "
+            f"adventure game background, scene: {scene_name}."
+        ),
+        (
+            "Preserve the exact original camera angle, layout, architecture, "
+            "doorways, props, silhouettes, lighting direction, signs, exits, "
+            "walkable geometry, object positions, and puzzle-relevant details."
+        ),
+        (
+            "Realistic materials, period-accurate grime, weathered brick, "
+            "wood, glass, soot, gaslight, fog, worn fabric, cinematic natural "
+            "lighting, high detail, sharp but not over-processed."
+        ),
+        (
+            "Do not add new readable text, new people, new clues, new doors, "
+            "new exits, modern objects, fantasy elements, or extra signage."
+        ),
+    ]
+    if style_prompt.strip():
+        parts.append(style_prompt.strip())
+    parts.extend(
         [
-            (
-                "Photorealistic faithful redraw of a Victorian London detective "
-                f"adventure game background, scene: {scene_name}."
-            ),
-            (
-                "Preserve the exact original camera angle, layout, architecture, "
-                "doorways, props, silhouettes, lighting direction, signs, exits, "
-                "walkable geometry, object positions, and puzzle-relevant details."
-            ),
-            (
-                "Realistic materials, period-accurate grime, weathered brick, "
-                "wood, glass, soot, gaslight, fog, worn fabric, cinematic natural "
-                "lighting, high detail, sharp but not over-processed."
-            ),
-            (
-                "Do not add new readable text, new people, new clues, new doors, "
-                "new exits, modern objects, fantasy elements, or extra signage."
-            ),
             "",
             scene_prompt.strip(),
         ]
     )
+    return "\n".join(parts)
 
 
 def make_edge_image(source: Image.Image, output_path: Path) -> None:
@@ -353,6 +358,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
     prompt = make_realism_prompt(
         prompt_path.read_text(encoding="utf-8"),
         scene_name,
+        args.style_prompt,
     )
     scene_output_dir.mkdir(parents=True, exist_ok=True)
     prompt_output_path.write_text(prompt + "\n", encoding="utf-8")
@@ -509,6 +515,16 @@ def main() -> None:
         help="Flag scene results whose RGB RMS drift from the init image is higher.",
     )
     parser.add_argument("--seed", type=int, default=36000)
+    parser.add_argument(
+        "--style-prompt",
+        default=(
+            "Render as a real location photograph, not as concept art: natural "
+            "lens perspective, physically plausible surfaces, uneven handmade "
+            "period construction, dust, smoke, dampness, patina, subtle film grain, "
+            "imperfect exposure, grounded shadows, no plastic materials, no CGI look."
+        ),
+        help="Additional style guidance appended before extracted scene details.",
+    )
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--cfg-scale", type=float, default=5.5)
     parser.add_argument("--sampler", default="DPM++ 2M SDE")
@@ -519,6 +535,7 @@ def main() -> None:
             "cartoon, anime, illustration, fantasy, futuristic, modern cars, "
             "electric lights, extra people, readable new text, new signs, new "
             "doors, wrong architecture, warped perspective, distorted geometry, "
+            "3d render, CGI, game engine render, plastic, dollhouse, miniature, "
             "low quality, blurry, oversharpened, watermark, signature"
         ),
     )

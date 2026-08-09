@@ -120,6 +120,36 @@ python3 tools/neural_redraw_rosetattoo_backgrounds.py \
   --scummvm-overrides mods/neural-hires-backgrounds
 ```
 
+For the photographic-redraw target, use a stronger calibration pass before
+launching a full batch. The goal is not just low-drift cleanup; it should look
+like a plausible period photograph while preserving exits, walkable geometry,
+and puzzle-relevant props:
+
+```sh
+python3 tools/neural_redraw_rosetattoo_backgrounds.py \
+  --api-url http://127.0.0.1:7860 \
+  --wait \
+  --checkpoint Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors \
+  --scenes 2 18 36 \
+  --scale 2 \
+  --steps 14 \
+  --cfg-scale 4.2 \
+  --denoising-strength 0.56 \
+  --controlnet-model 'controlnet-canny-sdxl-1.0-fp16 [7b2ce256]' \
+  --controlnet-weight 0.55 \
+  --controlnet-guidance-end 0.5 \
+  --tile-width 1536 \
+  --tile-overlap 256 \
+  --output-dir generated/neural-redraws-juggernaut-calibration \
+  --scummvm-overrides mods/neural-hires-backgrounds-juggernaut-calibration
+```
+
+Compare calibration sheets under `validation/contact-sheets/` before committing
+to a full run. In early tests, conservative settings produced RMS deltas around
+`7-17`, which mostly looked like cleaned-up game art; stronger photographic
+settings pushed key scenes into roughly `20-25` and better matched the desired
+redraw direction.
+
 The neural redraw tool creates a 2x init image, an edge-control image, a
 resource-pinned realism prompt, and a generated `background@2x.png` for each
 scene. Outputs remain ignored under `generated/` and `mods/`; the tracked code
