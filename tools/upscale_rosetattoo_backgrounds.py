@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shutil
 import shlex
 import subprocess
 from dataclasses import dataclass, asdict
@@ -35,6 +36,7 @@ class SceneResult:
     input_size: tuple[int, int]
     output_size: tuple[int, int]
     expected_size: tuple[int, int]
+    scummvm_override: str | None
     size_ok: bool
     blank: bool
     rms_delta_from_scaled_source: float
@@ -138,6 +140,7 @@ def validate_output(
         input_size=input_size,
         output_size=output_size,
         expected_size=expected_size,
+        scummvm_override=None,
         size_ok=size_ok,
         blank=blank,
         rms_delta_from_scaled_source=round(delta, 3),
@@ -219,6 +222,7 @@ def process_scene(
     scale: int,
     external_command: str | None,
     allow_size_mismatch: bool,
+    scummvm_overrides: Path | None,
 ) -> SceneResult:
     metadata = load_metadata(scene_dir)
     scene_id = int(scene_dir.name.split("_", 1)[1])
@@ -241,7 +245,7 @@ def process_scene(
     else:
         upscale_with_pillow(input_path, output_path, scale, method)
 
-    return validate_output(
+    result = validate_output(
         scene_id,
         scene_name,
         input_path,
@@ -251,6 +255,26 @@ def process_scene(
         scale,
         allow_size_mismatch,
     )
+    if scummvm_overrides is not None:
+        if result.output_size != result.expected_size:
+            raise ValueError(
+                f"{output_path} cannot be installed as a ScummVM override: "
+                f"got {result.output_size}, expected {result.expected_size}"
+            )
+
+        override_dir = scummvm_overrides / f"scene_{scene_id:03d}"
+        override_path = override_dir / f"background@{scale}x.png"
+        override_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(output_path, override_path)
+
+        for sidecar_name in ("prompt.txt", "metadata.json"):
+            sidecar = scene_dir / sidecar_name
+            if sidecar.exists():
+                shutil.copy2(sidecar, override_dir / sidecar_name)
+
+        result.scummvm_override = str(override_path)
+
+    return result
 
 
 def main() -> None:
@@ -279,6 +303,14 @@ def main() -> None:
         action="store_true",
         help="Do not fail if an external enhancer returns a non-scale-multiple size.",
     )
+    parser.add_argument(
+        "--scummvm-overrides",
+        type=Path,
+        help=(
+            "Also copy each validated output to a ScummVM override tree as "
+            "scene_NNN/background@Sx.png, with prompt and metadata sidecars."
+        ),
+    )
     args = parser.parse_args()
 
     if args.scale < 1:
@@ -294,13 +326,17 @@ def main() -> None:
             args.scale,
             args.external_command,
             args.allow_size_mismatch,
+            args.scummvm_overrides,
         )
         results.append(result)
+        override_msg = (
+            f" override={result.scummvm_override}" if result.scummvm_override else ""
+        )
         print(
             f"scene {result.scene_id:02d}: {result.scene_name} "
             f"{result.input_size[0]}x{result.input_size[1]} -> "
             f"{result.output_size[0]}x{result.output_size[1]} "
-            f"delta={result.rms_delta_from_scaled_source}"
+            f"delta={result.rms_delta_from_scaled_source}{override_msg}"
         )
 
     report = {
@@ -308,6 +344,9 @@ def main() -> None:
         "output_dir": str(args.output_dir),
         "method": args.method,
         "scale": args.scale,
+        "scummvm_overrides": (
+            str(args.scummvm_overrides) if args.scummvm_overrides else None
+        ),
         "scene_count": len(results),
         "results": [asdict(result) for result in results],
     }

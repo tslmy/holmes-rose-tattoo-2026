@@ -38,6 +38,22 @@ python3 tools/upscale_rosetattoo_backgrounds.py \
 The upscaler can also call an external model runner with `--method external` and
 an `--external-command` template.
 
+Create ScummVM-ready high-resolution background overrides:
+
+```sh
+python3 tools/upscale_rosetattoo_backgrounds.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir enhanced/rosetattoo-2x \
+  --scenes 2 18 36 \
+  --scale 2 \
+  --method lanczos \
+  --scummvm-overrides generated/overrides-2x
+```
+
+This writes normal enhancement outputs under `enhanced/` and copies validated
+runtime assets to `generated/overrides-2x/scene_NNN/background@2x.png`, along
+with prompt and metadata sidecars.
+
 Launch ScummVM for scene-jump validation:
 
 ```sh
@@ -82,6 +98,22 @@ python3 tools/run_rosetattoo_validation.py \
 This first prototype keeps the original 640x480 game logic and sprite/UI
 composition, opens a 1280x960 ScummVM backend, and composites a palette-mapped
 high-resolution room background underneath the native moving layers.
+
+Batch-capture several scenes and build a contact sheet:
+
+```sh
+python3 tools/batch_validate_rosetattoo.py \
+  --scummvm scummvm-src/scummvm \
+  --asset-overrides generated/overrides-2x \
+  --hires-scale 2 \
+  --scenes 2 18 36 \
+  --capture-after 4 \
+  --output-dir validation/screenshots/batch-hires-2x
+```
+
+The batch helper records successful screenshots and failures in
+`validation/screenshots/batch-hires-2x/report.json`; failed scene launches do
+not prevent later scenes from being attempted unless `--fail-fast` is passed.
 
 ## ScummVM Strategy
 
