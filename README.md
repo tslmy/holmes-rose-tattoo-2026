@@ -55,12 +55,16 @@ git apply patches/scummvm/rosetattoo-start-scene-env.patch
 python3 tools/run_rosetattoo_validation.py \
   --scummvm scummvm-src/scummvm \
   --start-scene 36 \
+  --asset-overrides generated/overrides \
   --capture-after 3 \
   --capture-output validation/screenshots/desktop-scene-036.png
 ```
 
 `--capture-after` captures the ScummVM window directly on macOS by default. Use
 `--capture-mode screen` only when a full-desktop capture is useful.
+External room backgrounds are loaded from
+`<override-dir>/scene_036/background.png` and must currently match the native
+room dimensions.
 
 ## ScummVM Strategy
 

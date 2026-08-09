@@ -138,6 +138,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--asset-overrides",
+        type=Path,
+        help=(
+            "Directory for external Rose Tattoo asset overrides when using the "
+            "local ScummVM override patch. Sets SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES."
+        ),
+    )
+    parser.add_argument(
         "--window-size",
         default="1280,960",
         help="Window size passed to ScummVM when not using --fullscreen.",
@@ -201,6 +209,8 @@ def main() -> None:
     print("\nLaunch command:")
     if args.start_scene is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_START_SCENE={args.start_scene}")
+    if args.asset_overrides is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES={args.asset_overrides.resolve()}")
     print("  " + " ".join(cmd))
 
     if args.print_only:
@@ -208,6 +218,8 @@ def main() -> None:
     env = os.environ.copy()
     if args.start_scene is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_START_SCENE"] = str(args.start_scene)
+    if args.asset_overrides is not None:
+        env["SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES"] = str(args.asset_overrides.resolve())
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)

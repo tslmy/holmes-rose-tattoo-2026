@@ -120,6 +120,7 @@ ScummVM checkout, build it, then launch:
 python3 tools/run_rosetattoo_validation.py \
   --scummvm scummvm-src/scummvm \
   --start-scene 36 \
+  --asset-overrides generated/overrides \
   --capture-after 3 \
   --capture-output validation/screenshots/window-scene-036.png
 ```
@@ -127,6 +128,10 @@ python3 tools/run_rosetattoo_validation.py \
 The helper sets `SCUMMVM_SHERLOCK_TATTOO_START_SCENE`, which the patch reads
 during Rose Tattoo initialization. This skips the prologue state and starts at
 the requested room before ScummVM's main scene loop begins.
+It also sets `SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES` when `--asset-overrides`
+is passed. Background overrides are loaded from
+`<override-dir>/scene_036/background.png`, remapped to the room palette, and must
+currently match the room's native width and height.
 On macOS, `--capture-after` captures only the ScummVM window by default via
 `screencapture -l`, keeping validation images independent of whatever else is
 on screen.
