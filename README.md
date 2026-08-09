@@ -54,6 +54,33 @@ This writes normal enhancement outputs under `enhanced/` and copies validated
 runtime assets to `generated/overrides-2x/scene_NNN/background@2x.png`, along
 with prompt and metadata sidecars.
 
+Generate reviewable candidate sets:
+
+```sh
+python3 tools/generate_rosetattoo_candidates.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/candidates \
+  --scenes 1 18 36 \
+  --scale 2
+```
+
+Each scene gets a `review_sheet.jpg`, `review.json`, candidate images, and
+per-candidate ScummVM override trees under `generated/candidates/overrides/`.
+To include live in-game composite captures in each review sheet, add:
+
+```sh
+python3 tools/generate_rosetattoo_candidates.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/candidates-ingame \
+  --scenes 36 \
+  --scale 2 \
+  --candidates lanczos \
+  --capture-scummvm \
+  --scummvm scummvm-src/scummvm \
+  --data-dir scummvm \
+  --capture-after 4
+```
+
 Launch ScummVM for scene-jump validation:
 
 ```sh
