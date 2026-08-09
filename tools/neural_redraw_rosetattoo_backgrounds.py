@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import io
 import json
 import math
@@ -37,6 +38,10 @@ class RedrawResult:
     denoising_strength: float
     steps: int
     cfg_scale: float
+    checkpoint: str | None
+    profile: str | None
+    controlnet_weight: float
+    controlnet_guidance_end: float
     tile_count: int
     skipped: bool
     drift_warning: bool
@@ -58,6 +63,92 @@ def load_metadata(scene_dir: Path) -> dict[str, Any]:
     if not metadata_path.exists():
         return {}
     return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+
+def load_settings_file(path: Path | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def apply_setting_values(args: argparse.Namespace, values: dict[str, Any]) -> None:
+    option_map = {
+        "checkpoint": "checkpoint",
+        "steps": "steps",
+        "cfg_scale": "cfg_scale",
+        "denoising_strength": "denoising_strength",
+        "sampler": "sampler",
+        "style_prompt": "style_prompt",
+        "negative_prompt": "negative_prompt",
+        "controlnet_model": "controlnet_model",
+        "controlnet_module": "controlnet_module",
+        "controlnet_weight": "controlnet_weight",
+        "controlnet_processor_res": "controlnet_processor_res",
+        "controlnet_threshold_a": "controlnet_threshold_a",
+        "controlnet_threshold_b": "controlnet_threshold_b",
+        "controlnet_guidance_end": "controlnet_guidance_end",
+        "tile_width": "tile_width",
+        "tile_overlap": "tile_overlap",
+        "warn_rms_delta": "warn_rms_delta",
+    }
+    for key, value in values.items():
+        if key in {"profile", "scenes", "scene_overrides", "defaults"}:
+            continue
+        if key not in option_map:
+            raise ValueError(f"Unknown settings key: {key}")
+        setattr(args, option_map[key], value)
+
+
+def scene_settings_for(
+    base_args: argparse.Namespace,
+    settings: dict[str, Any],
+    scene_id: int,
+) -> argparse.Namespace:
+    scene_args = copy.copy(base_args)
+    scene_args.profile = settings.get("profile")
+    apply_setting_values(scene_args, settings.get("defaults", {}))
+
+    scene_overrides = settings.get("scene_overrides", {})
+    override = scene_overrides.get(str(scene_id), scene_overrides.get(scene_id, {}))
+    if override:
+        scene_args.profile = override.get("profile", scene_args.profile)
+        apply_setting_values(scene_args, override)
+    return scene_args
+
+
+def validate_generation_settings(args: argparse.Namespace) -> None:
+    if args.scale < 1:
+        raise ValueError("--scale must be >= 1")
+    if args.tile_width < 256:
+        raise ValueError("--tile-width must be >= 256")
+    if args.tile_overlap < 0 or args.tile_overlap >= args.tile_width:
+        raise ValueError("--tile-overlap must be between 0 and --tile-width")
+    if args.steps < 1:
+        raise ValueError("--steps must be >= 1")
+    if not 0 <= args.denoising_strength <= 1:
+        raise ValueError("--denoising-strength must be between 0 and 1")
+    if not 0 <= args.controlnet_weight <= 2:
+        raise ValueError("--controlnet-weight must be between 0 and 2")
+    if not 0 <= args.controlnet_guidance_end <= 1:
+        raise ValueError("--controlnet-guidance-end must be between 0 and 1")
+
+
+def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "scene_id": scene_id,
+        "profile": args.profile,
+        "checkpoint": args.checkpoint,
+        "steps": args.steps,
+        "cfg_scale": args.cfg_scale,
+        "denoising_strength": args.denoising_strength,
+        "sampler": args.sampler,
+        "controlnet_model": args.controlnet_model,
+        "controlnet_weight": args.controlnet_weight,
+        "controlnet_guidance_end": args.controlnet_guidance_end,
+        "tile_width": args.tile_width,
+        "tile_overlap": args.tile_overlap,
+        "warn_rms_delta": args.warn_rms_delta,
+    }
 
 
 def image_to_base64(img: Image.Image) -> str:
@@ -330,7 +421,7 @@ def copy_sidecars(scene_dir: Path, destination: Path) -> None:
             shutil.copy2(source, destination / name)
 
 
-def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
+def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argparse.Namespace) -> RedrawResult:
     metadata = load_metadata(scene_dir)
     scene_id = int(scene_dir.name.split("_", 1)[1])
     scene_name = metadata.get("scene_name", f"Scene {scene_id:02d}")
@@ -358,7 +449,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
     prompt = make_realism_prompt(
         prompt_path.read_text(encoding="utf-8"),
         scene_name,
-        args.style_prompt,
+        scene_args.style_prompt,
     )
     scene_output_dir.mkdir(parents=True, exist_ok=True)
     prompt_output_path.write_text(prompt + "\n", encoding="utf-8")
@@ -385,12 +476,16 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
             scummvm_override=str(override_path) if override_path else None,
             scale=args.scale,
             seed=seed,
-            denoising_strength=args.denoising_strength,
-            steps=args.steps,
-            cfg_scale=args.cfg_scale,
-            tile_count=len(tile_positions(expected_size[0], args.tile_width, args.tile_overlap)),
+            denoising_strength=scene_args.denoising_strength,
+            steps=scene_args.steps,
+            cfg_scale=scene_args.cfg_scale,
+            checkpoint=scene_args.checkpoint,
+            profile=scene_args.profile,
+            controlnet_weight=scene_args.controlnet_weight,
+            controlnet_guidance_end=scene_args.controlnet_guidance_end,
+            tile_count=len(tile_positions(expected_size[0], scene_args.tile_width, scene_args.tile_overlap)),
             skipped=True,
-            drift_warning=delta > args.warn_rms_delta,
+            drift_warning=delta > scene_args.warn_rms_delta,
             input_size=input_size,
             output_size=output_size,
             expected_size=expected_size,
@@ -401,7 +496,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
     if args.backend != "automatic1111":
         raise ValueError(f"Unsupported backend: {args.backend}")
     output_image, tile_count = redraw_image(
-        args,
+        scene_args,
         init_image,
         edge_path,
         prompt,
@@ -429,12 +524,16 @@ def process_scene(scene_dir: Path, args: argparse.Namespace) -> RedrawResult:
         scummvm_override=str(override_path) if override_path else None,
         scale=args.scale,
         seed=seed,
-        denoising_strength=args.denoising_strength,
-        steps=args.steps,
-        cfg_scale=args.cfg_scale,
+        denoising_strength=scene_args.denoising_strength,
+        steps=scene_args.steps,
+        cfg_scale=scene_args.cfg_scale,
+        checkpoint=scene_args.checkpoint,
+        profile=scene_args.profile,
+        controlnet_weight=scene_args.controlnet_weight,
+        controlnet_guidance_end=scene_args.controlnet_guidance_end,
         tile_count=tile_count,
         skipped=False,
-        drift_warning=delta > args.warn_rms_delta,
+        drift_warning=delta > scene_args.warn_rms_delta,
         input_size=input_size,
         output_size=output_image.size,
         expected_size=expected_size,
@@ -494,6 +593,19 @@ def main() -> None:
         default=ROOT / "generated" / "neural-redraws",
     )
     parser.add_argument("--scummvm-overrides", type=Path)
+    parser.add_argument(
+        "--settings-file",
+        type=Path,
+        help=(
+            "JSON file with defaults and per-scene overrides for production "
+            "photographic redraw passes."
+        ),
+    )
+    parser.add_argument(
+        "--print-effective-settings",
+        action="store_true",
+        help="Print resolved per-scene settings and exit without calling the API.",
+    )
     parser.add_argument("--scenes", type=int, nargs="*")
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument(
@@ -548,20 +660,32 @@ def main() -> None:
     parser.add_argument("--controlnet-guidance-end", type=float, default=0.75)
     args = parser.parse_args()
 
-    if args.scale < 1:
-        raise ValueError("--scale must be >= 1")
-    if args.tile_width < 256:
-        raise ValueError("--tile-width must be >= 256")
-    if args.tile_overlap < 0 or args.tile_overlap >= args.tile_width:
-        raise ValueError("--tile-overlap must be between 0 and --tile-width")
+    validate_generation_settings(args)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    settings = load_settings_file(args.settings_file)
+    if args.print_effective_settings:
+        summaries = []
+        for scene_dir in scene_dirs(args.input_dir, args.scenes):
+            scene_id = int(scene_dir.name.split("_", 1)[1])
+            scene_args = scene_settings_for(args, settings, scene_id)
+            validate_generation_settings(scene_args)
+            summaries.append(effective_settings_summary(scene_id, scene_args))
+        print(json.dumps(summaries, indent=2, ensure_ascii=False))
+        return
+
     if args.wait:
         wait_for_api(args.api_url, args.wait_timeout)
-    set_automatic1111_checkpoint(args)
 
     results: list[RedrawResult] = []
+    current_checkpoint: str | None = None
     for scene_dir in scene_dirs(args.input_dir, args.scenes):
-        result = process_scene(scene_dir, args)
+        scene_id = int(scene_dir.name.split("_", 1)[1])
+        scene_args = scene_settings_for(args, settings, scene_id)
+        validate_generation_settings(scene_args)
+        if scene_args.checkpoint != current_checkpoint:
+            set_automatic1111_checkpoint(scene_args)
+            current_checkpoint = scene_args.checkpoint
+        result = process_scene(scene_dir, args, scene_args)
         results.append(result)
         print(
             f"scene {result.scene_id:03d}: {result.scene_name} "
@@ -575,6 +699,8 @@ def main() -> None:
         "backend": args.backend,
         "api_url": args.api_url,
         "checkpoint": args.checkpoint,
+        "settings_file": str(args.settings_file) if args.settings_file else None,
+        "profile": settings.get("profile"),
         "input_dir": str(args.input_dir),
         "output_dir": str(args.output_dir),
         "scummvm_overrides": (

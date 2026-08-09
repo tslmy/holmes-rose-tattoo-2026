@@ -150,6 +150,23 @@ to a full run. In early tests, conservative settings produced RMS deltas around
 settings pushed key scenes into roughly `20-25` and better matched the desired
 redraw direction.
 
+The tracked balanced production profile lives at
+`profiles/neural/photographic-balanced.json`. It uses a middle setting rather
+than the most aggressive calibration: lower denoise, stronger ControlNet, and
+special tighter overrides for scenes with masks or heavy fog/water overlays.
+
+```sh
+python3 tools/neural_redraw_rosetattoo_backgrounds.py \
+  --api-url http://127.0.0.1:7860 \
+  --wait \
+  --settings-file profiles/neural/photographic-balanced.json \
+  --scenes 2 18 36 \
+  --scale 2 \
+  --seed 91000 \
+  --output-dir generated/neural-redraws-balanced-calibration \
+  --scummvm-overrides mods/neural-hires-backgrounds-balanced-calibration
+```
+
 The neural redraw tool creates a 2x init image, an edge-control image, a
 resource-pinned realism prompt, and a generated `background@2x.png` for each
 scene. Outputs remain ignored under `generated/` and `mods/`; the tracked code

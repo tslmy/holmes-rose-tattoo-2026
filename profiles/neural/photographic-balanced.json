@@ -1,0 +1,58 @@
+{
+  "profile": "photographic-balanced",
+  "defaults": {
+    "checkpoint": "dreamshaperXL_v21TurboDPMSDE.safetensors",
+    "steps": 14,
+    "cfg_scale": 4.8,
+    "denoising_strength": 0.46,
+    "sampler": "DPM++ 2M SDE",
+    "style_prompt": "Render as a grounded Victorian location photograph while preserving every recognizable object silhouette from the game frame. Improve materials, lighting, grime, patina, lens realism, and fine texture, but keep furniture, props, doorways, signs, stairs, railings, windows, wall breaks, floor boundaries, and walkable geometry in the same positions. Avoid fantasy embellishment, new readable text, decorative inventions, and rearranged architecture.",
+    "negative_prompt": "cartoon, anime, illustration, fantasy, futuristic, modern cars, electric lights, extra people, readable new text, new signs, new doors, wrong architecture, warped perspective, distorted geometry, missing furniture, missing props, replaced props, merged objects, melted details, 3d render, CGI, game engine render, plastic, dollhouse, miniature, low quality, blurry, oversharpened, watermark, signature",
+    "controlnet_model": "controlnet-canny-sdxl-1.0-fp16 [7b2ce256]",
+    "controlnet_module": "canny",
+    "controlnet_weight": 0.85,
+    "controlnet_guidance_end": 0.82,
+    "controlnet_processor_res": 1024,
+    "tile_width": 1536,
+    "tile_overlap": 256,
+    "warn_rms_delta": 24.0
+  },
+  "scene_overrides": {
+    "7": {
+      "profile": "photographic-balanced-overlay",
+      "denoising_strength": 0.42,
+      "controlnet_weight": 0.95,
+      "controlnet_guidance_end": 0.9,
+      "warn_rms_delta": 20.0
+    },
+    "8": {
+      "profile": "photographic-balanced-overlay",
+      "denoising_strength": 0.42,
+      "controlnet_weight": 0.95,
+      "controlnet_guidance_end": 0.9,
+      "warn_rms_delta": 20.0
+    },
+    "18": {
+      "profile": "photographic-balanced-fog-overlay",
+      "denoising_strength": 0.44,
+      "controlnet_weight": 0.88,
+      "controlnet_guidance_end": 0.78,
+      "style_prompt": "Render as a grounded late-Victorian documentary photograph in fog, but preserve the exact silhouettes of the embankment, stairs, sphinxes, obelisk, lamps, river edge, wall seams, and all puzzle-relevant scene boundaries. Add stone texture, grime, dampness, and atmospheric depth without changing monument shapes or water-mask regions.",
+      "warn_rms_delta": 18.0
+    },
+    "53": {
+      "profile": "photographic-balanced-overlay",
+      "denoising_strength": 0.42,
+      "controlnet_weight": 0.95,
+      "controlnet_guidance_end": 0.9,
+      "warn_rms_delta": 20.0
+    },
+    "68": {
+      "profile": "photographic-balanced-overlay",
+      "denoising_strength": 0.42,
+      "controlnet_weight": 0.95,
+      "controlnet_guidance_end": 0.9,
+      "warn_rms_delta": 20.0
+    }
+  }
+}

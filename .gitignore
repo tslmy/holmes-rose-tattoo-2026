@@ -9,6 +9,8 @@
 !/tools/**
 !/patches/
 !/patches/**
+!/profiles/
+!/profiles/**
 !/thor-package/
 !/thor-package/**
 
