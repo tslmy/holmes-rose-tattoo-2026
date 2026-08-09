@@ -106,6 +106,25 @@ python3 tools/generate_rosetattoo_candidates.py \
   --capture-after 4
 ```
 
+Run a local neural photoreal redraw pilot through an Automatic1111/Forge API:
+
+```sh
+python3 tools/neural_redraw_rosetattoo_backgrounds.py \
+  --api-url http://127.0.0.1:7860 \
+  --wait \
+  --checkpoint dreamshaperXL_v21TurboDPMSDE.safetensors \
+  --scenes 18 \
+  --scale 2 \
+  --denoising-strength 0.42 \
+  --controlnet-model 'controlnet-canny-sdxl-1.0-fp16 [7b2ce256]' \
+  --scummvm-overrides mods/neural-hires-backgrounds
+```
+
+The neural redraw tool creates a 2x init image, an edge-control image, a
+resource-pinned realism prompt, and a generated `background@2x.png` for each
+scene. Outputs remain ignored under `generated/` and `mods/`; the tracked code
+only stores the repeatable pipeline.
+
 Launch ScummVM for scene-jump validation:
 
 ```sh
