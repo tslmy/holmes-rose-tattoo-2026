@@ -54,6 +54,29 @@ This writes normal enhancement outputs under `enhanced/` and copies validated
 runtime assets to `generated/overrides-2x/scene_NNN/background@2x.png`, along
 with prompt and metadata sidecars.
 
+Build a full playable 2x background override pack:
+
+```sh
+python3 tools/build_playable_rosetattoo_hires.py
+```
+
+This uses existing extracted assets when available, otherwise extracts from
+`scummvm/`, upscales every discovered room background with Lanczos, and writes a
+patched-ScummVM-ready mod pack to `mods/hires-backgrounds/`.
+
+To also capture a quick in-game validation pass:
+
+```sh
+python3 tools/build_playable_rosetattoo_hires.py \
+  --validate \
+  --scummvm scummvm-src/scummvm \
+  --scene-capture-after 1=8
+```
+
+The generated `mods/hires-backgrounds/manifest.json` records the scene count,
+enhancement method, output paths, and a launch command for the local patched
+ScummVM build.
+
 Generate reviewable candidate sets:
 
 ```sh
