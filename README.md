@@ -66,6 +66,23 @@ External room backgrounds are loaded from
 `<override-dir>/scene_036/background.png` and must currently match the native
 room dimensions.
 
+The experimental high-resolution renderer can also present a 2x background from
+`<override-dir>/scene_036/background@2x.png`:
+
+```sh
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --asset-overrides generated/overrides \
+  --hires-scale 2 \
+  --capture-after 5 \
+  --capture-output validation/screenshots/window-hires-scene-036.png
+```
+
+This first prototype keeps the original 640x480 game logic and sprite/UI
+composition, opens a 1280x960 ScummVM backend, and composites a palette-mapped
+high-resolution room background underneath the native moving layers.
+
 ## ScummVM Strategy
 
 The clean default is to keep this as a game-modernization/modding repository and

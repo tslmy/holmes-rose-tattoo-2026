@@ -146,6 +146,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--hires-scale",
+        type=int,
+        help=(
+            "Enable experimental high-resolution Rose Tattoo presentation "
+            "when using the local ScummVM patch. Sets SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE."
+        ),
+    )
+    parser.add_argument(
         "--window-size",
         default="1280,960",
         help="Window size passed to ScummVM when not using --fullscreen.",
@@ -211,6 +219,8 @@ def main() -> None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_START_SCENE={args.start_scene}")
     if args.asset_overrides is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES={args.asset_overrides.resolve()}")
+    if args.hires_scale is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE={args.hires_scale}")
     print("  " + " ".join(cmd))
 
     if args.print_only:
@@ -220,6 +230,8 @@ def main() -> None:
         env["SCUMMVM_SHERLOCK_TATTOO_START_SCENE"] = str(args.start_scene)
     if args.asset_overrides is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES"] = str(args.asset_overrides.resolve())
+    if args.hires_scale is not None:
+        env["SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE"] = str(args.hires_scale)
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)
