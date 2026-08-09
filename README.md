@@ -62,7 +62,9 @@ python3 tools/build_playable_rosetattoo_hires.py
 
 This uses existing extracted assets when available, otherwise extracts from
 `scummvm/`, upscales every discovered room background with Lanczos, and writes a
-patched-ScummVM-ready mod pack to `mods/hires-backgrounds/`.
+patched-ScummVM-ready mod pack to `mods/hires-backgrounds/`. The generated
+launch manifest defaults to the RGBA32 high-resolution compositor so enhanced
+backgrounds are no longer quantized back into the game's 256-color palette.
 
 To also capture a quick in-game validation pass:
 
@@ -74,8 +76,8 @@ python3 tools/build_playable_rosetattoo_hires.py \
 ```
 
 The generated `mods/hires-backgrounds/manifest.json` records the scene count,
-enhancement method, output paths, and a launch command for the local patched
-ScummVM build.
+enhancement method, output paths, pixel format, and a launch command for the
+local patched ScummVM build.
 
 Generate reviewable candidate sets:
 
@@ -141,13 +143,16 @@ python3 tools/run_rosetattoo_validation.py \
   --start-scene 36 \
   --asset-overrides generated/overrides \
   --hires-scale 2 \
+  --hires-format rgba32 \
   --capture-after 5 \
   --capture-output validation/screenshots/window-hires-scene-036.png
 ```
 
 This first prototype keeps the original 640x480 game logic and sprite/UI
-composition, opens a 1280x960 ScummVM backend, and composites a palette-mapped
-high-resolution room background underneath the native moving layers.
+composition, opens a 1280x960 ScummVM backend, and composites a true-color
+high-resolution room background underneath the native moving layers. Use
+`--hires-format clut8` to compare against the older palette-mapped compositor,
+or `--hires-format rgb565` as a lighter high-color fallback.
 
 Batch-capture several scenes and build a contact sheet:
 
@@ -156,6 +161,7 @@ python3 tools/batch_validate_rosetattoo.py \
   --scummvm scummvm-src/scummvm \
   --asset-overrides generated/overrides-2x \
   --hires-scale 2 \
+  --hires-format rgba32 \
   --scenes 1 2 18 36 \
   --capture-after 4 \
   --scene-capture-after 1=8 \

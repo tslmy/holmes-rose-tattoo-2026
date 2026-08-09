@@ -245,6 +245,8 @@ def capture_in_game_candidate(
         str(override_root),
         "--hires-scale",
         str(args.scale),
+        "--hires-format",
+        args.hires_format,
         "--capture-after",
         str(capture_after),
         "--capture-output",
@@ -429,6 +431,12 @@ def main() -> None:
     parser.add_argument("--scummvm", help="Path to a patched ScummVM executable")
     parser.add_argument("--data-dir", type=Path, default=ROOT / "scummvm")
     parser.add_argument("--capture-after", type=float, default=5)
+    parser.add_argument(
+        "--hires-format",
+        choices=["clut8", "rgb565", "rgba32"],
+        default="rgba32",
+        help="Runtime pixel format for in-game candidate captures.",
+    )
     parser.add_argument(
         "--scene-capture-after",
         action="append",

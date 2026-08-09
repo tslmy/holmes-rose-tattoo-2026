@@ -162,6 +162,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--hires-format",
+        choices=["clut8", "rgb565", "rgba32"],
+        help=(
+            "Select the experimental high-resolution renderer pixel format. Sets "
+            "SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT."
+        ),
+    )
+    parser.add_argument(
         "--window-size",
         default="1280,960",
         help="Window size passed to ScummVM when not using --fullscreen.",
@@ -231,6 +239,8 @@ def main() -> None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE={args.hires_scale}")
     if args.hires_debug is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG={args.hires_debug}")
+    if args.hires_format is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT={args.hires_format}")
     print("  " + " ".join(cmd))
 
     if args.print_only:
@@ -244,6 +254,8 @@ def main() -> None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE"] = str(args.hires_scale)
     if args.hires_debug is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG"] = args.hires_debug
+    if args.hires_format is not None:
+        env["SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT"] = args.hires_format
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)

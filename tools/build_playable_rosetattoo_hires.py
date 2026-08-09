@@ -80,6 +80,8 @@ def validate_overrides(args: argparse.Namespace) -> None:
         str(args.mod_dir),
         "--hires-scale",
         str(args.scale),
+        "--hires-format",
+        args.hires_format,
         "--capture-after",
         str(args.capture_after),
         "--output-dir",
@@ -106,6 +108,7 @@ def write_manifest(args: argparse.Namespace) -> None:
     play_parts = [
         f"SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES={args.mod_dir}",
         f"SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE={args.scale}",
+        f"SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT={args.hires_format}",
         str(args.scummvm),
         f"--path={args.data_dir}",
         "--aspect-ratio",
@@ -117,6 +120,7 @@ def write_manifest(args: argparse.Namespace) -> None:
     manifest = {
         "name": "Rose Tattoo high-resolution background override pack",
         "scale": args.scale,
+        "hires_format": args.hires_format,
         "method": args.method,
         "data_dir": str(args.data_dir),
         "input_dir": str(args.input_dir),
@@ -166,6 +170,12 @@ def main() -> None:
     )
     parser.add_argument("--scenes", type=int, nargs="*")
     parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument(
+        "--hires-format",
+        choices=["clut8", "rgb565", "rgba32"],
+        default="rgba32",
+        help="Runtime pixel format for the patched high-resolution ScummVM compositor.",
+    )
     parser.add_argument(
         "--method",
         choices=["nearest", "bilinear", "bicubic", "lanczos", "external"],

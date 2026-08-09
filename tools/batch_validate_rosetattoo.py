@@ -80,6 +80,8 @@ def run_scene_capture(
         cmd.extend(["--hires-scale", str(args.hires_scale)])
     if args.hires_debug:
         cmd.extend(["--hires-debug", args.hires_debug])
+    if args.hires_format:
+        cmd.extend(["--hires-format", args.hires_format])
     if args.fullscreen:
         cmd.append("--fullscreen")
 
@@ -121,6 +123,10 @@ def main() -> None:
     parser.add_argument(
         "--hires-debug",
         choices=["composite", "background", "mask", "native"],
+    )
+    parser.add_argument(
+        "--hires-format",
+        choices=["clut8", "rgb565", "rgba32"],
     )
     parser.add_argument("--scenes", type=int, nargs="*", default=DEFAULT_SCENES)
     parser.add_argument(
@@ -195,6 +201,7 @@ def main() -> None:
         "asset_overrides": str(args.asset_overrides) if args.asset_overrides else None,
         "hires_scale": args.hires_scale,
         "hires_debug": args.hires_debug,
+        "hires_format": args.hires_format,
         "capture_after": args.capture_after,
         "scene_capture_after": {
             str(scene_id): seconds for scene_id, seconds in sorted(scene_capture_after.items())
