@@ -112,6 +112,25 @@ python3 tools/run_rosetattoo_validation.py --scummvm /path/to/scummvm
 The helper stores screenshots under `validation/screenshots/`, which is ignored
 by the repository.
 
+For automated validation, use a patched ScummVM binary instead of keyboard
+automation. Apply `patches/scummvm/rosetattoo-start-scene-env.patch` to a local
+ScummVM checkout, build it, then launch:
+
+```sh
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --capture-after 3 \
+  --capture-output validation/screenshots/window-scene-036.png
+```
+
+The helper sets `SCUMMVM_SHERLOCK_TATTOO_START_SCENE`, which the patch reads
+during Rose Tattoo initialization. This skips the prologue state and starts at
+the requested room before ScummVM's main scene loop begins.
+On macOS, `--capture-after` captures only the ScummVM window by default via
+`screencapture -l`, keeping validation images independent of whatever else is
+on screen.
+
 ## Current Limits
 
 The extractor currently targets the highest-value first pass: base room

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,6 +13,36 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENES = [1, 2, 18, 20, 36, 42, 53, 91]
 MACOS_APP_BINARY = Path("/Applications/ScummVM.app/Contents/MacOS/scummvm")
+MACOS_WINDOW_ID_SWIFT = r"""
+import CoreGraphics
+import Foundation
+
+let owner = CommandLine.arguments.dropFirst().first?.lowercased() ?? "scummvm"
+let options = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
+
+guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+    exit(2)
+}
+
+for window in windows {
+    let layer = window[kCGWindowLayer as String] as? Int ?? -1
+    guard layer == 0 else {
+        continue
+    }
+
+    let ownerName = (window[kCGWindowOwnerName as String] as? String ?? "").lowercased()
+    guard ownerName == owner else {
+        continue
+    }
+
+    if let windowNumber = window[kCGWindowNumber as String] as? UInt32 {
+        print(windowNumber)
+        exit(0)
+    }
+}
+
+exit(1)
+"""
 
 
 def find_scummvm(explicit: str | None) -> str | None:
@@ -68,6 +99,22 @@ def print_scene_commands(scenes: list[int]) -> None:
     print("  scene N   jump to room/scene N")
 
 
+def macos_window_id(owner: str) -> str | None:
+    swift = shutil.which("swift")
+    if not swift:
+        return None
+
+    result = subprocess.run(
+        [swift, "-e", MACOS_WINDOW_ID_SWIFT, owner],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Launch ScummVM with Rose Tattoo validation paths and scene-jump notes."
@@ -83,6 +130,14 @@ def main() -> None:
     parser.add_argument("--scenes", type=int, nargs="*", default=DEFAULT_SCENES)
     parser.add_argument("--save-slot", type=int, help="Load a numbered ScummVM save slot on start")
     parser.add_argument(
+        "--start-scene",
+        type=int,
+        help=(
+            "Start directly in a scene when using the local ScummVM validation "
+            "patch. Sets SCUMMVM_SHERLOCK_TATTOO_START_SCENE."
+        ),
+    )
+    parser.add_argument(
         "--window-size",
         default="1280,960",
         help="Window size passed to ScummVM when not using --fullscreen.",
@@ -92,6 +147,27 @@ def main() -> None:
         "--print-only",
         action="store_true",
         help="Print launch/debugger instructions without starting ScummVM.",
+    )
+    parser.add_argument(
+        "--capture-after",
+        type=float,
+        help="After launching ScummVM, wait this many seconds, capture the screen, then stop ScummVM.",
+    )
+    parser.add_argument(
+        "--capture-output",
+        type=Path,
+        help="Screenshot path for --capture-after. Defaults under the screenshot directory.",
+    )
+    parser.add_argument(
+        "--capture-mode",
+        choices=["window", "screen"],
+        default="window",
+        help="Capture only the ScummVM window by default; use screen for full desktop capture.",
+    )
+    parser.add_argument(
+        "--capture-window-owner",
+        default="scummvm",
+        help="macOS window owner process name for --capture-mode window.",
     )
     args = parser.parse_args()
 
@@ -123,11 +199,54 @@ def main() -> None:
         fullscreen=args.fullscreen,
     )
     print("\nLaunch command:")
+    if args.start_scene is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_START_SCENE={args.start_scene}")
     print("  " + " ".join(cmd))
 
     if args.print_only:
         return
-    subprocess.run(cmd, check=True)
+    env = os.environ.copy()
+    if args.start_scene is not None:
+        env["SCUMMVM_SHERLOCK_TATTOO_START_SCENE"] = str(args.start_scene)
+
+    if args.capture_after is None:
+        subprocess.run(cmd, check=True, env=env)
+        return
+
+    screencapture = shutil.which("screencapture")
+    if not screencapture:
+        raise SystemExit("--capture-after currently requires macOS screencapture on PATH")
+
+    capture_output = args.capture_output
+    if capture_output is None:
+        scene_suffix = f"scene-{args.start_scene:03d}" if args.start_scene is not None else "launch"
+        capture_output = screenshot_dir / f"desktop-{scene_suffix}.png"
+    capture_output = capture_output.resolve()
+    capture_output.parent.mkdir(parents=True, exist_ok=True)
+
+    proc = subprocess.Popen(cmd, env=env)
+    try:
+        import time
+
+        time.sleep(args.capture_after)
+        capture_cmd = [screencapture, "-x"]
+        if args.capture_mode == "window":
+            window_id = macos_window_id(args.capture_window_owner)
+            if not window_id:
+                raise SystemExit(
+                    f"Could not find a visible {args.capture_window_owner!r} window for capture"
+                )
+            capture_cmd.append(f"-l{window_id}")
+        capture_cmd.append(str(capture_output))
+        subprocess.run(capture_cmd, check=True)
+        print(f"\nCaptured: {capture_output}")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
 
 if __name__ == "__main__":

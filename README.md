@@ -47,6 +47,21 @@ python3 tools/run_rosetattoo_validation.py --save-slot 1 --scenes 1 2 18
 On macOS the helper auto-detects `/Applications/ScummVM.app/Contents/MacOS/scummvm`
 when ScummVM is installed as an app bundle.
 
+For deterministic scene validation, apply the local ScummVM patch and launch a
+patched binary with `--start-scene`:
+
+```sh
+git apply patches/scummvm/rosetattoo-start-scene-env.patch
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --capture-after 3 \
+  --capture-output validation/screenshots/desktop-scene-036.png
+```
+
+`--capture-after` captures the ScummVM window directly on macOS by default. Use
+`--capture-mode screen` only when a full-desktop capture is useful.
+
 ## ScummVM Strategy
 
 The clean default is to keep this as a game-modernization/modding repository and
@@ -54,6 +69,7 @@ treat ScummVM as an external dependency:
 
 - Use the installed ScummVM runtime for playing the original game.
 - Use a local `scummvm-src/` checkout for reference or experiments.
+- Keep repeatable engine changes as patches under `patches/scummvm/`.
 - Add ScummVM as a Git submodule only when this repo needs to build a patched
   engine as part of its normal workflow.
 

@@ -1,0 +1,41 @@
+diff --git a/scummvm-src/engines/sherlock/tattoo/tattoo.cpp b/scummvm-src/engines/sherlock/tattoo/tattoo.cpp
+index 8f5866c7..9b315e3e 100644
+--- a/scummvm-src/engines/sherlock/tattoo/tattoo.cpp
++++ b/scummvm-src/engines/sherlock/tattoo/tattoo.cpp
+@@ -19,6 +19,8 @@
+  *
+  */
+ 
++#define FORBIDDEN_SYMBOL_EXCEPTION_getenv
++
+ #include "common/config-manager.h"
+ #include "engines/util.h"
+ #include "sherlock/tattoo/tattoo.h"
+@@ -31,6 +33,8 @@
+ 
+ #include "backends/keymapper/keymapper.h"
+ 
++#include <cstdlib>
++
+ namespace Sherlock {
+ 
+ namespace Tattoo {
+@@ -86,6 +90,18 @@ void TattooEngine::initialize() {
+ 	// Starting scene
+ 	_scene->_goToScene = STARTING_INTRO_SCENE;
+ 
++	const char *validationScene = getenv("SCUMMVM_SHERLOCK_TATTOO_START_SCENE");
++	if (validationScene && *validationScene) {
++		int sceneNumber = atoi(validationScene);
++		if (sceneNumber > 0) {
++			_runningProlog = false;
++			setFlagsDirect(-FLAG_PLAYER_IS_HOLMES);
++			setFlagsDirect(396);
++			keymapper->getKeymap("tattoo-prolog")->setEnabled(false);
++			_scene->_goToScene = sceneNumber;
++		}
++	}
++
+ 	// Load an initial palette
+ 	loadInitialPalette();
+ }
