@@ -1,11 +1,33 @@
 # Rose Tattoo Modernization Lab
 
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+
 Tools and notes for modernizing the graphics pipeline for *The Lost Files of
 Sherlock Holmes: The Case of the Rose Tattoo*.
 
 This repository intentionally does not track original game files, extracted
 backgrounds, generated art, or a local ScummVM checkout. Keep those assets local
 under ignored directories such as `scummvm/`, `extracted/`, and `scummvm-src/`.
+
+## Setup
+
+Python tooling is managed with [`uv`](https://github.com/astral-sh/uv). Install
+uv, then sync the project's virtual environment (pins Pillow, the only
+third-party dependency, per `pyproject.toml`/`uv.lock`):
+
+```sh
+uv sync
+```
+
+Run any tool via `uv run`, e.g.:
+
+```sh
+uv run python3 tools/extract_rosetattoo_assets.py --data-dir scummvm --scenes 1 2 18
+```
+
+Every command below also works with a plain `python3` as long as Pillow is
+installed in the active interpreter (`uv run` is just the recommended,
+reproducible way to get there).
 
 ## Current Workflow
 

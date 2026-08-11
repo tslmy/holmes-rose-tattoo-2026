@@ -15,11 +15,14 @@
 !/profiles/**
 !/thor-package/
 !/thor-package/**
+!/pyproject.toml
+!/uv.lock
 
 # Common local/generated noise within allowed directories.
 .DS_Store
 __pycache__/
 *.py[cod]
+.venv/
 
 # These are intentionally left local even if the root allow-list changes later.
 /scummvm/
