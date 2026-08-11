@@ -455,6 +455,58 @@ these upscaled glyphs in-game. That engine-side wiring is left as future
 work; the upscaled glyph assets are ready under `enhanced/sprites/font*_vgs/`
 whenever that lands.
 
+#### Additional character/item sprites
+
+Beyond the cursor set and Watson, the same `extract_rosetattoo_sprites.py` /
+`upscale_rosetattoo_sprites.py` pipeline has also been run over the rest of
+the game's VGS-format character and item resources: the player's own walk
+cycles across coat/hat states (`SVGAWALK.VGS`, `NOHAT.VGS`, `COATWALK.VGS`,
+and the `CT*`/`HT*`/`JT*`/`TDOWNRG` directional variants), the named NPCs
+(`MYCROFT.VGS`, `TOBY.VGS`, `TUX.VGS`, `WIGGINS.VGS`), and every inventory/
+interactive item icon (`ITEM01.VGS`-`ITEM84.VGS`). Like Watson, these are
+extracted and upscaled but not yet wired into any runtime override path -
+same reasoning as above: hooking real hires art into `people.cpp`'s
+walk-cycle/animation state machine (as opposed to the single well-defined
+`Events::setCursor()` call site the cursor override uses) is a much larger,
+higher-risk change than has been attempted so far. `TALK.LIB`'s ~1400
+talking-head portrait frames and the per-scene `RES##.VGS` foreground sprite
+overlays are not yet extracted at all.
+
+#### Overhead/travel map (`MAP.VGS`)
+
+The London overhead map screen bypasses `Scene::loadScene()` entirely (see
+`TattooMap::show()`) and previously only got the black-screen fix from
+`patches/scummvm/rosetattoo-hires-map-black-screen-fix.patch` - correct
+scaling, but still the original blocky low-resolution artwork, unlike every
+room background. `patches/scummvm/rosetattoo-hires-map-upscale-override.patch`
+adds a real hires override for it, reusing the same decode/validation logic
+as the per-scene background override (factored into a shared
+`loadRoseTattooHiresBackgroundFromPath()` helper) with a fixed path instead
+of a per-scene one.
+
+Unlike room backgrounds, `MAP.VGS` stores no palette of its own - the engine
+loads a separate `MAP.PAL` resource for it - so extraction needs
+`--palette-resource` (a new flag alongside `--palette-scene`) instead:
+
+```sh
+python3 tools/extract_rosetattoo_sprites.py --resources MAP.VGS --palette-resource MAP.PAL
+python3 tools/extract_rosetattoo_sprites.py --resources MAPICONS.VGS --palette-resource MAP.PAL
+
+# The map is a single large (1280x960 native) illustration full of fine
+# engraving-style linework and ~30 clickable location pins, so - like
+# cursors/items - it gets the same non-diffusion real-ESRGAN upscale, not a
+# ControlNet redraw pass that could hallucinate away small geometry:
+python3 tools/upscale_rosetattoo_sprites.py --resources map_vgs mapicons_vgs --scale 2
+```
+
+The engine looks for the result at
+`sprites/map_vgs/frame_000@<scale>x.png` under
+`$SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES` (the same directory tree the
+cursor override already reads from), so copying `enhanced/sprites/map_vgs/`
+into the production mod's `sprites/` directory is enough to pick it up.
+`MAPICONS.VGS`'s 33 location-pin frames are upscaled too but not yet wired
+into a runtime override (the map only reads the background frame today).
+
 Launch ScummVM for scene-jump validation:
 
 ```sh

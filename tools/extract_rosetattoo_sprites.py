@@ -393,8 +393,34 @@ def load_scene_palette(root: Path, scene_id: int) -> list[int]:
     return [palette_6bit_to_8bit(value) for value in raw_palette]
 
 
+def load_named_palette(root: Path, palette_resource: str) -> list[int]:
+    """Loads a standalone .PAL resource (e.g. MAP.PAL, a raw 768-byte 6-bit
+    VGA palette with no VGS frame header) as a default_palette for VGS
+    resources that carry no palette of their own - the overhead map's
+    MAP.VGS is the main example: it stores its palette separately in
+    MAP.PAL rather than inline, unlike room backgrounds.
+    """
+    physical_path = root / palette_resource
+    if physical_path.exists():
+        data = decompress_if_necessary(physical_path.read_bytes())
+    else:
+        lib_path = find_resource_library(root, palette_resource, DEFAULT_LIBRARIES)
+        if lib_path is None:
+            raise FileNotFoundError(
+                f"{palette_resource} not found on disk or in {DEFAULT_LIBRARIES} under {root}"
+            )
+        data = load_resource(lib_path, palette_resource)
+    if len(data) < PALETTE_SIZE:
+        raise ValueError(f"{palette_resource} is too short to be a VGA palette ({len(data)} bytes)")
+    return [palette_6bit_to_8bit(value) for value in data[:PALETTE_SIZE]]
+
+
 def extract_resource(
-    root: Path, resource_name: str, output_dir: Path, palette_scene: int | None = None
+    root: Path,
+    resource_name: str,
+    output_dir: Path,
+    palette_scene: int | None = None,
+    palette_resource: str | None = None,
 ) -> dict:
     physical_path = root / resource_name
     if physical_path.exists():
@@ -409,7 +435,12 @@ def extract_resource(
         data = load_resource(lib_path, resource_name)
         source = f"{lib_path.name}:{resource_name}"
 
-    default_palette = load_scene_palette(root, palette_scene) if palette_scene else None
+    if palette_resource:
+        default_palette = load_named_palette(root, palette_resource)
+    elif palette_scene:
+        default_palette = load_scene_palette(root, palette_scene)
+    else:
+        default_palette = None
     palette, frames = load_vgs_image(data, default_palette=default_palette)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -483,12 +514,26 @@ def main() -> None:
             "all-black fallback palette."
         ),
     )
+    parser.add_argument(
+        "--palette-resource",
+        default=None,
+        help=(
+            "Standalone .PAL resource name (e.g. MAP.PAL) to use as the "
+            "default palette instead of --palette-scene - for resources "
+            "like MAP.VGS whose palette is a separate file rather than a "
+            "room's RRM palette."
+        ),
+    )
     args = parser.parse_args()
 
     for resource_name in args.resources:
         output_dir = args.output_dir / resource_name.replace(".", "_").lower()
         metadata = extract_resource(
-            args.data_dir, resource_name, output_dir, palette_scene=args.palette_scene
+            args.data_dir,
+            resource_name,
+            output_dir,
+            palette_scene=args.palette_scene,
+            palette_resource=args.palette_resource,
         )
         print(
             f"{resource_name}: {metadata['frame_count']} frames "
