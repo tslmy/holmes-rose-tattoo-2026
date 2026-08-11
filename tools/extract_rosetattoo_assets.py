@@ -486,7 +486,28 @@ def hotspot_rects(objects: list[dict]) -> list[dict]:
         and obj["bounds"]["w"] > 0
         and obj["bounds"]["h"] > 0
         and obj["action_type"] not in excluded_action_types
+        and _is_sane_bounds(obj["bounds"])
     ]
+
+
+def _is_sane_bounds(bounds: dict, margin: int = 64) -> bool:
+    """Reject bogus bounds from unused/inactive object record slots.
+
+    Many room object records are template slots not active in this scene;
+    their bounds fields hold leftover/uninitialized values (frequently the
+    sentinel-like 8224 == 0x2020) rather than real on-screen rectangles.
+    Real hotspots always sit within (or barely overlapping) the visible
+    640x480-scale room frame, so anything wildly outside that range is
+    parsing noise, not a real clickable item.
+    """
+    return (
+        bounds["x"] > -margin
+        and bounds["y"] > -margin
+        and bounds["x"] < SCREEN_WIDTH + margin
+        and bounds["y"] < SCREEN_HEIGHT + margin
+        and bounds["w"] < SCREEN_WIDTH * 2
+        and bounds["h"] < SCREEN_HEIGHT * 2
+    )
 
 
 def prompt_terms(description_texts: Iterable[str], limit: int) -> list[str]:
@@ -632,6 +653,23 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
         combined = ImageChops.lighter(combined, overlay)
         combined.save(scene_dir / "structure_control.png")
 
+    if walk_zones or hotspots:
+        # Solid-filled (not outline) union of both rect sets, used to protect
+        # pathfinding-critical geometry when a redraw pass is allowed extra
+        # artistic freedom elsewhere (e.g. neural_redraw_rosetattoo_backgrounds.py's
+        # --liberal-art inpainting pass): white = walkable floor or clickable
+        # hotspot bounds that must stay pixel-faithful, black = everywhere else,
+        # free to receive extra invented detail.
+        protect_mask = render_rect_mask(
+            walk_zones + hotspots,
+            full_width,
+            SCREEN_HEIGHT,
+            outline_color=(255, 255, 255),
+            fill_color=(255, 255, 255, 255),
+            outline_width=1,
+        )
+        protect_mask.convert("L").save(scene_dir / "protect_mask.png")
+
     terms = prompt_terms(description_texts, term_limit)
     metadata = {
         "scene_id": scene_id,
@@ -668,6 +706,10 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
             "zones (nowalk_zone/blank_zone/script_zone), rendered to hotspots_mask.png.",
             "structure_control.png overlays both masks (blue=walk zones, yellow=hotspots) "
             "as a cleaner boundary reference for ControlNet than pixel-level image edges.",
+            "protect_mask.png is a solid-filled (not outline) union of both rect sets: "
+            "white = walkable floor or hotspot bounds that must stay pixel-faithful, "
+            "black = decorative background free for extra invented detail (see "
+            "neural_redraw_rosetattoo_backgrounds.py's --liberal-art pass).",
         ],
     }
     (scene_dir / "metadata.json").write_text(

@@ -302,6 +302,36 @@ Older `extracted/rosetattoo/scene_*` directories predating this feature won't
 have the mask files; the tool warns and falls back to `canny` for those
 scenes. Re-run `extract_rosetattoo_assets.py` to regenerate them.
 
+### Liberal-art masked pass (`--liberal-art`)
+
+`extract_rosetattoo_assets.py` also writes `protect_mask.png` per scene: a
+solid-filled (not outline) union of the room's walk zones and hotspot bounds,
+white where pathfinding/clickable geometry must stay pixel-faithful and black
+everywhere else. `neural_redraw_rosetattoo_backgrounds.py` uses this as
+Automatic1111's native inpainting mask for a second pass, run automatically
+after the base geometry-preserving redraw (enabled by default; pass
+`--no-liberal-art` to disable it and keep only the base pass).
+
+The base redraw stays constrained to the game's original geometry; this
+second pass is deliberately allowed a higher `--liberal-art-denoise` (default
+`0.4`) so it can invent tasteful extra detail - weathering, broken brick,
+reliefs, grime, clutter - purely in the decorative background, while the
+protected mask region is left byte-identical (verified on scene 18,
+Cleopatra's Needle: mean RGB diff inside the protected region was ~0.05 vs.
+~6 in the free region at denoise 0.4). `--liberal-art-margin` (default `12`
+native pixels) dilates the protected region before inverting it, so
+freeform generation can't creep up to the exact edge of critical geometry,
+and `--liberal-art-mask-blur` (default `24`) softens the seam between the two
+regions. Scenes without a `protect_mask.png` sidecar (i.e. rooms with no
+parsed walk zones or hotspots, or extracted before this feature existed) are
+left untouched by this pass. The pre-liberal-art image is kept alongside the
+final output as `background_faithful@<scale>x.png` for comparison.
+
+Denoise strength above ~0.5 was found to invent whole new structures (e.g. an
+out-of-place iron gate) rather than just texture/detail on scene 18 - keep it
+in the 0.35-0.45 range unless a scene specifically calls for a bigger change,
+using `--settings-file` per-scene overrides.
+
 For a resumable full-room pass, point `--output-dir` and `--scummvm-overrides`
 at stable ignored directories and rerun with `--skip-existing` whenever the
 local model runner is interrupted. The batch validator rejects blank captures,

@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +98,10 @@ def apply_setting_values(args: argparse.Namespace, values: dict[str, Any]) -> No
         "warn_rms_delta": "warn_rms_delta",
         "edge_source": "edge_source",
         "init_upscaler": "init_upscaler",
+        "liberal_art": "liberal_art",
+        "liberal_art_denoise": "liberal_art_denoise",
+        "liberal_art_margin": "liberal_art_margin",
+        "liberal_art_mask_blur": "liberal_art_mask_blur",
     }
     for key, value in values.items():
         if key in {"profile", "scenes", "scene_overrides", "defaults"}:
@@ -143,6 +147,12 @@ def validate_generation_settings(args: argparse.Namespace) -> None:
         raise ValueError("--original-blend-strength must be between 0 and 1")
     if args.retry_drift_attempts < 1:
         raise ValueError("--retry-drift-attempts must be >= 1")
+    if not 0 <= args.liberal_art_denoise <= 1:
+        raise ValueError("--liberal-art-denoise must be between 0 and 1")
+    if args.liberal_art_margin < 0:
+        raise ValueError("--liberal-art-margin must be >= 0")
+    if args.liberal_art_mask_blur < 0:
+        raise ValueError("--liberal-art-mask-blur must be >= 0")
 
 
 def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[str, Any]:
@@ -166,6 +176,10 @@ def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[
         "warn_rms_delta": args.warn_rms_delta,
         "edge_source": args.edge_source,
         "init_upscaler": args.init_upscaler,
+        "liberal_art": args.liberal_art,
+        "liberal_art_denoise": args.liberal_art_denoise,
+        "liberal_art_margin": args.liberal_art_margin,
+        "liberal_art_mask_blur": args.liberal_art_mask_blur,
     }
 
 
@@ -476,6 +490,117 @@ def automatic1111_img2img(
     return base64_to_image(images[0])
 
 
+def automatic1111_inpaint(
+    args: argparse.Namespace,
+    base_image: Image.Image,
+    mask_image: Image.Image,
+    prompt: str,
+    denoising_strength: float,
+    mask_blur: int,
+    seed: int,
+) -> Image.Image:
+    """Run a masked img2img pass that only regenerates pixels under the mask.
+
+    Used for the --liberal-art pass: `mask_image` is white where the model is
+    free to invent new decorative detail and black where the base image must
+    stay byte-identical (Automatic1111's native inpainting semantics), so this
+    is safe to run at a higher denoising strength than the geometry-preserving
+    base redraw without risking walk-zone/hotspot drift.
+    """
+    payload: dict[str, Any] = {
+        "init_images": [image_to_base64(base_image)],
+        "mask": image_to_base64(mask_image),
+        "mask_blur": mask_blur,
+        "inpainting_fill": 1,
+        "inpaint_full_res": False,
+        "inpainting_mask_invert": 0,
+        "prompt": prompt,
+        "negative_prompt": args.negative_prompt,
+        "seed": seed,
+        "sampler_name": args.sampler,
+        "steps": args.steps,
+        "cfg_scale": args.cfg_scale,
+        "denoising_strength": denoising_strength,
+        "width": base_image.width,
+        "height": base_image.height,
+        "resize_mode": 0,
+        "batch_size": 1,
+        "n_iter": 1,
+        "restore_faces": False,
+        "tiling": False,
+        "do_not_save_samples": True,
+        "do_not_save_grid": True,
+    }
+    response = post_json(f"{args.api_url}/sdapi/v1/img2img", payload, args.api_timeout)
+    images = response.get("images") or []
+    if not images:
+        raise RuntimeError("Stable Diffusion API returned no images for liberal-art pass")
+    return base64_to_image(images[0])
+
+
+def build_liberal_art_mask(
+    scene_dir: Path,
+    size: tuple[int, int],
+    margin_px: int,
+) -> Image.Image | None:
+    """Build the inverted, dilated liberal-art mask for a scene, if available.
+
+    Returns a grayscale image the same size as the redraw output: white =
+    free for decorative invention, black = protected walk-zone/hotspot
+    geometry that must not change. Returns None if the scene has no
+    protect_mask.png sidecar (extract_rosetattoo_assets.py wasn't re-run, or
+    the room had no parsed walk zones/hotspots), so callers can skip the
+    pass entirely rather than treating an all-black/all-white mask as
+    meaningful.
+    """
+    mask_path = scene_dir / "protect_mask.png"
+    if not mask_path.exists():
+        return None
+    with Image.open(mask_path) as protect_mask:
+        protect_mask = protect_mask.convert("L")
+        # Nearest-neighbor keeps the resize edges crisp; mask_blur (applied
+        # later by the API) is what actually softens the boundary.
+        protect_mask = protect_mask.resize(size, Image.Resampling.NEAREST)
+        if margin_px > 0:
+            scale_x = size[0] / max(protect_mask.width, 1)
+            dilation = max(1, round(margin_px * scale_x))
+            # MaxFilter requires an odd kernel size.
+            kernel = dilation * 2 + 1
+            protect_mask = protect_mask.filter(ImageFilter.MaxFilter(kernel))
+        return ImageOps.invert(protect_mask)
+
+
+def apply_liberal_art_pass(
+    scene_args: argparse.Namespace,
+    scene_dir: Path,
+    output_image: Image.Image,
+    prompt: str,
+    seed: int,
+) -> Image.Image:
+    """Run the optional liberal-art masked decorative pass on a finished redraw.
+
+    No-ops (returns the input unchanged) when --no-liberal-art was passed or
+    the scene has no protect_mask.png sidecar, so this is always safe to call
+    unconditionally from process_scene().
+    """
+    if not scene_args.liberal_art:
+        return output_image
+    liberal_mask = build_liberal_art_mask(
+        scene_dir, output_image.size, scene_args.liberal_art_margin
+    )
+    if liberal_mask is None:
+        return output_image
+    return automatic1111_inpaint(
+        scene_args,
+        output_image,
+        liberal_mask,
+        prompt,
+        scene_args.liberal_art_denoise,
+        scene_args.liberal_art_mask_blur,
+        seed,
+    )
+
+
 def tile_positions(length: int, tile_length: int, overlap: int) -> list[int]:
     if length <= tile_length:
         return [0]
@@ -738,10 +863,26 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
 
     assert best is not None
     output_image, tile_count, delta, blank, seed, attempt_count = best
-    output_image.save(output_path)
 
     if blank:
         raise ValueError(f"{output_path} appears blank")
+
+    faithful_image = output_image
+    output_image = apply_liberal_art_pass(scene_args, scene_dir, faithful_image, prompt, seed)
+    if output_image is not faithful_image:
+        if output_image.size != expected_size:
+            output_image = output_image.resize(expected_size, Image.Resampling.LANCZOS)
+        if is_blank(output_image):
+            print(
+                f"scene {scene_id:03d}: liberal-art pass produced a blank image, "
+                "keeping the faithful base redraw instead"
+            )
+            output_image = faithful_image
+        else:
+            faithful_path = scene_output_dir / f"background_faithful@{args.scale}x.png"
+            faithful_image.save(faithful_path)
+
+    output_image.save(output_path)
 
     override_path = copy_to_override(args, scene_dir, scene_id, output_path, prompt_output_path)
     result = RedrawResult(
@@ -979,6 +1120,63 @@ def main() -> None:
         "--retry-existing-drift",
         action="store_true",
         help="Regenerate existing --skip-existing outputs that exceed their drift threshold.",
+    )
+    parser.add_argument(
+        "--liberal-art",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "After the faithful geometry-preserving redraw pass, run a second "
+            "masked img2img pass that is free to invent extra decorative "
+            "detail (broken bricks, reliefs, weathering, clutter, etc.) "
+            "anywhere NOT covered by the scene's protect_mask.png sidecar "
+            "(union of walk zones + hotspot bounds, produced by "
+            "extract_rosetattoo_assets.py). Protected pixels are left "
+            "byte-identical via Automatic1111's native inpainting mask, so "
+            "pathfinding/hotspot geometry can never drift even though this "
+            "pass runs at a higher denoising strength than the base pass. "
+            "Scenes missing a protect_mask.png sidecar are left untouched "
+            "for this pass. Enabled by default; pass --no-liberal-art to "
+            "restore the old single-pass behavior."
+        ),
+    )
+    parser.add_argument(
+        "--liberal-art-denoise",
+        type=float,
+        default=0.4,
+        help=(
+            "Denoising strength for the liberal-art masked pass. Higher than "
+            "the base --denoising-strength since this pass is deliberately "
+            "allowed to invent new detail, but still moderate since it "
+            "starts from the already-faithful base redraw as strong visual "
+            "context rather than from scratch. Calibrated against scene 18 "
+            "(Cleopatra's Needle): 0.55 introduced an out-of-place wrought-"
+            "iron gate and a large background structure; 0.35-0.4 stayed to "
+            "subtle, in-period embellishment (weathered brick, texture, "
+            "grime) without inventing new landmarks."
+        ),
+    )
+    parser.add_argument(
+        "--liberal-art-margin",
+        type=int,
+        default=12,
+        help=(
+            "Native-resolution pixel margin used to dilate (grow) the "
+            "protected walk-zone/hotspot regions before inverting them into "
+            "the liberal-art mask, so freeform generation can't creep up to "
+            "the exact edge of geometry that must stay pixel-faithful."
+        ),
+    )
+    parser.add_argument(
+        "--liberal-art-mask-blur",
+        type=int,
+        default=24,
+        help=(
+            "Output-resolution mask_blur (soft edge feather) passed to "
+            "Automatic1111 for the liberal-art pass, so the boundary between "
+            "protected and freeform regions blends rather than showing a "
+            "hard seam."
+        ),
     )
     args = parser.parse_args()
 
