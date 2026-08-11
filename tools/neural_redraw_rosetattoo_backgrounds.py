@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +95,7 @@ def apply_setting_values(args: argparse.Namespace, values: dict[str, Any]) -> No
         "tile_width": "tile_width",
         "tile_overlap": "tile_overlap",
         "warn_rms_delta": "warn_rms_delta",
+        "edge_source": "edge_source",
     }
     for key, value in values.items():
         if key in {"profile", "scenes", "scene_overrides", "defaults"}:
@@ -161,6 +162,7 @@ def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[
         "tile_width": args.tile_width,
         "tile_overlap": args.tile_overlap,
         "warn_rms_delta": args.warn_rms_delta,
+        "edge_source": args.edge_source,
     }
 
 
@@ -268,12 +270,63 @@ def load_scene_prompt_text(
     return prompt_path.read_text(encoding="utf-8"), prompt_path
 
 
-def make_edge_image(source: Image.Image, output_path: Path) -> None:
-    gray = ImageOps.grayscale(source)
-    edges = gray.filter(ImageFilter.FIND_EDGES)
-    edges = ImageOps.autocontrast(edges)
+def make_edge_image(
+    scene_dir: Path,
+    init_image: Image.Image,
+    edge_source: str,
+    requested_module: str,
+    output_path: Path,
+) -> str:
+    """Build the ControlNet structural-guidance image for a scene.
+
+    Returns the effective ControlNet preprocessor module name the caller
+    should use with the resulting image.
+
+    - ``canny``: hand the upscaled *unfiltered* init image straight to
+      Automatic1111 so its own ``canny`` preprocessor module runs exactly
+      once. Previously this function pre-filtered the image with PIL's
+      ``FIND_EDGES`` *and* the API preprocessor still ran canny on top of
+      that already-edge-filtered image, so edges effectively got detected
+      twice - producing much denser/noisier structural constraints than
+      intended and over-constraining fine painted texture/dithering rather
+      than just architecture and geometry.
+    - ``walk-zones`` / ``hotspots`` / ``combined``: use the game-semantic
+      boundary rasters produced by extract_rosetattoo_assets.py (walkable
+      floor rectangles and/or clickable-object bounds) instead of pixel-level
+      edge detection on the painted background. These are already final
+      boundary images, so the ControlNet preprocessor is bypassed by default
+      (module "none") - the raster *is* the control signal. If the caller
+      explicitly requested a non-default module (i.e. --controlnet-module
+      was passed alongside a non-canny --edge-source), that explicit choice
+      is respected instead.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    edges.convert("RGB").save(output_path)
+
+    if edge_source == "canny":
+        init_image.convert("RGB").save(output_path)
+        return requested_module
+
+    mask_filename = {
+        "walk-zones": "walk_zones_mask.png",
+        "hotspots": "hotspots_mask.png",
+        "combined": "structure_control.png",
+    }[edge_source]
+    mask_path = scene_dir / mask_filename
+    if not mask_path.exists():
+        print(
+            f"  warning: {mask_path} not found (scene may predate walk-zone/hotspot "
+            f"extraction); falling back to --edge-source canny for this scene"
+        )
+        init_image.convert("RGB").save(output_path)
+        return requested_module
+
+    with Image.open(mask_path) as mask:
+        # Nearest-neighbor keeps the rectangle outlines crisp when upscaling
+        # to the tile resolution, matching how boundaries stay sharp rather
+        # than blurring into soft gradients like a photographic edge map.
+        mask = mask.convert("RGB").resize(init_image.size, Image.Resampling.NEAREST)
+        mask.save(output_path)
+    return requested_module if requested_module != "canny" else "none"
 
 
 def make_init_image(source: Image.Image, scale: int, output_path: Path) -> Image.Image:
@@ -310,6 +363,7 @@ def automatic1111_img2img(
     args: argparse.Namespace,
     init_image: Image.Image,
     edge_path: Path,
+    controlnet_module: str,
     prompt: str,
     seed: int,
 ) -> Image.Image:
@@ -339,7 +393,7 @@ def automatic1111_img2img(
                     {
                         "enabled": True,
                         "image": image_file_to_base64(edge_path),
-                        "module": args.controlnet_module,
+                        "module": controlnet_module,
                         "model": args.controlnet_model,
                         "weight": args.controlnet_weight,
                         "resize_mode": "Just Resize",
@@ -409,12 +463,16 @@ def redraw_image(
     args: argparse.Namespace,
     init_image: Image.Image,
     edge_path: Path,
+    controlnet_module: str,
     prompt: str,
     seed: int,
     scene_output_dir: Path,
 ) -> tuple[Image.Image, int]:
     if init_image.width <= args.tile_width:
-        return automatic1111_img2img(args, init_image, edge_path, prompt, seed), 1
+        return (
+            automatic1111_img2img(args, init_image, edge_path, controlnet_module, prompt, seed),
+            1,
+        )
 
     positions = tile_positions(init_image.width, args.tile_width, args.tile_overlap)
     canvas = Image.new("RGB", init_image.size)
@@ -443,6 +501,7 @@ def redraw_image(
                 args,
                 init_tile,
                 tile_edge_path,
+                controlnet_module,
                 prompt,
                 seed + idx if seed >= 0 else -1,
             )
@@ -465,6 +524,7 @@ def generate_candidate(
     scene_args: argparse.Namespace,
     init_image: Image.Image,
     edge_path: Path,
+    controlnet_module: str,
     prompt: str,
     seed: int,
     scene_output_dir: Path,
@@ -474,6 +534,7 @@ def generate_candidate(
         scene_args,
         init_image,
         edge_path,
+        controlnet_module,
         prompt,
         seed,
         scene_output_dir,
@@ -516,7 +577,9 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
 
     with Image.open(input_path).convert("RGB") as source:
         init_image = make_init_image(source, args.scale, init_path)
-        make_edge_image(init_image, edge_path)
+        controlnet_module = make_edge_image(
+            scene_dir, init_image, scene_args.edge_source, scene_args.controlnet_module, edge_path
+        )
         expected_size = init_image.size
         input_size = source.size
 
@@ -600,6 +663,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
             scene_args,
             init_image,
             edge_path,
+            controlnet_module,
             prompt,
             attempt_seed,
             scene_output_dir,
@@ -771,6 +835,24 @@ def main() -> None:
     )
     parser.add_argument("--controlnet-model")
     parser.add_argument("--controlnet-module", default="canny")
+    parser.add_argument(
+        "--edge-source",
+        choices=["canny", "walk-zones", "hotspots", "combined"],
+        default="canny",
+        help=(
+            "Structural guidance source for ControlNet. 'canny' upscales the "
+            "background and lets Automatic1111's own preprocessor detect "
+            "edges from the painted pixels (can over-constrain fine texture "
+            "and dithering). 'walk-zones'/'hotspots'/'combined' instead use "
+            "the room's semantic walkable-floor rectangles and/or clickable-"
+            "object bounds produced by extract_rosetattoo_assets.py "
+            "(walk_zones_mask.png / hotspots_mask.png / structure_control.png), "
+            "which preserves navigable geometry and interactive silhouettes "
+            "without dictating brush-stroke detail. Non-canny sources bypass "
+            "the server-side preprocessor (ControlNet module 'none') since "
+            "the mask image is already the final boundary reference."
+        ),
+    )
     parser.add_argument("--controlnet-weight", type=float, default=0.75)
     parser.add_argument("--controlnet-processor-res", type=int, default=1024)
     parser.add_argument("--controlnet-threshold-a", type=float, default=100)

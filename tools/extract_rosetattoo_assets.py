@@ -16,13 +16,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageChops
 
 
 SCREEN_WIDTH = 640
 SCREEN_HEIGHT = 480
 PALETTE_SIZE = 256 * 3
 OBJECT_RECORD_SIZE = 625
+# Size in bytes of one CAnim table entry for Rose Tattoo, per CAnim::load()'s
+# non-Serrated-Scalpel branch in engines/sherlock/objects.cpp: 12 (name) +
+# 4 (dataSize) + 2+2 (position) + 1 (flags) + 2 (scaleVal) + 3*2*2 (goto x2) +
+# 3*2*2 (teleport x2) = 47 bytes.
+ANIM_RECORD_SIZE = 47
+# Size in bytes of one room-bounding "walk zone" rectangle record: left, top,
+# width-1, height-1 (int16 each), plus 2 bytes for an unused scene-number
+# field. See "Read in the room bounding areas" in Scene::loadScene()
+# (engines/sherlock/scene.cpp).
+ZONE_RECORD_SIZE = 10
+# Path-data version marker byte that follows the walk zones for Rose Tattoo
+# (251) vs Serrated Scalpel (254); see the same loadScene() section.
+ROSE_TATTOO_PATH_VERSION = 251
 
 
 SPRITE_TYPES = {
@@ -352,6 +365,130 @@ def image_from_indices(indices: bytes, width: int, height: int, palette: bytes) 
     return img.convert("RGB")
 
 
+def skip_image_chunks(reader: Reader, bg_info: list[dict], num_images: int, compressed: bool) -> None:
+    """Consume the room's raw sprite/image data blocks.
+
+    ``Scene::loadScene()`` reads ``bgHeader._numImages`` image resources right
+    after the sequence buffer and before the cAnim table ("Set up the list of
+    images used by the scene"), each individually LZ-compressed with its own
+    length prefix (when compressed) and sized per that image's ``_filesize``
+    entry from the bgInfo/shape header list. We don't need pixel data for
+    these sprites here, but must skip over them byte-for-byte to keep the
+    reader aligned for the cAnim table and walk zones that follow.
+    """
+    for idx in range(num_images):
+        filesize = bg_info[idx]["filesize"]
+        if compressed:
+            decompress_lz(reader, filesize)
+        else:
+            reader.skip(filesize)
+
+
+def skip_canim_table(reader: Reader, num_animations: int, compressed: bool) -> None:
+    """Consume the room's cAnim table so the reader lands on the walk zones.
+
+    We don't need cAnim contents (cutscene-triggering animation records) for
+    background/zone extraction, but the room-bounding walk zones are stored
+    immediately after this table in the file, so it must be skipped over
+    correctly - including going through the LZ decompressor when the room
+    resource is compressed, since decompress_lz() also advances the reader
+    past the compressed block's length-prefixed byte range.
+    """
+    if not num_animations:
+        return
+    anim_bytes_size = ANIM_RECORD_SIZE * num_animations
+    if compressed:
+        decompress_lz(reader, anim_bytes_size)
+    else:
+        reader.skip(anim_bytes_size)
+
+
+def parse_walk_zones(reader: Reader, compressed: bool) -> list[dict]:
+    """Parse the room's rectangular walk zones (ScummVM's ``Scene::_zones``).
+
+    These are the same walkable-area rectangles the engine loads to build its
+    zone-to-zone pathfinding graph - see "Read in the room bounding areas" in
+    ``Scene::loadScene()`` (engines/sherlock/scene.cpp). Each room's walkable
+    floor is covered by a handful of overlapping rectangles; they're a much
+    cleaner boundary source for image generation guidance than pixel-level
+    edge detection on the painted background, since they directly encode
+    where Holmes can walk rather than wherever brush strokes happen to change
+    color (paint grain, dithering, decorative flourishes, etc.).
+    """
+    size = reader.u16()
+    bounds_bytes = decompress_lz(reader, size) if compressed else reader.read(size)
+    bounds_reader = Reader(bounds_bytes)
+
+    zones = []
+    for _ in range(size // ZONE_RECORD_SIZE):
+        left = bounds_reader.s16()
+        top = bounds_reader.s16()
+        width = bounds_reader.s16() + 1
+        height = bounds_reader.s16() + 1
+        bounds_reader.skip(2)  # unused scene-number field
+        zones.append({"x": left, "y": top, "w": width, "h": height})
+
+    # Sanity-check against the path-data version marker byte that follows the
+    # zones in the file. A mismatch usually means our cAnim-table skip landed
+    # on the wrong offset (e.g. a room layout ScummVM's loader handles
+    # differently than assumed here); warn but don't fail the whole
+    # extraction, since the zones we already parsed may still be usable.
+    marker = reader.u8()
+    if marker != ROSE_TATTOO_PATH_VERSION:
+        print(
+            f"  warning: unexpected path-data marker byte {marker} "
+            f"(expected {ROSE_TATTOO_PATH_VERSION}); walk zones may be misaligned",
+        )
+
+    return zones
+
+
+def render_rect_mask(
+    rects: Iterable[dict],
+    width: int,
+    height: int,
+    outline_color: tuple[int, int, int] = (255, 255, 255),
+    fill_color: tuple[int, int, int, int] | None = None,
+    outline_width: int = 2,
+) -> Image.Image:
+    """Render a set of {x, y, w, h} rectangles as a black-background mask.
+
+    Used to turn walk zones and object hotspot bounds into ControlNet-ready
+    boundary images: clean rectangle outlines instead of noisy pixel-level
+    edges from the painted background art.
+    """
+    mask = Image.new("RGB", (width, height), (0, 0, 0))
+    draw = ImageDraw.Draw(mask, "RGBA" if fill_color else "RGB")
+    for rect in rects:
+        x0, y0 = rect["x"], rect["y"]
+        x1, y1 = x0 + rect["w"] - 1, y0 + rect["h"] - 1
+        if x1 < 0 or y1 < 0 or x0 >= width or y0 >= height:
+            continue
+        if fill_color:
+            draw.rectangle([x0, y0, x1, y1], fill=fill_color)
+        draw.rectangle([x0, y0, x1, y1], outline=outline_color, width=outline_width)
+    return mask
+
+
+def hotspot_rects(objects: list[dict]) -> list[dict]:
+    """Filter object records down to visually-clickable item bounds.
+
+    Excludes pure floor/logic zones (nowalk_zone, blank_zone, script_zone)
+    that have no visual sprite of their own - those are already covered by
+    the walk zones - keeping only object records with real bounds that
+    represent an examinable/clickable prop, person, or interactive shape.
+    """
+    excluded_action_types = {"nowalk_zone", "blank_zone", "script_zone"}
+    return [
+        obj["bounds"]
+        for obj in objects
+        if obj["bounds"]
+        and obj["bounds"]["w"] > 0
+        and obj["bounds"]["h"] > 0
+        and obj["action_type"] not in excluded_action_types
+    ]
+
+
 def prompt_terms(description_texts: Iterable[str], limit: int) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
@@ -440,16 +577,60 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
     ]
     description_texts = natural_language_strings(desc_text)
 
-    # Later resource sections hold sequences, image chunks, animations, walk
-    # zones, exits, and sounds. They are intentionally left for follow-up
-    # extractors so this first pass stays focused on reliable room backdrops and
-    # prompt text.
+    walk_zones: list[dict] = []
+    try:
+        # A sequence-data buffer (bgHeader._seqSize bytes) follows desc_text
+        # and precedes the cAnim table; it must be consumed to keep the
+        # reader aligned, even though we don't need its contents here.
+        if compressed:
+            decompress_lz(reader, header.seq_size)
+        else:
+            reader.skip(header.seq_size)
+
+        skip_image_chunks(reader, bg_info, header.num_images, compressed)
+        skip_canim_table(reader, header.num_animations, compressed)
+        walk_zones = parse_walk_zones(reader, compressed)
+    except (EOFError, struct.error) as exc:
+        print(f"  warning: could not parse walk zones for scene {scene_id:02d}: {exc}")
+
+    # Later resource sections hold sequences, image chunks, walk-directory
+    # graphs/waypoints, exits, and sounds. They are intentionally left for
+    # follow-up extractors so this pass stays focused on reliable room
+    # backdrops, prompt text, and boundary metadata (walk zones + object
+    # hotspot bounds) for ControlNet-style image generation guidance.
     scene_dir = output_root / f"scene_{scene_id:02d}"
     scene_dir.mkdir(parents=True, exist_ok=True)
 
     image_from_indices(bg_indices, full_width, SCREEN_HEIGHT, palette).save(
         scene_dir / "background.png"
     )
+
+    hotspots = hotspot_rects(objects)
+    if walk_zones:
+        render_rect_mask(walk_zones, full_width, SCREEN_HEIGHT).save(
+            scene_dir / "walk_zones_mask.png"
+        )
+    if hotspots:
+        render_rect_mask(hotspots, full_width, SCREEN_HEIGHT).save(
+            scene_dir / "hotspots_mask.png"
+        )
+    if walk_zones or hotspots:
+        combined = render_rect_mask(
+            walk_zones,
+            full_width,
+            SCREEN_HEIGHT,
+            outline_color=(0, 160, 255),
+        )
+        overlay = render_rect_mask(
+            hotspots,
+            full_width,
+            SCREEN_HEIGHT,
+            outline_color=(255, 200, 0),
+        )
+        # Combine by taking the brighter pixel of each mask so both colors
+        # stay visible instead of one overwriting the other.
+        combined = ImageChops.lighter(combined, overlay)
+        combined.save(scene_dir / "structure_control.png")
 
     terms = prompt_terms(description_texts, term_limit)
     metadata = {
@@ -474,11 +655,19 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
         "image_chunks": bg_info,
         "description_texts": description_texts,
         "objects": objects,
+        "walk_zones": walk_zones,
+        "hotspots": hotspots,
         "prompt_terms": terms,
         "notes": [
             "Background is the raw room backdrop before runtime object/sprite compositing.",
             "Object bounds are best-effort metadata from room object records.",
             "Animation and sprite frame extraction is intentionally left for a later pass.",
+            "walk_zones are the room's rectangular walkable-floor zones (Scene::_zones in "
+            "engines/sherlock/scene.cpp), rendered to walk_zones_mask.png.",
+            "hotspots are clickable/examinable object bounds excluding pure floor-logic "
+            "zones (nowalk_zone/blank_zone/script_zone), rendered to hotspots_mask.png.",
+            "structure_control.png overlays both masks (blue=walk zones, yellow=hotspots) "
+            "as a cleaner boundary reference for ControlNet than pixel-level image edges.",
         ],
     }
     (scene_dir / "metadata.json").write_text(

@@ -23,7 +23,11 @@ python3 tools/extract_rosetattoo_assets.py --data-dir scummvm
 ```
 
 Outputs are written to `extracted/rosetattoo/`, which is ignored because it
-contains derived game artwork and extracted game text.
+contains derived game artwork and extracted game text. Each `scene_NN/`
+directory includes `background.png`, `metadata.json` (object bounds, walk
+zones, hotspots, description text, and prompt terms), `prompt.txt`, and
+boundary-reference rasters `walk_zones_mask.png`, `hotspots_mask.png`, and
+`structure_control.png` (both overlaid) for ControlNet-guided neural redraws.
 
 Create baseline enhanced outputs:
 
@@ -225,6 +229,28 @@ only stores the repeatable pipeline. Use `--skip-existing` to resume long
 batches. Wide scrolling rooms are split into overlapping horizontal tiles by
 default so panoramic backgrounds do not need to be generated in one enormous
 diffusion request.
+
+### ControlNet structural guidance source (`--edge-source`)
+
+By default (`--edge-source canny`) the ControlNet control image is the
+upscaled background handed to Automatic1111's own `canny` preprocessor. This
+constrains the redraw to the room's *pixel-level* edges, which can be overly
+strict about fine painted texture, dithering, and brush-stroke noise rather
+than just architecture and geometry.
+
+`extract_rosetattoo_assets.py` also extracts genuine game-semantic boundary
+data per scene: `walk_zones_mask.png` (the room's rectangular walkable-floor
+areas, matching the engine's own pathfinding zones) and `hotspots_mask.png`
+(clickable/examinable object bounds). Pass `--edge-source walk-zones`,
+`--edge-source hotspots`, or `--edge-source combined` (both overlaid, from
+`structure_control.png`) to use these instead - the ControlNet preprocessor is
+skipped (module `none`) since the mask is already the final boundary image.
+This tends to preserve navigable geometry and interactive silhouettes without
+dictating brush-stroke detail, letting the model repaint texture more freely.
+
+Older `extracted/rosetattoo/scene_*` directories predating this feature won't
+have the mask files; the tool warns and falls back to `canny` for those
+scenes. Re-run `extract_rosetattoo_assets.py` to regenerate them.
 
 For a resumable full-room pass, point `--output-dir` and `--scummvm-overrides`
 at stable ignored directories and rerun with `--skip-existing` whenever the
