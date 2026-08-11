@@ -57,6 +57,28 @@ def find_scummvm(explicit: str | None) -> str | None:
     return None
 
 
+MACOS_APP_RESOURCES = Path("/Applications/ScummVM.app/Contents/Resources")
+
+
+def _theme_path_for(scummvm: str) -> Path | None:
+    """Return the themes directory for the given scummvm binary.
+
+    For the installed app bundle the themes live inside the bundle; for a
+    custom build they live next to the binary under gui/themes/ in the source
+    tree.  Falls back to the app bundle resources if neither is found locally.
+    """
+    binary = Path(scummvm).resolve()
+    # Custom build: look for gui/themes/ relative to the source tree root
+    # (the binary sits at <src>/scummvm, themes at <src>/gui/themes/).
+    candidate = binary.parent / "gui" / "themes"
+    if candidate.is_dir():
+        return candidate
+    # App bundle: themes are in the bundle's Resources directory.
+    if MACOS_APP_RESOURCES.is_dir():
+        return MACOS_APP_RESOURCES
+    return None
+
+
 def command_for(
     scummvm: str,
     data_dir: Path,
@@ -75,13 +97,27 @@ def command_for(
         "--aspect-ratio",
         "--stretch-mode=pixel-perfect",
     ]
+
+    # Provide theme and extra-data paths so a bare (non-bundle) binary can
+    # find its GUI skin and helper zips (helpdialog.zip etc.).
+    theme_path = _theme_path_for(scummvm)
+    if theme_path is not None:
+        cmd.append(f"--themepath={theme_path}")
+    if MACOS_APP_RESOURCES.is_dir():
+        cmd.append(f"--extrapath={MACOS_APP_RESOURCES}")
+
     if fullscreen:
         cmd.append("--fullscreen")
     else:
         cmd.extend(["--no-fullscreen", f"--window-size={window_size}"])
     if save_slot is not None:
         cmd.append(f"--save-slot={save_slot}")
-    cmd.append("sherlock:rosetattoo")
+    # Use the configured target name "rosetattoo" rather than the
+    # engine-qualified form "sherlock:rosetattoo".  The latter triggers
+    # ScummVM's createTemporaryTarget() which appends "-1" to the domain name
+    # (because "rosetattoo" already exists in the config), causing saves to be
+    # looked up as "rosetattoo-1.NNN" rather than "rosetattoo.NNN".
+    cmd.append("rosetattoo")
     return cmd
 
 
