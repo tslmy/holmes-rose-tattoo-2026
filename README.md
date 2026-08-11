@@ -384,6 +384,36 @@ runtime overrides are not yet wired into the engine - that would touch every
 sprite-draw call site (`people.cpp`, `objects.cpp`) and is a larger,
 higher-risk change than the cursor and background override paths.
 
+#### Fonts (`FONT1.VGS`-`FONT8.VGS`)
+
+The in-game bitmap fonts are extracted and upscaled the same way, but through
+a dedicated `--mode font` path instead of the ESRGAN endpoint:
+
+```sh
+python3 tools/extract_rosetattoo_sprites.py --resources FONT1.VGS FONT2.VGS FONT3.VGS FONT4.VGS FONT5.VGS FONT6.VGS FONT7.VGS FONT8.VGS
+python3 tools/upscale_rosetattoo_sprites.py --resources font1_vgs font2_vgs font3_vgs font4_vgs font5_vgs font6_vgs font7_vgs font8_vgs --mode font --scale 4
+```
+
+Font glyphs are tiny (often under 10x10px) monochrome stencils - the RGB
+channel is always solid black, with the actual glyph shape living entirely in
+alpha (the engine recolors glyphs via whichever color is active at draw time
+in `Fonts::writeString()`). Running these through a photographic
+super-resolution model would blur or hallucinate texture into strokes only
+1-2px wide, so `--mode font` instead does a fast, local, no-API Lanczos
+resize of just the alpha channel, producing clean anti-aliased glyph edges
+(similar to how a hinted/vector font looks when rendered larger) rather than
+a blurry photographic upscale. A contact-sheet comparison of `FONT1.VGS`'s
+letters at 4x confirmed this: glyphs stayed crisp and fully legible with
+smooth diagonal/curved edges, versus the blocky nearest-neighbor look of the
+original bitmaps.
+
+As with character/item sprites, this is a tooling-only deliverable for
+now - the engine's text layout (`Fonts::writeString()`, dialog/journal/UI
+positioning) draws glyphs at their native pixel size and would need every
+call site's metrics scaled by `_roseTattooHiresScale` to actually render
+these upscaled glyphs in-game. That engine-side wiring is left as future
+work; the upscaled glyph assets are ready under `enhanced/sprites/font*_vgs/`
+whenever that lands.
 
 Launch ScummVM for scene-jump validation:
 

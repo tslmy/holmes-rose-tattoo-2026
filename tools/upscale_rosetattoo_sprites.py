@@ -69,6 +69,31 @@ def upscale_frame(
     return result
 
 
+def upscale_font_glyph(frame: Image.Image, scale: int) -> Image.Image:
+    """Upscales a single bitmap-font glyph frame without calling any AI
+    upscaler.
+
+    Font glyphs (FONT1.VGS..FONT8.VGS) are tiny (often under 10x10px)
+    monochrome stencils - the glyph "shape" lives entirely in the alpha
+    channel (RGB is always solid black, since the engine recolors glyphs
+    via whichever palette/color is active at draw time - see
+    Fonts::writeString() in fonts.cpp). Running these through a
+    photographic ESRGAN model would blur or hallucinate texture into
+    strokes that are only 1-2 pixels wide; a plain smooth (Lanczos) resize
+    of just the alpha channel instead produces clean anti-aliased edges
+    while keeping the glyph recognizable, matching how vector/hinted fonts
+    look when rendered at a larger size.
+    """
+    rgba = frame.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    target_size = (rgba.width * scale, rgba.height * scale)
+    upscaled_alpha = alpha.resize(target_size, Image.Resampling.LANCZOS)
+
+    result = Image.new("RGBA", target_size, (255, 255, 255, 0))
+    result.putalpha(upscaled_alpha)
+    return result
+
+
 def upscale_resource_dir(
     input_dir: Path,
     output_dir: Path,
@@ -76,6 +101,7 @@ def upscale_resource_dir(
     api_url: str,
     api_timeout: int,
     upscaler: str,
+    mode: str = "photo",
 ) -> dict:
     metadata_path = input_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -85,7 +111,10 @@ def upscale_resource_dir(
     for frame_record in metadata["frames"]:
         frame_path = input_dir / frame_record["file"]
         with Image.open(frame_path) as frame:
-            upscaled = upscale_frame(frame, scale, api_url, api_timeout, upscaler)
+            if mode == "font":
+                upscaled = upscale_font_glyph(frame, scale)
+            else:
+                upscaled = upscale_frame(frame, scale, api_url, api_timeout, upscaler)
         # Scale-qualified filename (frame_NNN@Sx.png), matching the
         # background pipeline's background@Nx.png convention - this lets the
         # engine's loadRoseTattooHiresCursorOverride() pick the exact scale
@@ -107,7 +136,7 @@ def upscale_resource_dir(
     out_metadata = {
         **metadata,
         "scale": scale,
-        "upscaler": upscaler,
+        "upscaler": upscaler if mode != "font" else "lanczos-alpha",
         "frames": out_frames,
     }
     (output_dir / "metadata.json").write_text(
@@ -155,6 +184,19 @@ def main() -> None:
     )
     parser.add_argument("--api-url", default="http://127.0.0.1:7860")
     parser.add_argument("--api-timeout", type=int, default=120)
+    parser.add_argument(
+        "--mode",
+        choices=["photo", "font"],
+        default="photo",
+        help=(
+            "'photo' (default) upscales via the ESRGAN-family API, suitable "
+            "for cursors/items/characters. 'font' does a fast local "
+            "Lanczos-smoothed alpha-only upscale with no API call, "
+            "appropriate for tiny monochrome bitmap font glyphs "
+            "(FONT1.VGS-FONT8.VGS) where photographic detail would blur "
+            "thin strokes rather than help legibility."
+        ),
+    )
     args = parser.parse_args()
 
     if args.resources:
@@ -170,7 +212,13 @@ def main() -> None:
             continue
         output_dir = args.output_dir / resource_dir.name
         metadata = upscale_resource_dir(
-            resource_dir, output_dir, args.scale, args.api_url, args.api_timeout, args.upscaler
+            resource_dir,
+            output_dir,
+            args.scale,
+            args.api_url,
+            args.api_timeout,
+            args.upscaler,
+            mode=args.mode,
         )
         print(
             f"{resource_dir.name}: {len(metadata['frames'])} frames "
