@@ -230,6 +230,41 @@ batches. Wide scrolling rooms are split into overlapping horizontal tiles by
 default so panoramic backgrounds do not need to be generated in one enormous
 diffusion request.
 
+### Sharper, less dithered redraws (`--init-upscaler`)
+
+By default the init image handed to the diffusion pass is now built with a
+real super-resolution model (`--init-upscaler`, default `R-ESRGAN 4x+`, called
+through Automatic1111's `/sdapi/v1/extra-single-image` endpoint) instead of a
+naive Lanczos resize. This matters because the redraw pass runs at a moderate
+denoising strength to stay faithful to game geometry - it mostly polishes
+whatever the init image already looks like rather than repainting it from
+scratch. A Lanczos resize just interpolates the source's *existing* pixels to
+a bigger canvas, which bakes in the original 256-color palette's dithering
+pattern and low-res softness right into the model's starting point, so the
+output stays soft and dithered too. A real upscaler reconstructs plausible
+high-frequency detail and cleans up dithering/palette banding instead of
+preserving it, giving the diffusion pass a much sharper, cleaner base to work
+from - verified on scene 1's "EXTRA" newsstand sign, which stayed crisp and
+legible with the ESRGAN init versus turning into "LXTRA" with a Lanczos init.
+
+Counterintuitively, pushing `--steps`/`--cfg-scale`/`--denoising-strength`
+higher on top of the ESRGAN init made things *worse* in testing (more
+hallucinated detail, further text drift) - the fix is the init image quality,
+not the diffusion parameters. Pass `--init-upscaler lanczos` to restore the
+old offline-only behavior for `--skip-existing` reruns or A/B comparisons
+without a live API. Other installed Automatic1111 upscalers (`SwinIR 4x`,
+`DAT x4`, etc. - see `/sdapi/v1/upscalers`) also work.
+
+Now that the init image carries real reconstructed detail instead of
+interpolated noise, `--scale` (default `2`) is also worth raising for a
+final/hero pass: a scene 1 `--scale 4` run (same steps/cfg/denoise as above)
+resolved noticeably sharper stone and wood grain than `--scale 2`, and even
+rendered an interior candelabra silhouette through a window that was
+completely lost at 2x. Higher scale costs more generation time (wide rooms
+split into more overlapping tiles) and disk space, so `--scale 2` remains the
+default for full-batch runs, but `--scale 4` is recommended when quality
+matters more than turnaround time.
+
 ### ControlNet structural guidance source (`--edge-source`)
 
 By default (`--edge-source canny`) the ControlNet control image is the

@@ -44,6 +44,7 @@ class RedrawResult:
     controlnet_guidance_end: float
     controlnet_control_mode: str
     original_blend_strength: float
+    init_upscaler: str
     attempt_count: int
     tile_count: int
     skipped: bool
@@ -96,6 +97,7 @@ def apply_setting_values(args: argparse.Namespace, values: dict[str, Any]) -> No
         "tile_overlap": "tile_overlap",
         "warn_rms_delta": "warn_rms_delta",
         "edge_source": "edge_source",
+        "init_upscaler": "init_upscaler",
     }
     for key, value in values.items():
         if key in {"profile", "scenes", "scene_overrides", "defaults"}:
@@ -163,6 +165,7 @@ def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[
         "tile_overlap": args.tile_overlap,
         "warn_rms_delta": args.warn_rms_delta,
         "edge_source": args.edge_source,
+        "init_upscaler": args.init_upscaler,
     }
 
 
@@ -329,11 +332,67 @@ def make_edge_image(
     return requested_module if requested_module != "canny" else "none"
 
 
-def make_init_image(source: Image.Image, scale: int, output_path: Path) -> Image.Image:
-    init = source.resize(
-        (source.width * scale, source.height * scale),
-        Image.Resampling.LANCZOS,
-    )
+def upscale_via_api(
+    api_url: str,
+    api_timeout: int,
+    source: Image.Image,
+    scale: int,
+    upscaler: str,
+) -> Image.Image:
+    """Upscale via Automatic1111's /sdapi/v1/extra-single-image endpoint.
+
+    A real super-resolution model (ESRGAN/SwinIR/DAT/etc.) reconstructs
+    plausible high-frequency detail and, critically, treats the source
+    image's palette-dithering noise and low-res JPEG-like blocking as
+    something to clean up rather than something to preserve - unlike a
+    naive Lanczos resize, which just smoothly interpolates the existing
+    pixels (including their dithering pattern) to a bigger canvas. Since
+    the diffusion pass afterwards runs at a moderate denoising strength to
+    stay faithful to game geometry, it mostly polishes whatever the init
+    image already looks like rather than removing baked-in artifacts - so
+    starting from a cleaner, sharper init image matters far more than
+    tweaking the diffusion pass alone.
+    """
+    payload = {
+        "image": image_to_base64(source),
+        "upscaling_resize": scale,
+        "upscaler_1": upscaler,
+    }
+    response = post_json(f"{api_url}/sdapi/v1/extra-single-image", payload, api_timeout)
+    image = response.get("image")
+    if not image:
+        raise RuntimeError(f"Upscale API returned no image (upscaler={upscaler!r})")
+    return base64_to_image(image)
+
+
+def make_init_image(
+    args: argparse.Namespace,
+    source: Image.Image,
+    scale: int,
+    output_path: Path,
+) -> Image.Image:
+    if args.init_upscaler.lower() not in ("lanczos", "nearest", "none"):
+        try:
+            init = upscale_via_api(args.api_url, args.api_timeout, source, scale, args.init_upscaler)
+            if init.size != (source.width * scale, source.height * scale):
+                init = init.resize(
+                    (source.width * scale, source.height * scale),
+                    Image.Resampling.LANCZOS,
+                )
+        except (urllib.error.URLError, RuntimeError, TimeoutError) as exc:
+            print(
+                f"  warning: --init-upscaler {args.init_upscaler!r} failed ({exc}); "
+                f"falling back to Lanczos for this scene"
+            )
+            init = source.resize(
+                (source.width * scale, source.height * scale),
+                Image.Resampling.LANCZOS,
+            )
+    else:
+        init = source.resize(
+            (source.width * scale, source.height * scale),
+            Image.Resampling.LANCZOS,
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     init.save(output_path)
     return init
@@ -576,7 +635,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
     seed = args.seed + scene_id if args.seed >= 0 else -1
 
     with Image.open(input_path).convert("RGB") as source:
-        init_image = make_init_image(source, args.scale, init_path)
+        init_image = make_init_image(scene_args, source, args.scale, init_path)
         controlnet_module = make_edge_image(
             scene_dir, init_image, scene_args.edge_source, scene_args.controlnet_module, edge_path
         )
@@ -636,6 +695,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
                 controlnet_guidance_end=scene_args.controlnet_guidance_end,
                 controlnet_control_mode=scene_args.controlnet_control_mode,
                 original_blend_strength=scene_args.original_blend_strength,
+                init_upscaler=scene_args.init_upscaler,
                 attempt_count=0,
                 tile_count=len(tile_positions(expected_size[0], scene_args.tile_width, scene_args.tile_overlap)),
                 skipped=True,
@@ -704,6 +764,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
         controlnet_guidance_end=scene_args.controlnet_guidance_end,
         controlnet_control_mode=scene_args.controlnet_control_mode,
         original_blend_strength=scene_args.original_blend_strength,
+        init_upscaler=scene_args.init_upscaler,
         attempt_count=attempt_count,
         tile_count=tile_count,
         skipped=False,
@@ -789,7 +850,22 @@ def main() -> None:
         help="Print resolved per-scene settings and exit without calling the API.",
     )
     parser.add_argument("--scenes", type=int, nargs="*")
-    parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=2,
+        help=(
+            "Output resolution multiplier applied to the native 640x480 (or similar) "
+            "background. Default 2x. With --init-upscaler using a real AI upscaler "
+            "(the new default), --scale 4 was verified to resolve genuinely more "
+            "high-frequency detail than 2x - not just interpolated pixels - e.g. an "
+            "interior candelabra silhouette became visible through a window at 4x "
+            "that was lost at 2x, and stone/wood texture stayed sharper. Higher scale "
+            "costs more generation time (wide rooms need more overlapping tiles) and "
+            "disk space, so it isn't the new default for full-batch runs, but is "
+            "recommended for hero scenes or a final high-quality pass."
+        ),
+    )
     parser.add_argument(
         "--skip-existing",
         action="store_true",
@@ -823,6 +899,27 @@ def main() -> None:
     parser.add_argument("--cfg-scale", type=float, default=5.5)
     parser.add_argument("--sampler", default="DPM++ 2M SDE")
     parser.add_argument("--denoising-strength", type=float, default=0.38)
+    parser.add_argument(
+        "--init-upscaler",
+        default="R-ESRGAN 4x+",
+        help=(
+            "Upscaler used to build the diffusion init image from the "
+            "extracted background. A naive Lanczos resize just interpolates "
+            "the source's existing pixels to a bigger canvas, which bakes in "
+            "the original 256-color palette's dithering pattern and low-res "
+            "softness - and since the diffusion pass runs at a moderate "
+            "denoising strength to stay faithful to game geometry, it mostly "
+            "polishes whatever the init image already looks like rather than "
+            "removing that baked-in noise. A real super-resolution model "
+            "(the default 'R-ESRGAN 4x+', or 'SwinIR 4x'/'DAT x4'/etc. - see "
+            "Automatic1111's /sdapi/v1/upscalers) reconstructs plausible "
+            "high-frequency detail and cleans up dithering/JPEG-like "
+            "blocking instead of preserving it, giving the diffusion pass a "
+            "much sharper, cleaner starting point. Pass 'lanczos' to restore "
+            "the old offline-only behavior (useful for --skip-existing runs "
+            "without a live API, or A/B comparisons)."
+        ),
+    )
     parser.add_argument(
         "--negative-prompt",
         default=(
