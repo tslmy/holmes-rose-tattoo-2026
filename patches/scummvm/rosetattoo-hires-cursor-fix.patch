@@ -1,0 +1,117 @@
+Fix black/undersized mouse cursor when running Rose Tattoo in hires mode.
+
+Root cause: when SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE > 1 and the hires
+format is not CLUT8 (rgb565/rgba32), Sherlock::Screen::setPalette()
+early-returned WITHOUT forwarding the palette to the backend at all,
+to avoid tripping the pixel-format assert in the base
+Graphics::Screen::setPalette() (the hires composite surface itself is
+no longer 1 byte/pixel, so the base class's assert(bytesPerPixel == 1)
+would fail).
+
+However, ScummVM's mouse cursor (loaded from rmouse.vgs) stays an 8-bit
+palettized image regardless of the hires screen format, and cursor
+rendering needs a color palette to make sense of it. Since the game
+palette was never being forwarded in hires-noCLUT8 mode, the cursor's
+color mapping stayed at its zero-initialized state and the cursor
+rendered solid black.
+
+First attempt: call g_system->getPaletteManager()->setPalette()
+directly (bypassing the Graphics::Screen pixel-format assert). This
+compiled, but crashed at runtime on the OpenGL backend:
+
+  Assertion failed: (_gameScreen->hasPalette()), function setPalette,
+  file opengl-graphics.cpp, line 1448.
+
+OpenGLGraphicsManager::setPalette() also asserts the *game* screen
+texture itself is palettized - not just an assert in the generic
+Graphics::Screen wrapper - so forwarding to the game palette manager
+is unsafe once the hires composite has switched to RGB565/RGBA32.
+
+Final fix: use CursorMan.replaceCursorPalette() instead. This is
+ScummVM's dedicated *cursor* palette mechanism (backed by
+OSystem::setCursorPalette() / OSystem::kFeatureCursorPalette), which
+is completely independent of the game screen's own pixel format - both
+the SDL and OpenGL backends support it unconditionally, so it doesn't
+require the game screen to be CLUT8. This correctly colors the 8-bit
+palettized cursor without touching the (now RGB565/RGBA32) main game
+screen palette path at all.
+
+Additionally, Events::setCursor() only special-cased upscaling the
+cursor bitmap for the 3DO engine's `_isScreenDoubled` 2x path; for PC
+(Rose Tattoo) it always passed CursorMan.replaceCursor() the native,
+unscaled cursor bitmap, leaving the cursor visually tiny relative to
+the enlarged hires window. Generalized the same nearest-neighbor
+upscaling approach to the PC 8-bit path using roseTattooHiresScale().
+
+--- a/engines/sherlock/screen.cpp
++++ b/engines/sherlock/screen.cpp
+@@ -31,6 +31,7 @@
+ #include "common/system.h"
+ #include "common/util.h"
+ #include "graphics/pixelformat.h"
+ #include "graphics/palette.h"
++#include "graphics/cursorman.h"
+ #include "image/png.h"
+
+@@ -172,8 +173,20 @@ void Screen::setPalette(const byte *palette, uint start, uint num) {
+ 	assert(start + num <= Graphics::PALETTE_COUNT);
+ 	Common::copy(palette, palette + num * 3, &_roseTattooPalette[start * 3]);
+
+-	if (_roseTattooHiresScale > 1 && !_roseTattooHiresFormat.isCLUT8())
++	if (_roseTattooHiresScale > 1 && !_roseTattooHiresFormat.isCLUT8()) {
++		// Graphics::Screen::setPalette() forwards to
++		// g_system->getPaletteManager()->setPalette(), which some backends
++		// (e.g. OpenGLGraphicsManager::setPalette()) assert requires the
++		// game screen itself to be palettized/CLUT8 - no longer true once
++		// we've switched the backend to RGB565/RGBA32 for the hires
++		// composite, so we can't call it here without crashing.
++		//
++		// However, the mouse cursor (an 8-bit palettized image) still needs
++		// a palette to be rendered in color: use CursorMan's dedicated
++		// cursor-palette mechanism (backed by OSystem::setCursorPalette(),
++		// independent of the game screen's own pixel format) instead of the
++		// regular game palette, so the cursor doesn't render solid black.
++		CursorMan.replaceCursorPalette(palette, start, num);
+ 		return;
++	}
+
+ 	Graphics::Screen::setPalette(palette, start, num);
+ }
+
+--- a/engines/sherlock/events.cpp
++++ b/engines/sherlock/events.cpp
+@@ -93,9 +93,32 @@ void Events::setCursor(const Graphics::Surface &src, int hotspotX, int hotspotY) {
+ 	_cursorId = INVALID_CURSOR;
+ 	_hotspotPos = Common::Point(hotspotX, hotspotY);
+
+ 	if (!IS_3DO) {
+ 		// PC 8-bit palettized
+-		CursorMan.replaceCursor(src, hotspotX, hotspotY, 0xff);
++		const int hiresScale = _vm->_screen->roseTattooHiresScale();
++
++		if (hiresScale > 1) {
++			// Upscale the cursor by the same factor as the hires composite,
++			// so it's proportioned correctly relative to the enlarged window
++			// (nearest-neighbor replication, matching the 3DO branch below).
++			Graphics::Surface tempSurface;
++			tempSurface.create(src.w * hiresScale, src.h * hiresScale, src.format);
++
++			for (int y = 0; y < src.h; ++y) {
++				const byte *srcP = (const byte *)src.getBasePtr(0, y);
++				for (int sy = 0; sy < hiresScale; ++sy) {
++					byte *destP = (byte *)tempSurface.getBasePtr(0, y * hiresScale + sy);
++					for (int x = 0; x < src.w; ++x) {
++						for (int sx = 0; sx < hiresScale; ++sx)
++							*destP++ = srcP[x];
++					}
++				}
++			}
++
++			CursorMan.replaceCursor(tempSurface, hotspotX * hiresScale, hotspotY * hiresScale, 0xff);
++			tempSurface.free();
++		} else {
++			CursorMan.replaceCursor(src, hotspotX, hotspotY, 0xff);
++		}
+ 	} else if (!_vm->_isScreenDoubled) {
+ 		CursorMan.replaceCursor(src, hotspotX, hotspotY, 0x0000);
+ 	} else {
