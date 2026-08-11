@@ -176,18 +176,17 @@ settings around `7-17` may keep rooms recognizable, while stronger photographic
 settings can improve atmosphere or destroy object identity depending on the
 scene.
 
-The tracked balanced production profile lives at
-`profiles/neural/photographic-balanced.json`. It uses a middle setting rather
-than the most aggressive calibration: lower denoise, stronger ControlNet, and
-special tighter overrides for scenes with masks or heavy fog/water overlays.
-
-When the model invents or loses too much detail, switch to
-`profiles/neural/photographic-faithful.json` for calibration. That profile keeps
-ControlNet in balanced mode, lowers denoise, increases tile overlap, strengthens
-negative prompts against replaced props/architecture, and blends a small amount
-of the upscaled original back into the neural result. Avoid
+The tracked production profile lives at
+`profiles/neural/photographic-faithful.json`. It keeps ControlNet in a
+prompt-favoring control mode, lowers denoise, increases tile overlap,
+strengthens negative prompts against replaced props/architecture, and blends
+a small amount of the upscaled original back into the neural result. Avoid
 `controlnet_control_mode: "ControlNet is more important"` for now; on Forge/MPS
-it produced very dark outputs despite preserving silhouettes.
+it produced very dark outputs despite preserving silhouettes. (An earlier
+`photographic-balanced.json` profile - a middle setting between this and the
+most aggressive calibration - was tried first but abandoned after day one in
+favor of `photographic-faithful.json`, and has since been removed along with
+its stale `mods/neural-hires-backgrounds-balanced*` output.)
 
 For LLM-polished prompts, Ollama works well enough that LM Studio is not needed
 yet. Use a vision-capable model such as `qwen3.5:9b-mlx` through Ollama's
