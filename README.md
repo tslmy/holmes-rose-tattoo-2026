@@ -338,6 +338,53 @@ local model runner is interrupted. The batch validator rejects blank captures,
 which helps catch early macOS window-capture misses during unattended scene
 checks.
 
+### Cursors, items, and character sprites (`extract_rosetattoo_sprites.py` / `upscale_rosetattoo_sprites.py`)
+
+Everything that *moves* in Rose Tattoo (mouse cursors, inventory/interactive
+item icons, and character walk-cycle sprites) is stored separately from room
+backgrounds, in a proprietary VGS frame format packed inside the game's
+`.LIB`/`.LIC` archives (`VGS.LIB`, `WALK.LIB`, `TALK.LIB`). Unlike room
+backgrounds (one full 640x480 frame per `.RRM`), each of these resources is a
+small sequence of individually-offset frames - e.g. `RMOUSE.VGS` holds all 14
+room cursor frames (arrow, magnifying glass, 3-frame wait animation, 8
+directional exit arrows, and the "Exit" label cursor), while a character file
+like `WATSON.VGS` holds ~95 walk-cycle frames.
+
+```sh
+# Extract cursor frames (writes extracted/sprites/<resource>/frame_NNN.png + metadata.json)
+python3 tools/extract_rosetattoo_sprites.py --resources RMOUSE.VGS OMOUSE.VGS
+
+# Extract a character walk cycle - these have no palette of their own at
+# runtime (they reuse whichever room palette is currently loaded), so borrow
+# one from a specific room's export for correct-color output:
+python3 tools/extract_rosetattoo_sprites.py --resources WATSON.VGS --palette-scene 1
+
+# Upscale extracted frames via the same non-diffusion ESRGAN-family endpoint
+# used for the background pipeline's init-image step (no ControlNet/redraw -
+# these are small, silhouette/hotspot-critical elements where hallucinated
+# new content would break gameplay recognizability):
+python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
+```
+
+Each frame's alpha channel is separated before upscaling (flattened onto a
+neutral fill so ESRGAN doesn't invent detail in fully-transparent regions),
+then resized and re-thresholded independently, keeping the crisp binary
+cutout edges the engine itself always uses (no partial-alpha blending).
+Output filenames are scale-qualified (`frame_NNN@Sx.png`), matching the
+background pipeline's `background@Nx.png` convention.
+
+An initial ScummVM-side hookup exists for the room cursor set specifically
+(`patches/scummvm/rosetattoo-hires-cursor-ai-override.patch`):
+`Events::setCursor()` looks for
+`$SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES/sprites/rmouse_vgs/frame_NNN@Sx.png`
+(NNN = CursorId, which lines up 1:1 with RMOUSE.VGS's own frame order) and,
+if found, draws it as a true-color RGBA cursor instead of nearest-neighbor
+upscaling the original palettized pixels. Character/item/animated-sprite
+runtime overrides are not yet wired into the engine - that would touch every
+sprite-draw call site (`people.cpp`, `objects.cpp`) and is a larger,
+higher-risk change than the cursor and background override paths.
+
+
 Launch ScummVM for scene-jump validation:
 
 ```sh
