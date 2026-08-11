@@ -1,0 +1,23 @@
+diff --git a/engines/sherlock/tattoo/tattoo_map.cpp b/engines/sherlock/tattoo/tattoo_map.cpp
+index d667a235..0166aa04 100644
+--- a/engines/sherlock/tattoo/tattoo_map.cpp
++++ b/engines/sherlock/tattoo/tattoo_map.cpp
+@@ -103,6 +103,18 @@ int TattooMap::show() {
+ 	screen.translatePalette(screen._cMap);
+ 	delete stream;
+ 
++	// The overhead map uses a much larger, double-size scrollable back buffer
++	// unlike normal room scenes, and it isn't loaded through Scene::loadScene(),
++	// so it never gets its own Rose Tattoo hires background override. If a
++	// previous room's hires composite/background buffers (sized for a single
++	// normal-size room) are left active, Screen::update()'s hires compositor
++	// samples them far out of bounds against the map's larger buffer, which
++	// renders as an all-black screen. Clear them so update() falls back to
++	// plain (non-overlay) scaled rendering for the map; the next room reload
++	// after closing the map naturally reloads its own override via
++	// Scene::loadScene() -> loadRoseTattooHiresBackgroundOverride().
++	screen.clearRoseTattooHiresBackground();
++
+ 	// Load the map image and draw it to the back buffer
+ 	ImageFile *map = new ImageFile("map.vgs");
+ 	screen._backBuffer1.create(SHERLOCK_SCREEN_WIDTH * 2, SHERLOCK_SCREEN_HEIGHT * 2);
