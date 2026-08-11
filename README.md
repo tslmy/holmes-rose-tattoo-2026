@@ -142,7 +142,7 @@ python3 tools/neural_redraw_rosetattoo_backgrounds.py \
   --scenes 18 \
   --scale 2 \
   --denoising-strength 0.42 \
-  --controlnet-model 'controlnet-canny-sdxl-1.0-fp16 [7b2ce256]' \
+  --controlnet-model 'controlnet-canny-sdxl-1.0-xinsir-v2 [ab7dc06d]' \
   --scummvm-overrides mods/neural-hires-backgrounds
 ```
 
@@ -161,7 +161,7 @@ python3 tools/neural_redraw_rosetattoo_backgrounds.py \
   --steps 14 \
   --cfg-scale 4.2 \
   --denoising-strength 0.56 \
-  --controlnet-model 'controlnet-canny-sdxl-1.0-fp16 [7b2ce256]' \
+  --controlnet-model 'controlnet-canny-sdxl-1.0-xinsir-v2 [ab7dc06d]' \
   --controlnet-weight 0.55 \
   --controlnet-guidance-end 0.5 \
   --tile-width 1536 \
@@ -301,6 +301,25 @@ completely lost at 2x. Higher scale costs more generation time (wide rooms
 split into more overlapping tiles) and disk space, so `--scale 2` remains the
 default for full-batch runs, but `--scale 4` is recommended when quality
 matters more than turnaround time.
+
+### ControlNet checkpoint choice (contrast/exposure collapse fix)
+
+The photographic-redraw profiles use `controlnet-canny-sdxl-1.0-xinsir-v2`
+(from [`xinsir/controlnet-canny-sdxl-1.0`](https://huggingface.co/xinsir/controlnet-canny-sdxl-1.0),
+`diffusion_pytorch_model_V2.safetensors`), not the official
+`diffusers/controlnet-canny-sdxl-1.0` checkpoint. A subset of scenes generated
+with the official checkpoint exhibited a genuine loss of dynamic range/contrast
+(not just underexposure): output stddev roughly half the source's and
+luminance clipped well short of both black and white, regardless of
+denoising/CFG/seed retries. This is a documented community issue with that
+checkpoint. The `xinsir` checkpoint is a drop-in replacement (same `canny`
+preprocessor workflow) trained on a larger, better-curated dataset and does
+not exhibit the collapse - verified across multiple previously-affected scenes
+with contact-sheet comparisons against source stddev/luminance range. Download
+the file into Forge's `models/ControlNet/` directory (any filename) and update
+`controlnet_model` in the relevant `profiles/neural/*.json` and/or
+`--controlnet-model` CLI value to match Forge's `/controlnet/model_list`
+identifier for it (Forge derives the `[hash]` suffix itself).
 
 ### ControlNet structural guidance source (`--edge-source`)
 

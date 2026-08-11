@@ -417,6 +417,82 @@ def is_blank(img: Image.Image) -> bool:
     return max(stat.stddev) < 0.5
 
 
+def has_dead_region(
+    img: Image.Image,
+    grid: int = 6,
+    dead_fraction_threshold: float = 0.12,
+    cell_mean_threshold: float = 2.0,
+    cell_stddev_threshold: float = 1.0,
+) -> bool:
+    """Detects a *partial* generation failure: a contiguous portion of the
+    image that came back flat, featureless black, while the rest of the
+    canvas has real content.
+
+    is_blank() only catches a *fully* uniform image and misses this pattern -
+    seen in practice where the SDXL Turbo checkpoint used for these redraws
+    occasionally emits solid-black pixels for part of a large (non-tiled)
+    single-shot canvas (e.g. the liberal-art inpaint pass, which always runs
+    on the whole composited image in one API call) while the remainder
+    renders normally. A legitimate dark/night scene still has real variance
+    (lamps, silhouettes, gradients) in most grid cells, so flagging only
+    cells that are both near-zero brightness *and* near-zero variance avoids
+    false positives on intentionally dark content.
+    """
+    gray = img.convert("L")
+    width, height = gray.size
+    cell_w = max(1, width // grid)
+    cell_h = max(1, height // grid)
+    dead_cells = 0
+    total_cells = 0
+    for grid_y in range(grid):
+        for grid_x in range(grid):
+            box = (
+                grid_x * cell_w,
+                grid_y * cell_h,
+                min(width, (grid_x + 1) * cell_w),
+                min(height, (grid_y + 1) * cell_h),
+            )
+            if box[2] <= box[0] or box[3] <= box[1]:
+                continue
+            cell_stat = ImageStat.Stat(gray.crop(box))
+            total_cells += 1
+            if cell_stat.mean[0] < cell_mean_threshold and cell_stat.stddev[0] < cell_stddev_threshold:
+                dead_cells += 1
+    if total_cells == 0:
+        return False
+    return (dead_cells / total_cells) >= dead_fraction_threshold
+
+
+def has_contrast_collapse(
+    output_image: Image.Image,
+    reference_image: Image.Image,
+    stddev_ratio_threshold: float = 0.62,
+) -> bool:
+    """Detects a *partial* tonal/contrast collapse that ``is_blank()`` and
+    ``has_dead_region()`` both miss: the redraw isn't uniform or literally
+    black anywhere, it's just globally flatter/grayer than the faithful init
+    image it was based on, with highlights and shadows both pulled toward
+    mid-gray. This was observed even after switching to a better-behaved
+    ControlNet checkpoint - it's a rarer, milder version of the same
+    generation-time instability, still content/seed-dependent per scene.
+
+    Comparing per-channel stddev (not mean/RMS-delta, which only measure
+    positional drift or overall brightness) against the source catches this:
+    a healthy redraw's stddev tracks its source closely (ratio ~0.9-1.05
+    across production scenes), while a collapsed one comes back at roughly
+    half the source's spread or less.
+    """
+    if output_image.size != reference_image.size:
+        reference_image = reference_image.resize(output_image.size, Image.Resampling.BILINEAR)
+    output_stddev = ImageStat.Stat(output_image.convert("RGB")).stddev
+    reference_stddev = ImageStat.Stat(reference_image.convert("RGB")).stddev
+    ratios = [
+        (out / ref) if ref > 1e-6 else 1.0
+        for out, ref in zip(output_stddev, reference_stddev)
+    ]
+    return max(ratios) < stddev_ratio_threshold
+
+
 def rms_delta(a: Image.Image, b: Image.Image) -> float:
     if a.size != b.size:
         b = b.resize(a.size, Image.Resampling.BILINEAR)
@@ -704,6 +780,62 @@ def blend_with_original(output_image: Image.Image, init_image: Image.Image, stre
     return Image.blend(output_image.convert("RGB"), init_image.convert("RGB"), strength)
 
 
+def match_exposure(
+    output_image: Image.Image,
+    reference_image: Image.Image,
+    min_ratio: float = 0.6,
+    target_ratio: float = 0.95,
+) -> Image.Image:
+    """Gently lifts shadows when a redraw comes back much darker overall than
+    the faithful init image it was based on.
+
+    Checking several *healthy* (non-drifted) scenes from the original
+    production run - e.g. scene 012 "In Mycroft's Bedroom" (ratio 0.98),
+    scene 014 "The Patient Ward of St. Bart's" (1.02), scene 021 "Porter's
+    Anteroom, Cambridge" (0.99) - shows this checkpoint/ControlNet
+    combination normally reproduces the source's own mean luminance almost
+    exactly (ratio ~0.95-1.05), regardless of whether that source scene is a
+    dim gaslit interior or a bright exterior. A DRIFT-flagged scene, by
+    contrast, comes back at roughly 15-20% of the source's mean luminance
+    (e.g. scene 017 "Old Sherman's Animal Emporium" at 0.17) - a large,
+    obvious departure from that ~1.0 baseline, not a stylistic choice.
+    `target_ratio` is therefore set close to the observed healthy baseline
+    (0.95, not fully 1.0, to leave a little headroom for legitimate
+    scene-to-scene variation) rather than an arbitrarily dimmer value. Only
+    lift exposure once the output has dropped below `min_ratio` of the
+    source's mean luminance, so scenes that generated normally (ratio near
+    1.0) are left untouched and only genuinely drifted renders are corrected.
+
+    The gamma curve is applied to the HSV *value* channel only, not to R/G/B
+    independently. An earlier version applied the same power-law curve to
+    each RGB channel separately; since x**gamma / x grows faster for smaller
+    x when gamma < 1, that boosted a pixel's darkest channel proportionally
+    more than its brightest channel, compressing the gap between channels
+    and visibly desaturating/graying out every corrected scene (verified by
+    comparing HSV saturation before/after: e.g. scene 001 dropped from
+    S=64->40, scene 004 from S=54->29, even though the *uncorrected* redraw's
+    own saturation already closely matched the source). Correcting only V
+    leaves hue and saturation exactly as the model generated them.
+    """
+    output_gray = ImageStat.Stat(output_image.convert("L")).mean[0]
+    reference_gray = ImageStat.Stat(reference_image.convert("L")).mean[0]
+    if reference_gray <= 0 or output_gray <= 0:
+        return output_image
+    if output_gray / reference_gray >= min_ratio:
+        return output_image
+
+    target_gray = reference_gray * target_ratio
+    # Gamma correction solved so applying it to the current mean luminance
+    # produces the target mean luminance; clamped to only ever brighten.
+    gamma = math.log(target_gray / 255.0) / math.log(output_gray / 255.0)
+    gamma = max(0.35, min(1.0, gamma))
+    lut = [min(255, round(255.0 * ((value / 255.0) ** gamma))) for value in range(256)]
+
+    hue, saturation, value = output_image.convert("HSV").split()
+    value = value.point(lut)
+    return Image.merge("HSV", (hue, saturation, value)).convert("RGB")
+
+
 def generate_candidate(
     scene_args: argparse.Namespace,
     init_image: Image.Image,
@@ -730,7 +862,13 @@ def generate_candidate(
         init_image,
         scene_args.original_blend_strength,
     )
-    blank = is_blank(output_image)
+    blank = (
+        is_blank(output_image)
+        or has_dead_region(output_image)
+        or has_contrast_collapse(output_image, init_image)
+    )
+    if not blank:
+        output_image = match_exposure(output_image, init_image)
     delta = rms_delta(output_image, init_image)
     return output_image, tile_count, delta, blank
 
@@ -787,7 +925,11 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
     if args.skip_existing and output_path.exists():
         with Image.open(output_path).convert("RGB") as output_image:
             output_size = output_image.size
-            blank = is_blank(output_image)
+            blank = (
+                is_blank(output_image)
+                or has_dead_region(output_image)
+                or has_contrast_collapse(output_image, init_image)
+            )
             delta = rms_delta(output_image, init_image)
         if output_size != expected_size:
             raise ValueError(f"{output_path} is {output_size}, expected {expected_size}")
@@ -865,6 +1007,36 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
     output_image, tile_count, delta, blank, seed, attempt_count = best
 
     if blank:
+        # Seed-only retries above sometimes come back byte-identical for a
+        # given scene: some content triggers a deterministic collapse at the
+        # profile's default denoising_strength regardless of seed, observed
+        # in practice on a handful of scenes even with a better-behaved
+        # ControlNet checkpoint. Lowering denoising_strength (which also
+        # means fewer effective diffusion steps for a fixed step count)
+        # reliably avoided the collapse in manual testing, so make one last
+        # escalation attempt at a gentler strength before giving up.
+        fallback_args = copy.copy(scene_args)
+        fallback_args.denoising_strength = max(0.12, scene_args.denoising_strength * 0.55)
+        fallback_seed = seed if seed >= 0 else -1
+        output_image, tile_count, delta, blank = generate_candidate(
+            fallback_args,
+            init_image,
+            edge_path,
+            controlnet_module,
+            prompt,
+            fallback_seed,
+            scene_output_dir,
+            expected_size,
+        )
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        output_image.save(
+            attempt_dir / f"attempt_{attempt_count + 1:02d}_seed_{fallback_seed}_lowdenoise.png"
+        )
+        attempt_count += 1
+        if not blank:
+            seed = fallback_seed
+
+    if blank:
         raise ValueError(f"{output_path} appears blank")
 
     faithful_image = output_image
@@ -872,10 +1044,10 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
     if output_image is not faithful_image:
         if output_image.size != expected_size:
             output_image = output_image.resize(expected_size, Image.Resampling.LANCZOS)
-        if is_blank(output_image):
+        if is_blank(output_image) or has_dead_region(output_image) or has_contrast_collapse(output_image, faithful_image):
             print(
-                f"scene {scene_id:03d}: liberal-art pass produced a blank image, "
-                "keeping the faithful base redraw instead"
+                f"scene {scene_id:03d}: liberal-art pass produced a blank/corrupted "
+                "image, keeping the faithful base redraw instead"
             )
             output_image = faithful_image
         else:
@@ -1107,13 +1279,36 @@ def main() -> None:
     parser.add_argument("--controlnet-threshold-a", type=float, default=100)
     parser.add_argument("--controlnet-threshold-b", type=float, default=200)
     parser.add_argument("--controlnet-guidance-end", type=float, default=0.75)
-    parser.add_argument("--controlnet-control-mode", default="Balanced")
+    parser.add_argument(
+        "--controlnet-control-mode",
+        default="My prompt is more important",
+        help=(
+            "ControlNet control_mode. Default changed from 'Balanced' after "
+            "the photographic-faithful full production run showed it is "
+            "unstable with this checkpoint at moderate-to-high controlnet "
+            "weight - certain weight/guidance_end combinations reliably "
+            "collapsed the SDXL Turbo sampler to a solid-black or "
+            "partially-black output (reproduced deterministically outside "
+            "this tool via the raw API). 'My prompt is more important' "
+            "reduces ControlNet's influence on the denoising trajectory and "
+            "was verified stable across repeated tests at the default "
+            "controlnet weight."
+        ),
+    )
     parser.add_argument("--original-blend-strength", type=float, default=0.0)
     parser.add_argument(
         "--retry-drift-attempts",
         type=int,
-        default=1,
-        help="Number of alternate seeds to try when a generated image exceeds its drift threshold.",
+        default=3,
+        help=(
+            "Number of alternate seeds to try when a generated image exceeds "
+            "its drift threshold or is blank/partially-corrupted (see "
+            "has_dead_region()). Was 1 (no effective retry) during the first "
+            "full production run, which let ~half of all scenes silently "
+            "keep a DRIFT-flagged, severely under-exposed, or partially "
+            "black-corrupted result since a single attempt always 'wins' "
+            "against itself. Raised to 3 so a bad seed actually gets retried."
+        ),
     )
     parser.add_argument("--retry-seed-step", type=int, default=1000)
     parser.add_argument(
