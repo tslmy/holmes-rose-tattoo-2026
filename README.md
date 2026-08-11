@@ -455,6 +455,36 @@ these upscaled glyphs in-game. That engine-side wiring is left as future
 work; the upscaled glyph assets are ready under `enhanced/sprites/font*_vgs/`
 whenever that lands.
 
+#### Hires TrueType tooltip/UI text (`patches/scummvm/rosetattoo-hires-font-ttf-override.patch`)
+
+Rather than upscaling the bitmap glyphs above, the engine now supports
+swapping in a real vector font for tooltip/hotspot-name text (e.g. hovering
+over "Street Lamp") when running in hires mode. Drop a TTF file at
+`$SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES/fonts/hires_font.ttf` and, if
+FreeType2 support is compiled in (`USE_FREETYPE2`) and
+`_roseTattooHiresScale > 1` with a non-CLUT8 hires format, `Screen` loads it
+on demand (cached per pixel size in `_roseTattooHiresFonts`) and renders
+crisp anti-aliased text into a persistent alpha-blended overlay
+(`_roseTattooHiresTextLayer`) instead of upscaling the native ~10px bitmap
+glyphs. This is a much better result for tooltip text than the Lanczos
+alpha-channel approach used for in-scene bitmap fonts above, since tooltip
+text is drawn fresh every frame rather than being baked into scene art.
+
+This required fixing an intermittent bug where a second, blocky bitmap-font
+"ghost" copy of the tooltip text would bleed through alongside the crisp TTF
+text. Root cause: `WidgetTooltipBase::draw()` always blitted the tooltip's
+native bitmap-rendered text (`screen.SHtransBlitFrom(_surface, ...)`)
+directly onto the screen, relying on the hires text layer's
+background-restore-then-blend mechanism to immediately paint over it -
+which proved unreliable frame-to-frame. The fix is `Screen::usesRoseTattooHiresText()`,
+which lets `WidgetTooltipBase::draw()` skip the redundant bitmap blit
+entirely whenever hires TTF text will replace it, so there is nothing left
+for the restore mechanism to (unreliably) hide. A related fix also stops
+`WidgetTooltip::setText()` from queueing phantom hires-text draws via its
+own internal `writeFancyString()` sizing calls (added `BaseSurface::clearHiresTextOrigin()`,
+used instead of `setHiresTextOrigin()` there) - only the paired `draw()`/`erase()`
+calls in `refreshHiresText()` should queue/clear hires text.
+
 #### Additional character/item sprites
 
 Beyond the cursor set and Watson, the same `extract_rosetattoo_sprites.py` /
