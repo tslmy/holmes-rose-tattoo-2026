@@ -650,7 +650,7 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
     prompt = make_realism_prompt(scene_prompt_text, scene_name, scene_args.style_prompt)
     scene_output_dir.mkdir(parents=True, exist_ok=True)
     prompt_output_path.write_text(prompt + "\n", encoding="utf-8")
-    if args.prompt_brief_dir:
+    if args.prompt_brief_dir and args.prompt_brief_dir.exists():
         brief_copy = scene_output_dir / "visual_brief.txt"
         brief_copy.write_text(scene_prompt_text.strip() + "\n", encoding="utf-8")
         (scene_output_dir / "visual_brief_source.txt").write_text(
@@ -842,7 +842,18 @@ def main() -> None:
     parser.add_argument(
         "--prompt-brief-dir",
         type=Path,
-        help="Optional directory of cached scene_XXX/visual_brief.txt prompt briefs.",
+        default=ROOT / "profiles" / "neural" / "prompt-briefs",
+        help=(
+            "Directory of scene_XXX/visual_brief.txt prompt briefs, generated "
+            "for every scene by polish_rosetattoo_prompts.py (LLM-paraphrased, "
+            "committed to git under profiles/ since they contain no verbatim "
+            "game text). Defaults to the repo's checked-in briefs so every "
+            "scene gets a consistent LLM-authored prompt with no per-scene "
+            "manual overrides. Falls back to the scene's raw prompt.txt only "
+            "if a brief is genuinely missing for that scene. Pass an empty "
+            "string or a nonexistent path to force raw prompt.txt for all "
+            "scenes instead."
+        ),
     )
     parser.add_argument(
         "--print-effective-settings",

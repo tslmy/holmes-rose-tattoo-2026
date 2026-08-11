@@ -171,9 +171,22 @@ For LLM-polished prompts, Ollama works well enough that LM Studio is not needed
 yet. Use a vision-capable model such as `qwen3.5:9b-mlx` through Ollama's
 `/api/generate` endpoint with thinking disabled; otherwise Qwen can spend the
 whole response budget on hidden reasoning and return little usable prompt text.
-The prompt-polisher treats the source image as authoritative, asks the model for
-a compact visual inventory, and writes ignored prompt sidecars under
-`generated/`:
+The prompt-polisher treats the source image as authoritative and asks the model
+for a compact, comma-separated visual inventory (35-80 words, no full
+sentences) - deliberately not the raw extracted game text, both to keep
+Stable Diffusion focused on static background detail and to keep the output
+safely paraphrased rather than a verbatim reproduction of the game's writing.
+
+**Every scene gets an LLM-generated brief, with no per-scene manual
+overrides.** An earlier iteration of this pipeline hand-curated verbatim,
+sentence-level "manual" overrides for a handful of fragile scenes while
+leaving the rest to raw `prompt.txt`, which meant different scenes were
+silently going through materially different prompt pipelines. All scenes now
+go through the same `polish_with_ollama()` LLM path, and the sanitizer strips
+crime-story/mood words and caps output length uniformly, so no per-scene
+special-casing is needed anymore. The `--manual-brief-dir` escape hatch still
+exists in the script for genuine emergencies, but the default workflow should
+not need it:
 
 ```sh
 python3 tools/polish_rosetattoo_prompts.py \
@@ -181,16 +194,19 @@ python3 tools/polish_rosetattoo_prompts.py \
   --ollama-url http://127.0.0.1:11434 \
   --ollama-model qwen3.5:9b-mlx \
   --ollama-api generate \
-  --manual-brief-dir profiles/neural/prompt-brief-overrides \
   --input-dir extracted/rosetattoo \
-  --output-dir generated/prompt-briefs-ollama-qwen9-inventory-v4
+  --output-dir generated/prompt-briefs
 ```
 
-Dense object inventories can still mislead Stable Diffusion on fragile scenes.
-Tracked sparse overrides live in `profiles/neural/prompt-brief-overrides/` and
-are copied verbatim into the generated cache. They are deliberately small:
-ControlNet and the source image should carry most composition detail, while the
-brief only pins a few puzzle-relevant scene facts.
+The resulting `visual_brief.txt` files are short, transformed noun-phrase
+lists (e.g. `red granite obelisk weathered hieroglyph inscriptions polished
+granite stairs iron lampposts ...`), not the game's original narrative prose,
+so they're checked into git under `profiles/neural/prompt-briefs/scene_NNN/`
+for every scene - future runs of this pipeline don't need to regenerate them
+(or have Ollama installed at all) unless a scene's extracted metadata
+changes. `neural_redraw_rosetattoo_backgrounds.py --prompt-brief-dir` defaults
+to this checked-in directory and only falls back to a scene's raw
+`prompt.txt` if a brief is genuinely missing.
 
 When launching Forge for this pipeline, make sure the ControlNet extension is
 enabled. The normal `--disable-extra-extensions` shortcut disables ControlNet,
@@ -214,7 +230,6 @@ python3 tools/neural_redraw_rosetattoo_backgrounds.py \
   --api-url http://127.0.0.1:7861 \
   --wait \
   --settings-file profiles/neural/photographic-faithful.json \
-  --prompt-brief-dir generated/prompt-briefs-ollama-qwen9-inventory-v4 \
   --scenes 4 18 \
   --scale 2 \
   --seed 108000 \
