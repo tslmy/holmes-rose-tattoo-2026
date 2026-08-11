@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -82,6 +83,18 @@ def command_for(
         cmd.append(f"--save-slot={save_slot}")
     cmd.append("sherlock:rosetattoo")
     return cmd
+
+
+def shell_join(cmd: list[str]) -> str:
+    """Like shlex.join but quotes only the value in --flag=value arguments."""
+    parts = []
+    for arg in cmd:
+        if arg.startswith("--") and "=" in arg:
+            flag, value = arg.split("=", 1)
+            parts.append(f"{flag}={shlex.quote(value)}" if " " in value else arg)
+        else:
+            parts.append(shlex.quote(arg))
+    return " ".join(parts)
 
 
 def print_scene_commands(scenes: list[int]) -> None:
@@ -241,7 +254,7 @@ def main() -> None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG={args.hires_debug}")
     if args.hires_format is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT={args.hires_format}")
-    print("  " + " ".join(cmd))
+    print("  " + shell_join(cmd))
 
     if args.print_only:
         return
