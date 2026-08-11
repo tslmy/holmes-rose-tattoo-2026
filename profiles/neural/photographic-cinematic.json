@@ -1,0 +1,25 @@
+{
+  "profile": "photographic-cinematic",
+  "defaults": {
+    "checkpoint": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+    "steps": 32,
+    "cfg_scale": 4.5,
+    "denoising_strength": 0.4,
+    "sampler": "DPM++ 2M Karras",
+    "style_prompt": "Faithful high-resolution restoration of the original background plate, shot as a moody cinematic interior/architectural photograph. Keep the game painting's exact composition, object inventory, silhouettes, readable-sign locations, doorway shapes, wall seams, floor boundaries, and walkable geometry. Render with warm tungsten and gaslight lighting, soft Rembrandt-style shadow falloff, rich material texture (aged wood grain, worn brass, velvet and wool fabric weave, plaster and wallpaper texture, oxidized metal, weathered stone), true-color period-accurate tonal depth, subtle film grain, shallow depth of field, and a 50mm lens look, without replacing props, changing architecture, inventing decorations, or smoothing away small object boundaries.",
+    "negative_prompt": "cartoon, anime, illustration, fantasy, futuristic, modern cars, electric lights, extra people, readable new text, new signs, new doors, changed doorway, changed window, wrong architecture, warped perspective, distorted geometry, missing furniture, missing props, replaced props, merged objects, melted details, symmetrical redesign, decorative invention, luxury renovation, 3d render, CGI, game engine render, plastic, dollhouse, miniature, flat lighting, dull, washed out, low contrast, overexposed, underexposed, gray, desaturated, hazy, foggy indoors, scattered coins, sequins, glitter, metallic confetti, shiny debris, broken glass shards, jewelry on ground, litter of small shiny objects, low quality, blurry, oversharpened, watermark, signature",
+    "controlnet_model": "controlnet-canny-sdxl-1.0-xinsir-v2 [ab7dc06d]",
+    "controlnet_module": "canny",
+    "controlnet_weight": 1.0,
+    "controlnet_guidance_end": 0.92,
+    "controlnet_control_mode": "My prompt is more important",
+    "controlnet_processor_res": 768,
+    "controlnet_threshold_a": 110,
+    "controlnet_threshold_b": 220,
+    "original_blend_strength": 0.14,
+    "tile_width": 1536,
+    "tile_overlap": 320,
+    "warn_rms_delta": 20.0
+  },
+  "scene_overrides": {}
+}
