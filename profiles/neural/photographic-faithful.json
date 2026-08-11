@@ -1,0 +1,99 @@
+{
+  "profile": "photographic-faithful",
+  "defaults": {
+    "checkpoint": "dreamshaperXL_v21TurboDPMSDE.safetensors",
+    "steps": 16,
+    "cfg_scale": 4.2,
+    "denoising_strength": 0.36,
+    "sampler": "DPM++ 2M SDE",
+    "style_prompt": "Faithful high-resolution restoration of the original background plate. Keep the game painting's exact composition, object inventory, silhouettes, readable-sign locations, doorway shapes, wall seams, floor boundaries, and walkable geometry. Add realistic texture, material variation, grime, period lighting, lens softness, and true-color tonal depth without replacing props, changing architecture, inventing decorations, or smoothing away small object boundaries.",
+    "negative_prompt": "cartoon, anime, illustration, fantasy, futuristic, modern cars, electric lights, extra people, readable new text, new signs, new doors, changed doorway, changed window, wrong architecture, warped perspective, distorted geometry, missing furniture, missing props, replaced props, merged objects, melted details, symmetrical redesign, decorative invention, luxury renovation, 3d render, CGI, game engine render, plastic, dollhouse, miniature, low quality, blurry, oversharpened, watermark, signature",
+    "controlnet_model": "controlnet-canny-sdxl-1.0-fp16 [7b2ce256]",
+    "controlnet_module": "canny",
+    "controlnet_weight": 0.92,
+    "controlnet_guidance_end": 0.88,
+    "controlnet_control_mode": "Balanced",
+    "controlnet_processor_res": 1024,
+    "controlnet_threshold_a": 64,
+    "controlnet_threshold_b": 192,
+    "original_blend_strength": 0.16,
+    "tile_width": 1536,
+    "tile_overlap": 320,
+    "warn_rms_delta": 18.0
+  },
+  "scene_overrides": {
+    "7": {
+      "profile": "photographic-faithful-overlay",
+      "denoising_strength": 0.3,
+      "controlnet_weight": 1.02,
+      "controlnet_guidance_end": 0.92,
+      "original_blend_strength": 0.22,
+      "warn_rms_delta": 14.0
+    },
+    "8": {
+      "profile": "photographic-faithful-overlay",
+      "denoising_strength": 0.3,
+      "controlnet_weight": 1.02,
+      "controlnet_guidance_end": 0.92,
+      "original_blend_strength": 0.22,
+      "warn_rms_delta": 14.0
+    },
+    "18": {
+      "profile": "photographic-faithful-fog-overlay",
+      "denoising_strength": 0.32,
+      "controlnet_weight": 0.98,
+      "original_blend_strength": 0.22,
+      "style_prompt": "Faithful high-resolution restoration of the original foggy embankment plate. Preserve the exact silhouettes of the embankment, stairs, sphinxes, obelisk, lamps, river edge, wall seams, puzzle boundaries, and water-mask regions. Add damp stone texture, grime, gaslit fog, and atmospheric depth without changing monument shapes or inventing extra masonry.",
+      "warn_rms_delta": 14.0
+    },
+    "50": {
+      "profile": "photographic-faithful-high-contrast-interior",
+      "warn_rms_delta": 22.0
+    },
+    "53": {
+      "profile": "photographic-faithful-overlay",
+      "denoising_strength": 0.24,
+      "controlnet_weight": 1.02,
+      "controlnet_guidance_end": 0.92,
+      "original_blend_strength": 0.35,
+      "style_prompt": "Faithful high-resolution restoration of the original opium den background plate. Preserve the exact wall positions, floor boundaries, beds, rugs, cabinet shapes, pipe and hookah silhouettes, curtain doorway, window glow, posters, and walkable geometry. Add realistic worn wood, fabric, plaster, and smoke-stained material texture without darkening the room exposure, hiding props, or changing the visible layout.",
+      "warn_rms_delta": 14.0
+    },
+    "61": {
+      "profile": "photographic-faithful-high-contrast-interior",
+      "warn_rms_delta": 22.0
+    },
+    "68": {
+      "profile": "photographic-faithful-overlay",
+      "denoising_strength": 0.3,
+      "controlnet_weight": 1.02,
+      "controlnet_guidance_end": 0.92,
+      "original_blend_strength": 0.22,
+      "warn_rms_delta": 14.0
+    },
+    "74": {
+      "profile": "photographic-faithful-bright-exterior",
+      "denoising_strength": 0.24,
+      "controlnet_weight": 1.02,
+      "original_blend_strength": 0.35,
+      "style_prompt": "Faithful high-resolution restoration of the original bright aerodrome exterior plate. Preserve the exact shed wall, glass hangar facade, wooden door, stencilled lettering location, balloon silhouette, ropes, crates, barrels, grass, path, sky brightness, and walkable geometry. Add realistic wood, glass, canvas, grass, and metal texture without darkening the daylight exposure or hiding objects.",
+      "warn_rms_delta": 18.0
+    },
+    "77": {
+      "profile": "photographic-faithful-bedroom-variant",
+      "denoising_strength": 0.24,
+      "controlnet_weight": 1.02,
+      "original_blend_strength": 0.35,
+      "style_prompt": "Faithful high-resolution restoration of the original bedroom background plate. Preserve the exact bed, dresser, globe, desk, lamp positions, window curtains, wallpaper, rug, scattered papers, doorways, floor boundaries, and walkable geometry. Add realistic fabric, wood, glass, brass, and paper texture without darkening the room exposure or changing furniture placement.",
+      "warn_rms_delta": 18.0
+    },
+    "92": {
+      "profile": "photographic-faithful-lab-table",
+      "denoising_strength": 0.24,
+      "controlnet_weight": 1.02,
+      "original_blend_strength": 0.35,
+      "style_prompt": "Faithful high-resolution restoration of the original laboratory table background plate. Preserve the exact wooden shelf, reagent bottles, glassware, microscope, burner tripod, books, saucer, tools, tubing, wall pattern, tabletop edges, object spacing, and bright tabletop exposure. Add realistic glass, liquid, paper, wood, brass, and ceramic texture without darkening the scene, hiding labels, or changing object positions.",
+      "warn_rms_delta": 18.0
+    }
+  }
+}

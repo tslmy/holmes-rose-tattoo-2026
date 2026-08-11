@@ -145,26 +145,77 @@ python3 tools/neural_redraw_rosetattoo_backgrounds.py \
 ```
 
 Compare calibration sheets under `validation/contact-sheets/` before committing
-to a full run. In early tests, conservative settings produced RMS deltas around
-`7-17`, which mostly looked like cleaned-up game art; stronger photographic
-settings pushed key scenes into roughly `20-25` and better matched the desired
-redraw direction.
+to a full run. RMS drift is only a tripwire, not a quality score: conservative
+settings around `7-17` may keep rooms recognizable, while stronger photographic
+settings can improve atmosphere or destroy object identity depending on the
+scene.
 
 The tracked balanced production profile lives at
 `profiles/neural/photographic-balanced.json`. It uses a middle setting rather
 than the most aggressive calibration: lower denoise, stronger ControlNet, and
 special tighter overrides for scenes with masks or heavy fog/water overlays.
 
+When the model invents or loses too much detail, switch to
+`profiles/neural/photographic-faithful.json` for calibration. That profile keeps
+ControlNet in balanced mode, lowers denoise, increases tile overlap, strengthens
+negative prompts against replaced props/architecture, and blends a small amount
+of the upscaled original back into the neural result. Avoid
+`controlnet_control_mode: "ControlNet is more important"` for now; on Forge/MPS
+it produced very dark outputs despite preserving silhouettes.
+
+For LLM-polished prompts, Ollama works well enough that LM Studio is not needed
+yet. Use a vision-capable model such as `qwen3.5:9b-mlx` through Ollama's
+`/api/generate` endpoint with thinking disabled; otherwise Qwen can spend the
+whole response budget on hidden reasoning and return little usable prompt text.
+The prompt-polisher treats the source image as authoritative, asks the model for
+a compact visual inventory, and writes ignored prompt sidecars under
+`generated/`:
+
+```sh
+python3 tools/polish_rosetattoo_prompts.py \
+  --provider ollama \
+  --ollama-url http://127.0.0.1:11434 \
+  --ollama-model qwen3.5:9b-mlx \
+  --ollama-api generate \
+  --manual-brief-dir profiles/neural/prompt-brief-overrides \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/prompt-briefs-ollama-qwen9-inventory-v4
+```
+
+Dense object inventories can still mislead Stable Diffusion on fragile scenes.
+Tracked sparse overrides live in `profiles/neural/prompt-brief-overrides/` and
+are copied verbatim into the generated cache. They are deliberately small:
+ControlNet and the source image should carry most composition detail, while the
+brief only pins a few puzzle-relevant scene facts.
+
+When launching Forge for this pipeline, make sure the ControlNet extension is
+enabled. The normal `--disable-extra-extensions` shortcut disables ControlNet,
+while loading every local extension can crash API initialization on unrelated
+plugins. This project includes a minimal Forge settings file that disables known
+broken extras while keeping ControlNet active:
+
+```sh
+cd ../stable-diffusion-webui-forge
+./webui.sh \
+  --api \
+  --listen \
+  --port 7861 \
+  --skip-version-check \
+  --no-gradio-queue \
+  --ui-settings-file /Users/lmy/Projects/shcrt/profiles/forge/controlnet-api.json
+```
+
 ```sh
 python3 tools/neural_redraw_rosetattoo_backgrounds.py \
-  --api-url http://127.0.0.1:7860 \
+  --api-url http://127.0.0.1:7861 \
   --wait \
-  --settings-file profiles/neural/photographic-balanced.json \
-  --scenes 2 18 36 \
+  --settings-file profiles/neural/photographic-faithful.json \
+  --prompt-brief-dir generated/prompt-briefs-ollama-qwen9-inventory-v4 \
+  --scenes 4 18 \
   --scale 2 \
-  --seed 91000 \
-  --output-dir generated/neural-redraws-balanced-calibration \
-  --scummvm-overrides mods/neural-hires-backgrounds-balanced-calibration
+  --seed 108000 \
+  --output-dir generated/neural-redraws-faithful-ollama-inventory-v4-calibration \
+  --scummvm-overrides mods/neural-hires-backgrounds-faithful-ollama-inventory-v4-calibration
 ```
 
 The neural redraw tool creates a 2x init image, an edge-control image, a

@@ -42,6 +42,9 @@ class RedrawResult:
     profile: str | None
     controlnet_weight: float
     controlnet_guidance_end: float
+    controlnet_control_mode: str
+    original_blend_strength: float
+    attempt_count: int
     tile_count: int
     skipped: bool
     drift_warning: bool
@@ -87,6 +90,8 @@ def apply_setting_values(args: argparse.Namespace, values: dict[str, Any]) -> No
         "controlnet_threshold_a": "controlnet_threshold_a",
         "controlnet_threshold_b": "controlnet_threshold_b",
         "controlnet_guidance_end": "controlnet_guidance_end",
+        "controlnet_control_mode": "controlnet_control_mode",
+        "original_blend_strength": "original_blend_strength",
         "tile_width": "tile_width",
         "tile_overlap": "tile_overlap",
         "warn_rms_delta": "warn_rms_delta",
@@ -131,6 +136,10 @@ def validate_generation_settings(args: argparse.Namespace) -> None:
         raise ValueError("--controlnet-weight must be between 0 and 2")
     if not 0 <= args.controlnet_guidance_end <= 1:
         raise ValueError("--controlnet-guidance-end must be between 0 and 1")
+    if not 0 <= args.original_blend_strength <= 1:
+        raise ValueError("--original-blend-strength must be between 0 and 1")
+    if args.retry_drift_attempts < 1:
+        raise ValueError("--retry-drift-attempts must be >= 1")
 
 
 def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[str, Any]:
@@ -145,10 +154,26 @@ def effective_settings_summary(scene_id: int, args: argparse.Namespace) -> dict[
         "controlnet_model": args.controlnet_model,
         "controlnet_weight": args.controlnet_weight,
         "controlnet_guidance_end": args.controlnet_guidance_end,
+        "controlnet_control_mode": args.controlnet_control_mode,
+        "controlnet_threshold_a": args.controlnet_threshold_a,
+        "controlnet_threshold_b": args.controlnet_threshold_b,
+        "original_blend_strength": args.original_blend_strength,
         "tile_width": args.tile_width,
         "tile_overlap": args.tile_overlap,
         "warn_rms_delta": args.warn_rms_delta,
     }
+
+
+def scene_dir_name(scene_id: int) -> str:
+    return f"scene_{scene_id:03d}"
+
+
+def find_scene_sidecar(root: Path, scene_id: int, name: str) -> Path | None:
+    for dirname in (f"scene_{scene_id:03d}", f"scene_{scene_id:02d}", f"scene_{scene_id}"):
+        path = root / dirname / name
+        if path.exists():
+            return path
+    return None
 
 
 def image_to_base64(img: Image.Image) -> str:
@@ -226,6 +251,21 @@ def make_realism_prompt(scene_prompt: str, scene_name: str, style_prompt: str) -
         ]
     )
     return "\n".join(parts)
+
+
+def load_scene_prompt_text(
+    scene_dir: Path,
+    scene_id: int,
+    prompt_brief_dir: Path | None,
+) -> tuple[str, Path]:
+    if prompt_brief_dir:
+        brief_path = find_scene_sidecar(prompt_brief_dir, scene_id, "visual_brief.txt")
+        if brief_path:
+            return brief_path.read_text(encoding="utf-8"), brief_path
+    prompt_path = scene_dir / "prompt.txt"
+    if not prompt_path.exists():
+        raise FileNotFoundError(prompt_path)
+    return prompt_path.read_text(encoding="utf-8"), prompt_path
 
 
 def make_edge_image(source: Image.Image, output_path: Path) -> None:
@@ -309,7 +349,7 @@ def automatic1111_img2img(
                         "threshold_b": args.controlnet_threshold_b,
                         "guidance_start": 0.0,
                         "guidance_end": args.controlnet_guidance_end,
-                        "control_mode": "Balanced",
+                        "control_mode": args.controlnet_control_mode,
                         "pixel_perfect": True,
                     }
                 ]
@@ -413,6 +453,43 @@ def redraw_image(
     return canvas, len(positions)
 
 
+def blend_with_original(output_image: Image.Image, init_image: Image.Image, strength: float) -> Image.Image:
+    if strength <= 0:
+        return output_image
+    if output_image.size != init_image.size:
+        init_image = init_image.resize(output_image.size, Image.Resampling.LANCZOS)
+    return Image.blend(output_image.convert("RGB"), init_image.convert("RGB"), strength)
+
+
+def generate_candidate(
+    scene_args: argparse.Namespace,
+    init_image: Image.Image,
+    edge_path: Path,
+    prompt: str,
+    seed: int,
+    scene_output_dir: Path,
+    expected_size: tuple[int, int],
+) -> tuple[Image.Image, int, float, bool]:
+    output_image, tile_count = redraw_image(
+        scene_args,
+        init_image,
+        edge_path,
+        prompt,
+        seed,
+        scene_output_dir,
+    )
+    if output_image.size != expected_size:
+        output_image = output_image.resize(expected_size, Image.Resampling.LANCZOS)
+    output_image = blend_with_original(
+        output_image,
+        init_image,
+        scene_args.original_blend_strength,
+    )
+    blank = is_blank(output_image)
+    delta = rms_delta(output_image, init_image)
+    return output_image, tile_count, delta, blank
+
+
 def copy_sidecars(scene_dir: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("prompt.txt", "metadata.json"):
@@ -426,13 +503,10 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
     scene_id = int(scene_dir.name.split("_", 1)[1])
     scene_name = metadata.get("scene_name", f"Scene {scene_id:02d}")
     input_path = scene_dir / "background.png"
-    prompt_path = scene_dir / "prompt.txt"
     if not input_path.exists():
         raise FileNotFoundError(input_path)
-    if not prompt_path.exists():
-        raise FileNotFoundError(prompt_path)
 
-    scene_output_dir = args.output_dir / f"scene_{scene_id:03d}"
+    scene_output_dir = args.output_dir / scene_dir_name(scene_id)
     init_path = scene_output_dir / "control" / f"init@{args.scale}x.png"
     edge_path = scene_output_dir / "control" / f"edges@{args.scale}x.png"
     output_path = scene_output_dir / f"background@{args.scale}x.png"
@@ -446,13 +520,21 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
         expected_size = init_image.size
         input_size = source.size
 
-    prompt = make_realism_prompt(
-        prompt_path.read_text(encoding="utf-8"),
-        scene_name,
-        scene_args.style_prompt,
+    scene_prompt_text, scene_prompt_source = load_scene_prompt_text(
+        scene_dir,
+        scene_id,
+        args.prompt_brief_dir,
     )
+    prompt = make_realism_prompt(scene_prompt_text, scene_name, scene_args.style_prompt)
     scene_output_dir.mkdir(parents=True, exist_ok=True)
     prompt_output_path.write_text(prompt + "\n", encoding="utf-8")
+    if args.prompt_brief_dir:
+        brief_copy = scene_output_dir / "visual_brief.txt"
+        brief_copy.write_text(scene_prompt_text.strip() + "\n", encoding="utf-8")
+        (scene_output_dir / "visual_brief_source.txt").write_text(
+            str(scene_prompt_source) + "\n",
+            encoding="utf-8",
+        )
     copy_sidecars(scene_dir, scene_output_dir)
 
     if args.skip_existing and output_path.exists():
@@ -464,53 +546,78 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
             raise ValueError(f"{output_path} is {output_size}, expected {expected_size}")
         if blank:
             raise ValueError(f"{output_path} appears blank")
-        override_path = copy_to_override(args, scene_dir, scene_id, output_path, prompt_output_path)
-        return RedrawResult(
-            scene_id=scene_id,
-            scene_name=scene_name,
-            input=str(input_path),
-            init_image=str(init_path),
-            edge_image=str(edge_path),
-            prompt=str(prompt_output_path),
-            output=str(output_path),
-            scummvm_override=str(override_path) if override_path else None,
-            scale=args.scale,
-            seed=seed,
-            denoising_strength=scene_args.denoising_strength,
-            steps=scene_args.steps,
-            cfg_scale=scene_args.cfg_scale,
-            checkpoint=scene_args.checkpoint,
-            profile=scene_args.profile,
-            controlnet_weight=scene_args.controlnet_weight,
-            controlnet_guidance_end=scene_args.controlnet_guidance_end,
-            tile_count=len(tile_positions(expected_size[0], scene_args.tile_width, scene_args.tile_overlap)),
-            skipped=True,
-            drift_warning=delta > scene_args.warn_rms_delta,
-            input_size=input_size,
-            output_size=output_size,
-            expected_size=expected_size,
-            blank=blank,
-            rms_delta_from_init=round(delta, 3),
-        )
+        if args.retry_existing_drift and delta > scene_args.warn_rms_delta:
+            print(
+                f"scene {scene_id:03d}: regenerating existing drift "
+                f"delta={round(delta, 3)} threshold={scene_args.warn_rms_delta}"
+            )
+        else:
+            override_path = copy_to_override(args, scene_dir, scene_id, output_path, prompt_output_path)
+            result = RedrawResult(
+                scene_id=scene_id,
+                scene_name=scene_name,
+                input=str(input_path),
+                init_image=str(init_path),
+                edge_image=str(edge_path),
+                prompt=str(prompt_output_path),
+                output=str(output_path),
+                scummvm_override=str(override_path) if override_path else None,
+                scale=args.scale,
+                seed=seed,
+                denoising_strength=scene_args.denoising_strength,
+                steps=scene_args.steps,
+                cfg_scale=scene_args.cfg_scale,
+                checkpoint=scene_args.checkpoint,
+                profile=scene_args.profile,
+                controlnet_weight=scene_args.controlnet_weight,
+                controlnet_guidance_end=scene_args.controlnet_guidance_end,
+                controlnet_control_mode=scene_args.controlnet_control_mode,
+                original_blend_strength=scene_args.original_blend_strength,
+                attempt_count=0,
+                tile_count=len(tile_positions(expected_size[0], scene_args.tile_width, scene_args.tile_overlap)),
+                skipped=True,
+                drift_warning=delta > scene_args.warn_rms_delta,
+                input_size=input_size,
+                output_size=output_size,
+                expected_size=expected_size,
+                blank=blank,
+                rms_delta_from_init=round(delta, 3),
+            )
+            result_path.write_text(
+                json.dumps(asdict(result), indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            return result
 
     if args.backend != "automatic1111":
         raise ValueError(f"Unsupported backend: {args.backend}")
-    output_image, tile_count = redraw_image(
-        scene_args,
-        init_image,
-        edge_path,
-        prompt,
-        seed,
-        scene_output_dir,
-    )
-    if output_image.size != expected_size:
-        output_image = output_image.resize(expected_size, Image.Resampling.LANCZOS)
+
+    best: tuple[Image.Image, int, float, bool, int, int] | None = None
+    attempt_dir = scene_output_dir / "attempts"
+    for attempt_index in range(args.retry_drift_attempts):
+        attempt_seed = seed + (attempt_index * args.retry_seed_step) if seed >= 0 else -1
+        output_image, tile_count, delta, blank = generate_candidate(
+            scene_args,
+            init_image,
+            edge_path,
+            prompt,
+            attempt_seed,
+            scene_output_dir,
+            expected_size,
+        )
+        if best is None or (not blank, -delta) > (not best[3], -best[2]):
+            best = (output_image, tile_count, delta, blank, attempt_seed, attempt_index + 1)
+        if not blank and delta <= scene_args.warn_rms_delta:
+            break
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        output_image.save(attempt_dir / f"attempt_{attempt_index + 1:02d}_seed_{attempt_seed}.png")
+
+    assert best is not None
+    output_image, tile_count, delta, blank, seed, attempt_count = best
     output_image.save(output_path)
 
-    blank = is_blank(output_image)
     if blank:
         raise ValueError(f"{output_path} appears blank")
-    delta = rms_delta(output_image, init_image)
 
     override_path = copy_to_override(args, scene_dir, scene_id, output_path, prompt_output_path)
     result = RedrawResult(
@@ -531,6 +638,9 @@ def process_scene(scene_dir: Path, args: argparse.Namespace, scene_args: argpars
         profile=scene_args.profile,
         controlnet_weight=scene_args.controlnet_weight,
         controlnet_guidance_end=scene_args.controlnet_guidance_end,
+        controlnet_control_mode=scene_args.controlnet_control_mode,
+        original_blend_strength=scene_args.original_blend_strength,
+        attempt_count=attempt_count,
         tile_count=tile_count,
         skipped=False,
         drift_warning=delta > scene_args.warn_rms_delta,
@@ -562,6 +672,9 @@ def copy_to_override(
     shutil.copy2(output_path, override_path)
     copy_sidecars(scene_dir, override_dir)
     shutil.copy2(prompt_output_path, override_dir / "neural_prompt.txt")
+    visual_brief_path = prompt_output_path.parent / "visual_brief.txt"
+    if visual_brief_path.exists():
+        shutil.copy2(visual_brief_path, override_dir / "visual_brief.txt")
     return override_path
 
 
@@ -600,6 +713,11 @@ def main() -> None:
             "JSON file with defaults and per-scene overrides for production "
             "photographic redraw passes."
         ),
+    )
+    parser.add_argument(
+        "--prompt-brief-dir",
+        type=Path,
+        help="Optional directory of cached scene_XXX/visual_brief.txt prompt briefs.",
     )
     parser.add_argument(
         "--print-effective-settings",
@@ -658,6 +776,20 @@ def main() -> None:
     parser.add_argument("--controlnet-threshold-a", type=float, default=100)
     parser.add_argument("--controlnet-threshold-b", type=float, default=200)
     parser.add_argument("--controlnet-guidance-end", type=float, default=0.75)
+    parser.add_argument("--controlnet-control-mode", default="Balanced")
+    parser.add_argument("--original-blend-strength", type=float, default=0.0)
+    parser.add_argument(
+        "--retry-drift-attempts",
+        type=int,
+        default=1,
+        help="Number of alternate seeds to try when a generated image exceeds its drift threshold.",
+    )
+    parser.add_argument("--retry-seed-step", type=int, default=1000)
+    parser.add_argument(
+        "--retry-existing-drift",
+        action="store_true",
+        help="Regenerate existing --skip-existing outputs that exceed their drift threshold.",
+    )
     args = parser.parse_args()
 
     validate_generation_settings(args)
