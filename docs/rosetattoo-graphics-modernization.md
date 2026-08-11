@@ -141,3 +141,57 @@ on screen.
 The extractor currently targets the highest-value first pass: base room
 backgrounds and prompt text. It does not yet export foreground object sprites,
 character walk cycles, cutscene animation frames, masks, or rebuilt room files.
+
+## Framerate Interpolation Feasibility
+
+Investigated whether animated sprites (character walk cycles, cursor wait
+animation, hotspot object animations) could be interpolated to a higher
+framerate alongside the visual upscale. Findings from reading the engine
+source (`events.cpp`, `objects.cpp`, `people.cpp`, `sherlock.cpp`):
+
+- The whole game logic loop (`SherlockEngine::sceneLoop()` in `sherlock.cpp`)
+  runs on a single fixed tick, gated by `Events::checkForNextFrameCounter()`.
+  The tick rate is `GAME_FRAME_RATE` (30 in `events.h`), and is already
+  user-toggleable to 2x (`Events::toggleSpeed()`) - so the engine has no
+  inherent floor below 30fps, but nothing above 60fps either without further
+  changes.
+- Sprite/animation advance is **not** "always show the next frame every
+  tick" - it is driven by a per-object bytecode-like `_sequences` array
+  (`objects.cpp`), which encodes frame indices interleaved with explicit
+  timing/pause commands, position deltas, sound triggers, and
+  show/hide toggles. Frame *indices* referenced by this bytecode are the
+  same indices baked into `.VGS` resources, hotspot bounding logic, and
+  save-game state - they are not purely cosmetic.
+- This means genuine motion interpolation (inserting new "in-between" sprite
+  images, e.g. via optical flow tools like RIFE/FILM) would require either
+  (a) doubling every `_sequences` bytecode program to reference new
+  interpolated frame indices - risky, since these are hand-authored per
+  animation and would need to be mechanically rewritten per resource without
+  breaking embedded pause/sound/position commands - or (b) decoupling
+  *rendering* rate from *logic* rate: keep the 30fps logic tick (so hotspot
+  state, sound cues, and walk-path decisions are unchanged) but render an
+  extra blended frame between every real logic tick for perceived smoothness.
+
+### Recommended approach (not yet implemented)
+
+Given the size of a full interpolation pipeline, the pragmatic path is (b):
+a purely presentational cross-fade, not true motion interpolation:
+
+1. Keep the 30fps logic tick untouched (no `_sequences`/hotspot/save changes).
+2. In the render path only, when between two logic ticks, alpha-blend the
+   previously-drawn sprite frame and the next upcoming one (weighted by how
+   far the renderer is between the two logic ticks) to produce one extra
+   visual frame at 60fps output.
+3. This needs no offline art generation and no changes to game data/saves,
+   but only smooths animations that hold a frame for multiple render frames
+   (i.e. anywhere the render loop already runs faster than the logic tick);
+   it will not add genuinely new in-between poses to a walk cycle.
+
+A higher-quality (but substantially larger) alternative would be an offline
+per-resource pass with a model such as RIFE or FILM to synthesize real
+in-between frames for each `.VGS` walk-cycle resource, then renumbering and
+re-injecting them into the `_sequences` bytecode for that resource -
+this was intentionally not attempted in this session given its scope (it
+touches game-logic-adjacent data, not just visuals, and each of the ~15+
+character/object animation resources would need individual verification
+that hotspot/interaction timing wasn't shifted).
