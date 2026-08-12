@@ -155,6 +155,7 @@ git apply ../patches/scummvm/rosetattoo-hires-journal-glitch-fix.patch
 git apply ../patches/scummvm/rosetattoo-hires-character-object-sprites.patch
 git apply ../patches/scummvm/rosetattoo-hires-map-sprite-purge-fix.patch
 git apply ../patches/scummvm/rosetattoo-hires-scene-sprite-occlusion-fix.patch
+git apply ../patches/scummvm/rosetattoo-hires-map-tooltip-scroll-fix.patch
 ./configure --enable-freetype2
 make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 cd ..
