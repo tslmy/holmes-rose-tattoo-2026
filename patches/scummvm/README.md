@@ -26,6 +26,7 @@ this order to avoid conflicts.
 | `rosetattoo-hires-tooltip-text-fix.patch` | Follow-up to the above: fixes tooltip text lingering on screen after the mouse leaves a hotspot, and the hires background "blinking"/showing through moving character sprites near an open tooltip. Supersedes that patch's `widget_tooltip.cpp`/`.h` hunks. |
 | `rosetattoo-hires-map-icons.patch` | Fixes missing location icons on the overhead map in hires mode by baking AI-upscaled icons into the map's persistent hires world buffer via `Screen::paintRoseTattooHiresWorldSprite()`. |
 | `rosetattoo-hires-journal-glitch-fix.patch` | Follow-up to the TTF/tooltip patches above: fixes Watson's Journal-specific color-noise (palette read into the wrong buffer) and doubled/ghosted text (missing background-empty guard) bugs. |
+| `rosetattoo-hires-character-object-sprites.patch` | Extends the AI-upscaled sprite-override system (previously only used for inventory item icons) to the live scene's walking characters and bg-shape objects, via a new `Screen::queueRoseTattooHiresSceneSprite()`/`_roseTattooHiresSceneSpriteLayer` wired into `TattooScene::drawAllShapes()`. Depends on `rosetattoo-hires-cursor-ai-override.patch`. |
 
 ## Writing a new patch
 
