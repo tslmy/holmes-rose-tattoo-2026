@@ -9,14 +9,14 @@
 !/docs/**
 !/tools/
 !/tools/**
-!/patches/
-!/patches/**
 !/profiles/
 !/profiles/**
 !/thor-package/
 !/thor-package/**
 !/pyproject.toml
 !/uv.lock
+!/.gitmodules
+!/scummvm-src
 
 # Common local/generated noise within allowed directories.
 .DS_Store
@@ -26,7 +26,6 @@ __pycache__/
 
 # These are intentionally left local even if the root allow-list changes later.
 /scummvm/
-/scummvm-src/
 /cd/
 /extracted/
 /enhanced/

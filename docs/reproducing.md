@@ -3,9 +3,9 @@
 End-to-end steps to independently reproduce this project's hires
 AI-upscaled ScummVM mod pack, from a stock game install to a playable
 patched ScummVM binary. See [`tools/README.md`](../tools/README.md) for
-detailed flag-by-flag documentation of each command below, and
-[`patches/scummvm/README.md`](../patches/scummvm/README.md) for what each
-engine patch does.
+detailed flag-by-flag documentation of each command below, and the root
+[README's ScummVM Strategy section](../README.md#scummvm-strategy) for how
+the patched engine is tracked as a Git submodule.
 
 ## Prerequisites
 
@@ -15,8 +15,8 @@ engine patch does.
   derived from them (see the root README's Safety section).
 - Python 3.10+, with [`uv`](https://github.com/astral-sh/uv) (recommended)
   or a plain venv with Pillow installed.
-- A ScummVM source checkout for building a patched engine (`git clone
-  https://github.com/scummvm/scummvm scummvm-src`).
+- The `scummvm-src/` Git submodule, initialized (`git submodule update
+  --init --recursive`), for building the patched engine.
 - A Stable Diffusion WebUI backend (AUTOMATIC1111 or Forge) with the
   ControlNet extension and the models described in
   [`docs/a1111-setup.md`](a1111-setup.md) — required for the neural
@@ -70,11 +70,11 @@ uv run python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse
 uv run python3 tools/upscale_rosetattoo_sprites.py --resources map_vgs mapicons_vgs --scale 2
 ```
 
-Also upscale the character/NPC walk-cycle sprites the
-`rosetattoo-hires-character-object-sprites.patch` engine patch (Step 4)
-looks for at runtime - both the player's own coat/hat states and the
-generic body-type sprite sheets Rose Tattoo reuses across many different
-one-off NPCs (see [`tools/README.md`](../tools/README.md#cursors-items-character-and-font-sprites)
+Also upscale the character/NPC walk-cycle sprites the ScummVM fork's
+character/object hires-sprite override support (Step 4) looks for at
+runtime - both the player's own coat/hat states and the generic body-type
+sprite sheets Rose Tattoo reuses across many different one-off NPCs (see
+[`tools/README.md`](../tools/README.md#cursors-items-character-and-font-sprites)
 for the full resource list and why extracting these generic sheets is
 higher-leverage than named characters):
 
@@ -110,63 +110,18 @@ cp -R enhanced/sprites/*_vgs mods/neural-hires-backgrounds-faithful/sprites/
 
 ## Step 4 — Build ScummVM
 
-Two equivalent ways to get a patched ScummVM checkout — pick one:
-
-**Option A: clone the pre-built fork branch (recommended, fastest)**
-
-All the patches below are already applied as commits on a branch of a
-personal fork:
+The patched engine lives at `scummvm-src/`, tracked as a Git submodule
+pointing at the `rosetattoo-hires-mod` branch of a personal fork
+(<https://github.com/tslmy/scummvm>) - see the root
+[README's ScummVM Strategy section](../README.md#scummvm-strategy) for why.
 
 ```sh
-git clone --branch rosetattoo-hires-mod https://github.com/tslmy/scummvm.git scummvm-src
+git submodule update --init --recursive
 cd scummvm-src
 ./configure --enable-freetype2
 make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 cd ..
 ```
-
-**Option B: apply patches onto a fresh upstream checkout**
-
-⚠️ Known gap: these patches were extracted retroactively from an
-accumulated working checkout across many sessions, and at least one
-foundational hires-mode change (the `_roseTattooHiresScale`/
-`_roseTattooHiresFormat` scaffolding and `Screen::setPalette()` override
-that later patches build on) was never captured as its own patch file.
-Applying this list onto a *pristine* upstream checkout is known to fail
-partway through (around `rosetattoo-hires-cursor-fix.patch`) as a result.
-Use Option A until that gap is backfilled with an initial
-`rosetattoo-hires-scale-scaffolding.patch`-style patch; the list below is
-kept for reference/review of each individual change.
-
-```sh
-git clone https://github.com/scummvm/scummvm.git scummvm-src
-cd scummvm-src
-git apply ../patches/scummvm/rosetattoo-start-scene-env.patch
-git apply ../patches/scummvm/rosetattoo-fix-vertical-walk-delta-x.patch
-git apply ../patches/scummvm/rosetattoo-hires-mouse-scale.patch
-git apply ../patches/scummvm/rosetattoo-hires-cursor-fix.patch
-git apply ../patches/scummvm/rosetattoo-hires-cursor-ai-override.patch
-git apply ../patches/scummvm/rosetattoo-hires-map-black-screen-fix.patch
-git apply ../patches/scummvm/rosetattoo-hires-map-upscale-override.patch
-git apply ../patches/scummvm/rosetattoo-hires-font-ttf-override.patch
-git apply ../patches/scummvm/rosetattoo-hires-tooltip-text-fix.patch
-git apply ../patches/scummvm/rosetattoo-hires-map-icons.patch
-git apply ../patches/scummvm/rosetattoo-hires-journal-glitch-fix.patch
-git apply ../patches/scummvm/rosetattoo-hires-character-object-sprites.patch
-git apply ../patches/scummvm/rosetattoo-hires-map-sprite-purge-fix.patch
-git apply ../patches/scummvm/rosetattoo-hires-scene-sprite-occlusion-fix.patch
-git apply ../patches/scummvm/rosetattoo-hires-map-tooltip-scroll-fix.patch
-./configure --enable-freetype2
-make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
-cd ..
-```
-
-Apply patches in the listed order — several are explicit follow-ups that
-touch the same files as an earlier patch (see
-[`patches/scummvm/README.md`](../patches/scummvm/README.md) for the full
-dependency notes). The patch files are the per-feature,
-individually-reviewable record of the same work; Option A's fork branch is
-just those same changes already applied and known to build.
 
 `--enable-freetype2` is required for the hires TrueType tooltip-text
 feature either way; `configure` will otherwise silently compile without it

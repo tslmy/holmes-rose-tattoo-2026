@@ -225,10 +225,9 @@ and every inventory/interactive item icon (`ITEM01.VGS`-`ITEM84.VGS`).
 stills, not sprites) are not yet extracted at all.
 
 An engine-side runtime override is wired up for the room cursor set
-(`patches/scummvm/rosetattoo-hires-cursor-ai-override.patch`), the overhead
-map background (see below), and - via
-`patches/scummvm/rosetattoo-hires-character-object-sprites.patch` - the live
-scene's walking characters and bg-shape objects (`Screen::queueRoseTattooHiresSceneSprite()`,
+(`Screen::loadRoseTattooHiresCursorOverride()` in the ScummVM fork), the
+overhead map background (see below), and the live scene's walking
+characters and bg-shape objects (`Screen::queueRoseTattooHiresSceneSprite()`,
 wired into `TattooScene::drawAllShapes()`). Item/inventory icon overrides are
 wired up in `widget_inventory.cpp`. Any character/bg-shape whose current
 resource+frame has no matching override PNG on disk (e.g. one of the
@@ -254,8 +253,9 @@ alpha. `--mode font` does a fast, local, no-API Lanczos resize of just the
 alpha channel, producing clean anti-aliased glyph edges instead of a blurry
 photographic upscale. This is a tooling-only deliverable for the *bitmap*
 glyphs; the engine's in-game tooltip/UI text instead uses a real vector font
-at runtime (see `patches/scummvm/rosetattoo-hires-font-ttf-override.patch`
-and its README entry in [`patches/scummvm/README.md`](../patches/scummvm/README.md)).
+at runtime (see `Screen::getRoseTattooHiresFont()` in the ScummVM fork's
+`screen.cpp`, tracked as a Git submodule at `scummvm-src/` - see the root
+[README's ScummVM Strategy section](../README.md#scummvm-strategy)).
 
 ### Overhead/travel map (`MAP.VGS`)
 
@@ -278,8 +278,8 @@ The engine looks for the result at `sprites/map_vgs/frame_000@<scale>x.png`
 under `$SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES`, so copying
 `enhanced/sprites/map_vgs/` into the production mod's `sprites/` directory is
 enough to pick it up. Location-pin icons (`MAPICONS.VGS`) are also baked into
-the map's hires background via
-`patches/scummvm/rosetattoo-hires-map-icons.patch`.
+the map's hires background via `Screen::paintRoseTattooHiresWorldSprite()`
+in the ScummVM fork.
 
 ## Validation and playtesting
 
@@ -293,11 +293,11 @@ On macOS the helper auto-detects
 `/Applications/ScummVM.app/Contents/MacOS/scummvm` when ScummVM is installed
 as an app bundle.
 
-For deterministic scene validation, apply the local ScummVM patch and launch
-a patched binary with `--start-scene`:
+For deterministic scene validation, launch a patched binary (built from the
+`scummvm-src/` submodule, which already includes the
+`SCUMMVM_SHERLOCK_TATTOO_START_SCENE` debug hook) with `--start-scene`:
 
 ```sh
-git apply patches/scummvm/rosetattoo-start-scene-env.patch
 python3 tools/run_rosetattoo_validation.py \
   --scummvm scummvm-src/scummvm \
   --start-scene 36 \

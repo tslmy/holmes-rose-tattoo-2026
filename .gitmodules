@@ -1,0 +1,4 @@
+[submodule "scummvm-src"]
+	path = scummvm-src
+	url = https://github.com/tslmy/scummvm.git
+	branch = rosetattoo-hires-mod

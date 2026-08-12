@@ -9,7 +9,7 @@ This repository is a tooling workspace for modernizing and validating graphics f
 3. builds ScummVM-ready override packs, and
 4. runs validation captures against a local ScummVM build.
 
-Treat `scummvm-src/`, `scummvm/`, `extracted/`, `enhanced/`, `generated/`, `mods/`, and `validation/` as workspace/output areas rather than source-of-truth code.
+Treat `scummvm/`, `extracted/`, `enhanced/`, `generated/`, `mods/`, and `validation/` as workspace/output areas rather than source-of-truth code. `scummvm-src/` is a Git submodule (a personal ScummVM fork, `rosetattoo-hires-mod` branch) - it *is* tracked (as a submodule pointer), unlike the other directories listed here.
 
 ## Commands
 
@@ -81,4 +81,4 @@ There is no project-wide package manager or build system checked in here; use th
 - Validation tooling assumes ScummVM scene jumping and capture flows on macOS, with `window` capture as the default and `screen` capture only when needed.
 - High-resolution validation and override generation use the local patch conventions exposed as `SCUMMVM_SHERLOCK_TATTOO_*` environment variables.
 - When adjusting enhancement logic, preserve the output/report shapes written by the existing scripts so downstream validation and manifests continue to work.
-- The repo’s ScummVM strategy is to keep the engine external and store only repeatable patches/scripts here unless that changes the workflow.
+- The repo's ScummVM strategy is to track a personal fork as a Git submodule at `scummvm-src/` (branch `rosetattoo-hires-mod`), rather than a pile of hand-maintained `.patch` files, so engine changes get normal Git history.
