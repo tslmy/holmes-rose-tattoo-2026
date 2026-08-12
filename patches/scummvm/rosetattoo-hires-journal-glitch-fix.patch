@@ -1,0 +1,225 @@
+Fix two Rose Tattoo hires-mode bugs specific to Watson's Journal
+(TattooJournal): scrambled/staticky colors covering the whole journal, and
+(once that was fixed) doubled/ghosted text - crisp text drawn on top of,
+rather than instead of, the blocky native bitmap glyphs.
+
+This is a follow-up to rosetattoo-hires-font-ttf-override.patch and
+rosetattoo-hires-tooltip-text-fix.patch (which introduced the hires TTF
+text overlay and its clear/erase helpers) - the screen.cpp/.h hunks below
+add one new helper (clearRoseTattooHiresTextLayer()) and one new guard
+clause to queueRoseTattooHiresText() that didn't exist in those patches.
+
+Root cause 1 - color noise/static: unlike TattooMap::show() (which reads
+its palette directly into screen._cMap), TattooJournal::show() read the
+journal's palette into a *local* byte palette[] array and never updated
+screen._cMap. _cMap is what the hires compositor's nearest-neighbor
+fallback path (Screen::update()) uses to convert native palette-index
+pixels to RGB - with _cMap still holding the previous room's palette while
+on-screen pixel indices referred to the journal's own distinct palette,
+every hires frame looked up journal pixel indices in the wrong (room)
+palette, producing scrambled colors over the whole journal. Fixed by
+reading the palette directly into screen._cMap (mirroring
+tattoo_map.cpp's convention) and calling screen.setPalette(screen._cMap)
+instead of setPalette(palette).
+
+Root cause 2 - doubled/ghosted text: Fonts::writeString() unconditionally
+queues hires TTF text via queueRoseTattooHiresText() whenever hires mode is
+active, and blendRoseTattooHiresTextLayer() can only mask away the
+composite's blocky nearest-neighbor-upscaled bitmap glyphs by repainting
+from _roseTattooHiresBackground first - but the journal deliberately
+clears that background (it draws its own paper/text UI directly into
+_backBuffer1 and has no hires background override of its own), so the
+masking step was a no-op, leaving both the blocky upscaled bitmap text AND
+the crisp TTF text visible simultaneously. Fixed by skipping
+queueRoseTattooHiresText() entirely when no hires background is loaded -
+a general fix applicable to any future full-screen overlay with the same
+characteristics (draws its own bitmap UI, has no hires background), not
+just the journal.
+
+Also clears both persistent hires overlay layers (text and sprite) at the
+start of TattooJournal::show(), since - being a full-screen overlay drawn
+outside the normal room-widget lifecycle - any glyphs/sprites still queued
+from whatever was on screen just before the journal opened (tooltips,
+inventory icons, etc.) would otherwise keep being alpha-blended on top of
+the journal every frame. This needed a new Screen::clearRoseTattooHiresTextLayer()
+method (full-wipe), mirroring the existing clearRoseTattooHiresSpriteLayer().
+
+Debugging note: an MD5 comparison of before/after screenshots proved the
+text/sprite-layer clearing alone had zero effect on the reported glitches,
+ruling that hypothesis out and redirecting the investigation to the actual
+_cMap root cause above.
+
+--- a/engines/sherlock/tattoo/tattoo_journal.cpp
++++ b/engines/sherlock/tattoo/tattoo_journal.cpp
+@@ -50,25 +50,72 @@ void TattooJournal::show() {
+ 	Resources &res = *_vm->_res;
+ 	Screen &screen = *_vm->_screen;
+ 	TattooUserInterface &ui = *(TattooUserInterface *)_vm->_ui;
+-	byte palette[Graphics::PALETTE_SIZE];
+ 
+ 	Common::Point oldScroll = screen._currentScroll;
+ 	screen._currentScroll = Common::Point(0, 0);
+ 
++	// The journal draws its own paper/text UI directly into _backBuffer1,
++	// completely replacing the current room's content, but it doesn't load
++	// (or need) its own hires background override the way rooms/the map
++	// do. If we don't clear the room's leftover hires background/composite
++	// buffers here, Screen::update()'s hires compositor keeps sampling the
++	// room's smooth background underneath the journal - and since the
++	// journal's paper texture and text can coincidentally match the room
++	// background's raw pixel values here and there (the per-pixel diff
++	// against _backBuffer2 that decides what to overlay isn't aware the
++	// screen no longer shows the room at all), stray patches of the room
++	// scenery bleed through the journal UI as visual noise/glitches. Clear
++	// it so update() instead does a clean full nearest-neighbor upscale of
++	// the actual journal framebuffer, with nothing left to bleed through;
++	// reload the room's own override again below once the journal closes.
++	//
++	// The persistent hires TTF text and sprite override layers (see their
++	// declarations in screen.h) are likewise NOT auto-cleared every frame -
++	// each widget that queues into them is responsible for erasing its own
++	// area when it changes. The journal doesn't use either layer itself,
++	// but since it's a full-screen overlay drawn independently of the
++	// normal room-widget lifecycle, any glyphs/sprites still queued from
++	// whatever was on screen just before the journal opened (tooltips,
++	// inventory icons, etc.) would otherwise keep being alpha-blended on
++	// top of the journal every frame - producing exactly the kind of
++	// flickering color-noise/ghosted-text glitches previously reported.
++	// Wipe both layers wholesale here since the journal has no use for
++	// them, and let whatever reopens afterwards re-queue its own content.
++	const int hiresScale = screen.roseTattooHiresScale();
++	if (hiresScale > 1) {
++		screen.clearRoseTattooHiresBackground();
++#ifdef USE_FREETYPE2
++		screen.clearRoseTattooHiresTextLayer();
++#endif
++		screen.clearRoseTattooHiresSpriteLayer();
++	}
++
+ 	// Load journal images
+ 	_journalImages = new ImageFile("journal.vgs");
+ 
+-	// Load palette
++	// Load palette. This is read directly into screen._cMap (mirroring
++	// TattooMap::show()'s convention for the same reason) rather than a
++	// local buffer: _cMap is what the Rose Tattoo hires compositor's
++	// nearest-neighbor fallback path (see Screen::update()) uses to convert
++	// native palette-index pixels to RGB when producing the hires
++	// composite. Loading the journal's own distinct palette into a
++	// local-only buffer left _cMap holding the previous room's palette
++	// while the on-screen pixel indices now referred to the journal's own
++	// palette entries - each hires frame then looked up journal pixel
++	// indices in the wrong (room) palette, producing scrambled/staticky
++	// colors over the whole journal. The next room reload after closing
++	// the journal naturally reloads its own palette into _cMap the normal
++	// way (Scene::loadScene()), just like it does after closing the map.
+ 	Common::SeekableReadStream *stream = res.load("journal.pal");
+-	stream->read(palette, Graphics::PALETTE_SIZE);
+-	ui.setupBGArea(palette);
+-	screen.translatePalette(palette);
++	stream->read(screen._cMap, Graphics::PALETTE_SIZE);
++	ui.setupBGArea(screen._cMap);
++	screen.translatePalette(screen._cMap);
+ 	delete stream;
+ 
+ 	// Set screen to black, and set background
+ 	screen._backBuffer1.SHblitFrom((*_journalImages)[0], Common::Point(0, 0));
+ 	screen.clear();
+-	screen.setPalette(palette);
++	screen.setPalette(screen._cMap);
+ 
+ 	ui._invLookFlag = 0;
+ 	ui._menuMode = TALK_MODE;
+
+--- a/engines/sherlock/screen.h
++++ b/engines/sherlock/screen.h
+@@
+ 	void clearRoseTattooHiresSpriteLayer();
+ 
+ #ifdef USE_FREETYPE2
+ 	/**
+ 	 * Queues a string to be rendered with a real (anti-aliased, properly
+ 	 * hinted) TrueType font into the hires composite, instead of the
+ 	 * blocky nearest-neighbor upscale that the native bitmap font glyphs
+ 	 * (drawn by Fonts::writeString() into _backBuffer1/2 at native
+ 	 * resolution) would otherwise get in Screen::update(). Called from
+ 	 * Fonts::writeString() once per call (i.e. once per drawn string, not
+ 	 * per character), so multi-line/wrapped text results in several calls.
+ 	 *
+ 	 * nativePt/fontHeightPx are in native (unscaled) Rose Tattoo
+ 	 * coordinates/pixels, matching what Fonts::writeString() already
+ 	 * receives - this method takes care of multiplying by
+ 	 * _roseTattooHiresScale itself. rgbColor is a true 0xRRGGBB color
+ 	 * (already resolved from the game's palette by the caller).
+ 	 *
+-	 * No-ops (does nothing) if hires mode isn't active or no hires font
+-	 * override is configured/loadable - callers don't need to guard first.
++	 * No-ops (does nothing) if hires mode isn't active, no hires font
++	 * override is configured/loadable, or no hires background is loaded
++	 * (e.g. Watson's Journal, which replaces the whole screen with its own
++	 * bitmap-drawn UI and deliberately clears the hires background) -
++	 * callers don't need to guard first. See queueRoseTattooHiresText()'s
++	 * definition for why the missing-background case matters.
+ 	 */
+ 	void queueRoseTattooHiresText(const Common::String &str, const Common::Point &nativePt,
+ 		uint32 rgbColor, int fontHeightPx);
+@@
+ 	void clearRoseTattooHiresTextRect(const Common::Rect &nativeRect);
+ 
++	/**
++	 * Clears the entire hires text layer at once - for full-screen
++	 * overlays (like Watson's Journal) that replace the whole native
++	 * framebuffer with their own content and don't use hires TTF text
++	 * themselves: any crisp text glyphs queued by widgets from before the
++	 * overlay opened would otherwise keep being blended on top every
++	 * frame, since the layer is only ever cleared rect-by-rect by the
++	 * widget that owns it (see _roseTattooHiresTextLayer's comment).
++	 */
++	void clearRoseTattooHiresTextLayer();
++
+ 	/**
+ 	 * Registers @p nativeRect (screen-absolute, native/unscaled - i.e. a
+
+--- a/engines/sherlock/screen.cpp
++++ b/engines/sherlock/screen.cpp
+@@
+ void Screen::queueRoseTattooHiresText(const Common::String &str, const Common::Point &nativePt,
+ 		uint32 rgbColor, int fontHeightPx) {
+ 	// True-color anti-aliased glyphs can't be represented well once
+ 	// quantized down to an 8-bit CLUT8 composite (the whole point is smooth
+ 	// alpha-blended edges) - only bother in the true-color hires modes,
+-	// same restriction the cursor override already applies.
+-	if (_roseTattooHiresScale <= 1 || _roseTattooHiresFormat.isCLUT8() || str.empty())
++	// same restriction the cursor override already applies. Also skip
++	// entirely when no hires background is loaded (e.g. Watson's Journal,
++	// which replaces the whole screen with its own bitmap-drawn UI and
++	// deliberately clears the hires background - see TattooJournal::show()):
++	// blendRoseTattooHiresTextLayer() can only mask away the composite's
++	// blocky nearest-neighbor-upscaled bitmap glyphs by repainting from the
++	// smooth hires background first, so without one, the crisp TTF text
++	// would just be blended on top of - not instead of - the native bitmap
++	// glyphs, producing a doubled/ghosted look.
++	if (_roseTattooHiresScale <= 1 || _roseTattooHiresFormat.isCLUT8() || str.empty() ||
++			_roseTattooHiresBackground.empty())
+ 		return;
+ 
+ 	// Slightly undersize the requested TTF point size relative to the
+@@
+ void Screen::clearRoseTattooHiresTextRect(const Common::Rect &nativeRect) {
+ 	if (_roseTattooHiresTextLayer.empty())
+ 		return;
+ 
+ 	const int scale = _roseTattooHiresScale;
+ 	Common::Rect r(nativeRect.left * scale, nativeRect.top * scale,
+ 		nativeRect.right * scale, nativeRect.bottom * scale);
+ 	r.clip(Common::Rect(0, 0, _roseTattooHiresTextLayer.w, _roseTattooHiresTextLayer.h));
+ 	if (!r.isEmpty())
+ 		_roseTattooHiresTextLayer.fillRect(r, 0);
+ }
++
++void Screen::clearRoseTattooHiresTextLayer() {
++	if (!_roseTattooHiresTextLayer.empty())
++		_roseTattooHiresTextLayer.fillRect(Common::Rect(0, 0, _roseTattooHiresTextLayer.w,
++			_roseTattooHiresTextLayer.h), 0);
++}
+ #endif
