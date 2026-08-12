@@ -1,17 +1,22 @@
 # ScummVM patches
 
-Repeatable engine-side patches against a ScummVM checkout (kept as patches
-rather than a fork/submodule — see the root
-[README's ScummVM Strategy section](../../README.md#scummvm-strategy)).
-Apply with `git apply patches/scummvm/<name>.patch` from inside a
-`scummvm-src/` checkout, or see
-[`docs/reproducing.md`](../../docs/reproducing.md) for the full recommended
-apply order.
+Repeatable engine-side patches against a ScummVM checkout. Apply with
+`git apply patches/scummvm/<name>.patch` from inside a `scummvm-src/`
+checkout, or see [`docs/reproducing.md`](../../docs/reproducing.md) for the
+full recommended apply order.
+
+These same changes are also available as real commits on the
+`rosetattoo-hires-mod` branch of <https://github.com/tslmy/scummvm> (a
+personal ScummVM fork) — see the root
+[README's ScummVM Strategy section](../../README.md#scummvm-strategy) for
+why a submodule hasn't been adopted yet and how to clone that branch
+directly instead of applying patches one by one.
 
 Patches are listed roughly in the order they build on each other. Several
 later patches are explicit follow-ups/supersessions of earlier ones (noted
 below and cross-referenced inside the patch files themselves) — apply in
 this order to avoid conflicts.
+
 
 | Patch | What it does |
 | --- | --- |
@@ -27,6 +32,8 @@ this order to avoid conflicts.
 | `rosetattoo-hires-map-icons.patch` | Fixes missing location icons on the overhead map in hires mode by baking AI-upscaled icons into the map's persistent hires world buffer via `Screen::paintRoseTattooHiresWorldSprite()`. |
 | `rosetattoo-hires-journal-glitch-fix.patch` | Follow-up to the TTF/tooltip patches above: fixes Watson's Journal-specific color-noise (palette read into the wrong buffer) and doubled/ghosted text (missing background-empty guard) bugs. |
 | `rosetattoo-hires-character-object-sprites.patch` | Extends the AI-upscaled sprite-override system (previously only used for inventory item icons) to the live scene's walking characters and bg-shape objects, via a new `Screen::queueRoseTattooHiresSceneSprite()`/`_roseTattooHiresSceneSpriteLayer` wired into `TattooScene::drawAllShapes()`. Depends on `rosetattoo-hires-cursor-ai-override.patch`. |
+| `rosetattoo-hires-map-sprite-purge-fix.patch` | Fixes AI-upscaled characters "hovering" over the overhead/travel map (and briefly over the next room after closing it): `TattooMap::show()` now clears `_roseTattooHiresSceneSpriteLayer` since the map's own render loop never calls `TattooScene::drawAllShapes()` to refresh/clear it. Depends on `rosetattoo-hires-character-object-sprites.patch`. |
+| `rosetattoo-hires-scene-sprite-occlusion-fix.patch` | Fixes AI-upscaled characters/objects visibly "floating above" un-overridden furniture and the right-click verb menu instead of being occluded by them. Adds per-native-pixel provenance tracking so `blendRoseTattooHiresSceneSpriteLayer()` can detect when native-only content was drawn over a queued sprite's position later in the same frame and skip blending there. Depends on `rosetattoo-hires-character-object-sprites.patch`. |
 
 ## Writing a new patch
 

@@ -72,7 +72,7 @@ diff --git a/engines/sherlock/image_file.h b/engines/sherlock/image_file.h
 index 847dfbec..688af0b1 100644
 --- a/engines/sherlock/image_file.h
 +++ b/engines/sherlock/image_file.h
-@@ -98,6 +98,32 @@ public:
+@@ -98,7 +98,33 @@ public:
  	uint size();
  	void push_back(const ImageFrame &frame);
  
@@ -105,7 +105,7 @@ index 847dfbec..688af0b1 100644
  	byte _palette[256 * 3];
  public:
  	ImageFile();
-
+ 
 diff --git a/engines/sherlock/screen.h b/engines/sherlock/screen.h
 --- a/engines/sherlock/screen.h
 +++ b/engines/sherlock/screen.h
@@ -555,7 +555,7 @@ diff --git a/engines/sherlock/tattoo/tattoo_scene.cpp b/engines/sherlock/tattoo/
  			}
  		}
  	}
-@@ -265,6 +340,7 @@
+@@ -265,7 +340,8 @@
  				screen._backBuffer1.SHblitFrom(*obj._imageFrame, obj._position);
  			else
  				screen._backBuffer1.SHtransBlitFrom(*obj._imageFrame, obj._position, obj._flags & OBJ_FLIPPED, obj._scaleVal);
@@ -563,7 +563,7 @@ diff --git a/engines/sherlock/tattoo/tattoo_scene.cpp b/engines/sherlock/tattoo/
  		}
  	}
  
-
+ 
 diff --git a/engines/sherlock/tattoo/widget_inventory.cpp b/engines/sherlock/tattoo/widget_inventory.cpp
 index 0a7e2e00..f4d07f99 100644
 --- a/engines/sherlock/tattoo/widget_inventory.cpp

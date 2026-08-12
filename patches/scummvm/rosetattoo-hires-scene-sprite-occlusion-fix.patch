@@ -1,0 +1,236 @@
+Fixes AI-upscaled characters/objects visibly "floating above" native
+scenery, furniture, and the right-click verb menu instead of being
+correctly occluded by them.
+
+Root cause: Screen::update()'s hires compositor blends three AI-upscaled
+override layers (text tooltips, scene sprites/characters, cursor/inventory
+sprites) on top of the nearest-neighbor-upscaled native composite,
+unconditionally, in a fixed order, every frame - regardless of what the
+native low-res framebuffer's final content at those same pixels ended up
+being. Most bg-shape scenery (ordinary furniture, doorframes, etc.) has no
+AI sprite override of its own (see
+rosetattoo-hires-character-object-sprites.patch), so when such an
+un-overridden shape - or the verb menu, or any other native-only UI - is
+drawn *after* a character in native z-order (correctly occluding it in the
+native-diff composite), nothing tells the AI scene-sprite layer that its
+earlier-queued character pixels there are now supposed to be hidden again.
+The AI layer blends on top regardless, making Holmes/Watson/NPCs appear to
+hover in front of things that should be in front of them.
+
+Fix: add per-native-pixel occlusion "provenance" tracking. When a
+shape/character is queued into the AI scene-sprite layer (via
+queueRoseTattooHiresSceneSprite(), immediately after that shape has already
+been drawn into the native low-res _backBuffer1 by the caller), also record
+what native pixel value _backBuffer1 held right at that moment for every
+pixel the AI sprite covers
+(_roseTattooHiresSceneSpriteExpectedNative/Valid). At final composite time,
+blendRoseTattooHiresSceneSpriteLayer() compares this recorded "expected"
+native value against the real final native framebuffer pixel (after every
+later shape/widget in the frame has had its chance to draw) and skips
+blending the AI-upscaled pixel wherever they differ - i.e. wherever
+something else painted over that native spot afterward. This is
+architecturally general: it fixes un-overridden-furniture occlusion, verb
+menu occlusion, and other native-only UI occlusion simultaneously, without
+per-widget special-casing. Only the scene-sprite layer opts into this
+tracking (via the new trackNativeProvenance parameter on
+blitRoseTattooHiresSpriteOverride()); the cursor/inventory sprite layer
+(queueRoseTattooHiresSprite()) is unaffected since it's always meant to
+render on top of everything.
+
+Depends on rosetattoo-hires-character-object-sprites.patch (introduces
+_roseTattooHiresSceneSpriteLayer, queueRoseTattooHiresSceneSprite(),
+blendRoseTattooHiresSceneSpriteLayer(), clearRoseTattooHiresSceneSpriteLayer()).
+
+Known limitation: this assumes shape/character draw coordinates are
+already in the same coordinate space as the native screen buffer
+(getPixels()), matching how the pre-existing scene-sprite-layer code
+already treats these coordinates. This should hold for the common
+non-scrolling-room case; wide scrolling rooms are unverified.
+
+diff --git a/engines/sherlock/screen.h b/engines/sherlock/screen.h
+--- a/engines/sherlock/screen.h
++++ b/engines/sherlock/screen.h
+@@ -22,6 +22,7 @@
+ #ifndef SHERLOCK_SCREEN_H
+ #define SHERLOCK_SCREEN_H
+ 
++#include "common/array.h"
+ #include "common/hashmap.h"
+ #include "common/list.h"
+ #include "common/path.h"
+@@ -165,6 +166,36 @@
+ 	Graphics::ManagedSurface _roseTattooHiresSceneSpriteLayer;
+ 
+ 	/**
++	 * Per-native-pixel (i.e. unscaled SHERLOCK_SCREEN_WIDTH x
++	 * SHERLOCK_SCREEN_HEIGHT) companion to _roseTattooHiresSceneSpriteLayer:
++	 * for every native pixel a queued scene sprite/object covers this
++	 * frame, records the native pixel value _backBuffer1 held immediately
++	 * after that shape's own SHtransBlitFrom() call (see
++	 * queueRoseTattooHiresSceneSprite()). _roseTattooHiresSceneSpriteExpectedValid
++	 * marks which entries were actually written this frame (both arrays are
++	 * reset - the valid one to all-zero - by clearRoseTattooHiresSceneSpriteLayer()).
++	 *
++	 * This exists to fix AI-upscaled characters/objects visibly "floating"
++	 * on top of things that should occlude them: most bg-shape scenery
++	 * (ordinary furniture, doorframes, etc.) has no AI sprite override of
++	 * its own, so when such an un-overridden shape is drawn *after* a
++	 * character in native z-order (correctly occluding it in the plain
++	 * nearest-neighbor-upscaled composite - see the diff loop in
++	 * Screen::update()), nothing ever tells the scene-sprite layer that
++	 * its previously-queued character pixels there are now supposed to be
++	 * hidden again. The same blind spot also affects the right-click verb
++	 * menu, tooltips, and any other UI drawn on top of the scene later in
++	 * the same frame (all native-only content with no AI override).
++	 * blendRoseTattooHiresSceneSpriteLayer() compares this recorded
++	 * "expected" value against the real final native pixel (after every
++	 * later shape/widget in the frame has had its chance to draw) and
++	 * skips blending the AI pixel wherever they differ, letting the
++	 * correctly-occluding native content show through instead.
++	 */
++	Common::Array<byte> _roseTattooHiresSceneSpriteExpectedNative;
++	Common::Array<byte> _roseTattooHiresSceneSpriteExpectedValid;
++
++	/**
+ 	 * Shared implementation behind queueRoseTattooHiresSprite() and
+ 	 * queueRoseTattooHiresSceneSprite() - loads/scales/flips the override
+ 	 * asset and alpha-blends it into whichever layer the caller passes
+@@ -172,10 +203,16 @@
+ 	 * _roseTattooHiresSceneSpriteLayer's declaration for why). Returns the
+ 	 * queued/output-pixel-space rect actually written to (may be empty if
+ 	 * hires mode isn't active or no override asset was found).
++	 *
++	 * When trackNativeProvenance is true (only passed from
++	 * queueRoseTattooHiresSceneSprite()), also records each written pixel's
++	 * corresponding native _backBuffer1 value into
++	 * _roseTattooHiresSceneSpriteExpectedNative/Valid - see their
++	 * declarations for why.
+ 	 */
+ 	Common::Rect blitRoseTattooHiresSpriteOverride(Graphics::ManagedSurface &layer,
+ 		const Common::String &resourceName, int frameIndex, const ImageFrame &nativeFrame,
+-		const Common::Point &pt, bool horizFlip, int scaleVal);
++		const Common::Point &pt, bool horizFlip, int scaleVal, bool trackNativeProvenance = false);
+ protected: 
+ 	SherlockEngine *_vm;
+ 	Surface _backBuffer;
+diff --git a/engines/sherlock/screen.cpp b/engines/sherlock/screen.cpp
+--- a/engines/sherlock/screen.cpp
++++ b/engines/sherlock/screen.cpp
+@@ -356,7 +356,7 @@
+ 
+ Common::Rect Screen::blitRoseTattooHiresSpriteOverride(Graphics::ManagedSurface &layer,
+ 		const Common::String &resourceName, int frameIndex, const ImageFrame &nativeFrame,
+-		const Common::Point &pt, bool horizFlip, int scaleVal) {
++		const Common::Point &pt, bool horizFlip, int scaleVal, bool trackNativeProvenance) {
+ 	if (_roseTattooHiresScale <= 1 || _roseTattooHiresFormat.isCLUT8())
+ 		return Common::Rect();
+ 
+@@ -430,6 +430,15 @@
+ 	// RGBA32/BlendBlit channel-order mismatch noted in
+ 	// blendRoseTattooHiresTextLayer() that rules out transBlitFrom()/
+ 	// blendBlitFrom() for this true-color format.
++	// See _roseTattooHiresSceneSpriteExpectedNative's declaration: lazily
++	// sized here (rather than in the constructor) since it's only ever
++	// needed once hires mode with a scene-sprite override is actually
++	// active.
++	if (trackNativeProvenance && _roseTattooHiresSceneSpriteExpectedNative.empty()) {
++		_roseTattooHiresSceneSpriteExpectedNative.resize(SHERLOCK_SCREEN_WIDTH * SHERLOCK_SCREEN_HEIGHT, 0);
++		_roseTattooHiresSceneSpriteExpectedValid.resize(SHERLOCK_SCREEN_WIDTH * SHERLOCK_SCREEN_HEIGHT, 0);
++	}
++
+ 	for (int sy = 0; sy < scaledSurface->h; ++sy) {
+ 		const int dy = y + sy;
+ 		if (dy < 0 || dy >= layer.h)
+@@ -445,6 +454,29 @@
+ 				continue;
+ 
+ 			layer.setPixel(dx, dy, layer.format.ARGBToColor(a, r, g, b));
++
++			if (trackNativeProvenance) {
++				// Record what _backBuffer1 (the native low-res scene
++				// buffer this shape/character was just SHtransBlitFrom()'d
++				// into, by the caller, immediately before this queue call)
++				// holds at this pixel's native equivalent right now - i.e.
++				// what this exact shape drew there. If a later shape in
++				// this same frame draws over the same native spot
++				// afterward (correctly occluding this one), its own
++				// queueRoseTattooHiresSceneSprite() call will overwrite
++				// this entry with its own value - see
++				// blendRoseTattooHiresSceneSpriteLayer() for how this gets
++				// used to detect and skip pixels that were subsequently
++				// occluded.
++				const int nx = dx / scale;
++				const int ny = dy / scale;
++				if (nx >= 0 && nx < SHERLOCK_SCREEN_WIDTH && ny >= 0 && ny < SHERLOCK_SCREEN_HEIGHT &&
++						nx < _backBuffer1.w && ny < _backBuffer1.h) {
++					const int idx = ny * SHERLOCK_SCREEN_WIDTH + nx;
++					_roseTattooHiresSceneSpriteExpectedNative[idx] = (byte)_backBuffer1.getPixel(nx, ny);
++					_roseTattooHiresSceneSpriteExpectedValid[idx] = 1;
++				}
++			}
+ 		}
+ 	}
+ 
+@@ -471,7 +503,7 @@
+ void Screen::queueRoseTattooHiresSceneSprite(const Common::String &resourceName, int frameIndex,
+ 		const ImageFrame &nativeFrame, const Common::Point &pt, bool horizFlip, int scaleVal) {
+ 	blitRoseTattooHiresSpriteOverride(_roseTattooHiresSceneSpriteLayer,
+-		resourceName, frameIndex, nativeFrame, pt, horizFlip, scaleVal);
++		resourceName, frameIndex, nativeFrame, pt, horizFlip, scaleVal, true);
+ }
+ 
+ void Screen::blendRoseTattooHiresSceneSpriteLayer() {
+@@ -482,6 +514,9 @@
+ 	// comment for why no background-repaint-first step is needed/wanted).
+ 	const int w = _roseTattooHiresSceneSpriteLayer.w;
+ 	const int h = _roseTattooHiresSceneSpriteLayer.h;
++	const int scale = _roseTattooHiresScale;
++	const bool haveProvenance = !_roseTattooHiresSceneSpriteExpectedValid.empty();
++	const byte *screenPixels = (const byte *)getPixels();
+ 	for (int y = 0; y < h; ++y) {
+ 		for (int x = 0; x < w; ++x) {
+ 			uint8 a, r, g, b;
+@@ -489,6 +524,28 @@
+ 				_roseTattooHiresSceneSpriteLayer.getPixel(x, y), a, r, g, b);
+ 			if (a == 0)
+ 				continue;
++
++			if (haveProvenance && scale > 0) {
++				// Skip this pixel if something else drew over its native
++				// equivalent *after* the shape/character that queued it
++				// did (see _roseTattooHiresSceneSpriteExpectedNative's
++				// declaration) - e.g. a bg-shape with no AI override,
++				// the verb menu, or any other native-only UI drawn later
++				// this same frame. Left unguarded, this AI-upscaled pixel
++				// would otherwise always render on top regardless, making
++				// characters/objects appear to "float" above whatever
++				// should be occluding them.
++				const int nx = x / scale;
++				const int ny = y / scale;
++				if (nx >= 0 && nx < SHERLOCK_SCREEN_WIDTH && ny >= 0 && ny < SHERLOCK_SCREEN_HEIGHT) {
++					const int idx = ny * SHERLOCK_SCREEN_WIDTH + nx;
++					if (!_roseTattooHiresSceneSpriteExpectedValid[idx])
++						continue;
++					const byte actualNative = screenPixels[ny * pitch + nx];
++					if (actualNative != _roseTattooHiresSceneSpriteExpectedNative[idx])
++						continue;
++				}
++			}
+ 
+ 			uint8 dstA, dstR, dstG, dstB;
+ 			_roseTattooHiresComposite.format.colorToARGB(_roseTattooHiresComposite.getPixel(x, y), dstA, dstR, dstG, dstB);
+@@ -506,6 +563,14 @@
+ 	if (!_roseTattooHiresSceneSpriteLayer.empty())
+ 		_roseTattooHiresSceneSpriteLayer.fillRect(Common::Rect(0, 0, _roseTattooHiresSceneSpriteLayer.w,
+ 			_roseTattooHiresSceneSpriteLayer.h), 0);
++
++	// Start this frame's occlusion-provenance tracking fresh too - see
++	// _roseTattooHiresSceneSpriteExpectedNative's declaration. Only the
++	// "valid" flags need clearing; stale expected-native values are
++	// harmless since they're never consulted unless their matching valid
++	// flag is set.
++	if (!_roseTattooHiresSceneSpriteExpectedValid.empty())
++		Common::fill(_roseTattooHiresSceneSpriteExpectedValid.begin(), _roseTattooHiresSceneSpriteExpectedValid.end(), 0);
+ }
+ 
+ void Screen::paintRoseTattooHiresWorldSprite(const Common::String &resourceName, int frameIndex,

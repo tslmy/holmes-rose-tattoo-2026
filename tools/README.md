@@ -214,17 +214,29 @@ Beyond the room cursor set and Watson, the same pipeline has also been run
 over the player's own walk cycles across coat/hat states (`SVGAWALK.VGS`,
 `NOHAT.VGS`, `COATWALK.VGS`, and the `CT*`/`HT*`/`JT*`/`TDOWNRG` directional
 variants), the named NPCs (`MYCROFT.VGS`, `TOBY.VGS`, `TUX.VGS`,
-`WIGGINS.VGS`), and every inventory/interactive item icon
-(`ITEM01.VGS`-`ITEM84.VGS`). `TALK.LIB`'s ~1400 talking-head portrait frames
-and the per-scene `RES##.VGS` foreground sprite overlays are not yet
-extracted at all.
+`WIGGINS.VGS`), every generic reused NPC body-type walk cycle
+(`3T*`/`GT*`/`GTS*`/`IT*`/`QT*`/`TW*`/`TRIGHT.VGS`/`TUPRIGHT.VGS`, and
+`GREEN.VGS` - Rose Tattoo reuses these same handful of sprite sheets across
+many different one-off/background NPCs scene to scene, so covering them has
+much higher leverage than extracting every named character individually),
+and every inventory/interactive item icon (`ITEM01.VGS`-`ITEM84.VGS`).
+`TALK.LIB`'s ~1400 talking-head portrait frames and the per-scene
+`RES##.VGS` resources (full 640x480 static images - closeups/cutscene
+stills, not sprites) are not yet extracted at all.
 
-An engine-side runtime override is wired up only for the room cursor set so
-far (`patches/scummvm/rosetattoo-hires-cursor-ai-override.patch`) and the
-overhead map background (see below). Character/item/animated-sprite runtime
-overrides are not yet wired into the engine — that would touch every
-sprite-draw call site (`people.cpp`, `objects.cpp`) and is a larger,
-higher-risk change than the cursor and background override paths.
+An engine-side runtime override is wired up for the room cursor set
+(`patches/scummvm/rosetattoo-hires-cursor-ai-override.patch`), the overhead
+map background (see below), and - via
+`patches/scummvm/rosetattoo-hires-character-object-sprites.patch` - the live
+scene's walking characters and bg-shape objects (`Screen::queueRoseTattooHiresSceneSprite()`,
+wired into `TattooScene::drawAllShapes()`). Item/inventory icon overrides are
+wired up in `widget_inventory.cpp`. Any character/bg-shape whose current
+resource+frame has no matching override PNG on disk (e.g. one of the
+`RES##.VGS` per-scene specials, or a body-type sprite sheet not yet
+extracted) simply falls back to the plain nearest-neighbor-upscaled native
+art for that shape - a quiet degradation, not a crash - so extracting a
+missing resource with the commands above and copying it into a production
+mod's `sprites/` directory is always safe to do incrementally.
 
 ### Fonts (`FONT1.VGS`-`FONT8.VGS`)
 

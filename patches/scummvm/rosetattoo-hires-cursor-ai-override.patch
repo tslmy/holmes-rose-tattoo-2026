@@ -37,7 +37,7 @@ with correct alpha blending via SDL_SRCALPHA rather than relying on an
 
 --- a/engines/sherlock/screen.h
 +++ b/engines/sherlock/screen.h
-@@ -211,6 +211,17 @@ public:
+@@ -211,5 +211,17 @@ public:
  	int roseTattooHiresScale() const { return _roseTattooHiresScale; }
  	bool loadRoseTattooHiresBackgroundOverride(int sceneNumber);
  	void clearRoseTattooHiresBackground();
@@ -54,10 +54,10 @@ with correct alpha blending via SDL_SRCALPHA rather than relying on an
 +	bool loadRoseTattooHiresCursorOverride(const Common::String &resourceName, int frameIndex,
 +		Graphics::Surface &outSurface);
  };
-
+ 
 --- a/engines/sherlock/screen.cpp
 +++ b/engines/sherlock/screen.cpp
-@@ -262,6 +262,60 @@ bool Screen::loadRoseTattooHiresBackgroundOverride(int sceneNumber) {
+@@ -262,3 +262,61 @@ bool Screen::loadRoseTattooHiresBackgroundOverride(int sceneNumber) {
  	return true;
  }
 +
@@ -118,13 +118,13 @@ with correct alpha blending via SDL_SRCALPHA rather than relying on an
 +
 +	return true;
 +}
-
+ 
 --- a/engines/sherlock/events.cpp
 +++ b/engines/sherlock/events.cpp
-@@ -82,6 +82,26 @@ void Events::setCursor(CursorId cursorId) {
+@@ -82,5 +82,25 @@ void Events::setCursor(CursorId cursorId) {
  		hotspotY = 0;
  	}
-
+ 
 +	// Prefer an AI-upscaled, true-color cursor override if one is available
 +	// (see tools/extract_rosetattoo_sprites.py / upscale_rosetattoo_sprites.py):
 +	// the frame index in RMOUSE.VGS lines up 1:1 with CursorId, so no lookup

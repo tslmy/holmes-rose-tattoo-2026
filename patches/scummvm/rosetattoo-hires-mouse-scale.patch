@@ -14,7 +14,7 @@
  
  void Events::pollEventsAndWait() {
  	pollEvents();
-@@ -239,11 +244,21 @@ void Events::pollEventsAndWait() {
+@@ -239,10 +244,19 @@ void Events::pollEventsAndWait() {
  void Events::warpMouse(const Common::Point &pt) {
 -	Common::Point pos = pt;
 -	if (_vm->_isScreenDoubled)

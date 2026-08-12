@@ -111,6 +111,34 @@ If external high-resolution background overrides need more than a patch set,
 that can grow into either a larger patch/script collection kept here, or a
 real ScummVM fork/submodule once engine development becomes central.
 
+Engine development has now grown past a handful of one-off patches (14+
+patches, ~2,700 lines) touching a shared set of core files
+(`screen.cpp`/`.h` in particular), so the accumulated hires-mod work is also
+kept as real commits on a branch of a personal fork, in addition to the
+patch files here:
+
+- Fork: <https://github.com/tslmy/scummvm>
+- Branch: `rosetattoo-hires-mod` (based on upstream ScummVM's `master`)
+
+To build from that branch directly instead of applying patches one by one:
+
+```sh
+git clone --branch rosetattoo-hires-mod https://github.com/tslmy/scummvm.git scummvm-src
+cd scummvm-src && ./configure && make -j$(nproc)
+```
+
+A Git submodule isn't adopted yet, since nothing in this repo's own
+tooling/CI currently orchestrates a ScummVM build step — `scummvm-src/` stays
+a locally-managed, gitignored checkout that tools like
+`run_rosetattoo_validation.py` just point at via `--scummvm`/`--scummvm-src`
+flags. Revisit this once/if this repo starts driving the ScummVM build
+itself (e.g. from a CI workflow).
+
+`patches/scummvm/*.patch` remain the per-feature, individually-reviewable
+record of the same changes (see
+[`patches/scummvm/README.md`](patches/scummvm/README.md)); the fork branch
+is the guaranteed-buildable, "just clone and go" equivalent.
+
 ## Safety
 
 Do not commit:

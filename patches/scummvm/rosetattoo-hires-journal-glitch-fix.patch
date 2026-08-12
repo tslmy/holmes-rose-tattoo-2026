@@ -163,7 +163,7 @@ returns.
  
  	if (_journal.empty()) {
  		_up = _down = false;
-@@ -114,6 +178,21 @@ void TattooJournal::show() {
+@@ -114,7 +178,22 @@ void TattooJournal::show() {
  
  	// Reset back to whatever scroll was active for the screen
  	screen._currentScroll = oldScroll;
@@ -185,7 +185,7 @@ returns.
  }
  
  void TattooJournal::handleKeyboardEvents() {
-
+ 
 --- a/engines/sherlock/screen.h
 +++ b/engines/sherlock/screen.h
 @@

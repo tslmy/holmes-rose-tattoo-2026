@@ -1,6 +1,6 @@
 --- a/engines/sherlock/tattoo/tattoo_people.cpp
 +++ b/engines/sherlock/tattoo/tattoo_people.cpp
-@@ -479,7 +479,7 @@ void TattooPerson::setWalking() {
+@@ -479,22 +479,22 @@ void TattooPerson::setWalking() {
  		} else {
  			// Major movement is vertical, so set the sequence for up and down,
  			// and set the delta Y depending on the direction

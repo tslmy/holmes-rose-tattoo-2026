@@ -45,18 +45,16 @@ upscaling approach to the PC 8-bit path using roseTattooHiresScale().
 
 --- a/engines/sherlock/screen.cpp
 +++ b/engines/sherlock/screen.cpp
-@@ -31,6 +31,7 @@
+@@ -25,4 +25,5 @@
+ #include "sherlock/tattoo/tattoo_screen.h"
  #include "common/system.h"
  #include "common/util.h"
- #include "graphics/pixelformat.h"
- #include "graphics/palette.h"
 +#include "graphics/cursorman.h"
- #include "image/png.h"
-
-@@ -172,8 +173,20 @@ void Screen::setPalette(const byte *palette, uint start, uint num) {
+ #include "graphics/palette.h"
+@@ -172,9 +173,23 @@ void Screen::setPalette(const byte *palette, uint start, uint num) {
  	assert(start + num <= Graphics::PALETTE_COUNT);
  	Common::copy(palette, palette + num * 3, &_roseTattooPalette[start * 3]);
-
+ 
 -	if (_roseTattooHiresScale > 1 && !_roseTattooHiresFormat.isCLUT8())
 +	if (_roseTattooHiresScale > 1 && !_roseTattooHiresFormat.isCLUT8()) {
 +		// Graphics::Screen::setPalette() forwards to
@@ -74,16 +72,16 @@ upscaling approach to the PC 8-bit path using roseTattooHiresScale().
 +		CursorMan.replaceCursorPalette(palette, start, num);
  		return;
 +	}
-
+ 
  	Graphics::Screen::setPalette(palette, start, num);
  }
-
+ 
 --- a/engines/sherlock/events.cpp
 +++ b/engines/sherlock/events.cpp
-@@ -93,9 +93,32 @@ void Events::setCursor(const Graphics::Surface &src, int hotspotX, int hotspotY) {
+@@ -93,9 +93,33 @@ void Events::setCursor(const Graphics::Surface &src, int hotspotX, int hotspotY) {
  	_cursorId = INVALID_CURSOR;
  	_hotspotPos = Common::Point(hotspotX, hotspotY);
-
+ 
  	if (!IS_3DO) {
  		// PC 8-bit palettized
 -		CursorMan.replaceCursor(src, hotspotX, hotspotY, 0xff);

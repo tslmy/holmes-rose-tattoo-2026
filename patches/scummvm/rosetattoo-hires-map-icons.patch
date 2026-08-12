@@ -32,7 +32,7 @@ expected at:
 
 --- a/engines/sherlock/screen.h
 +++ b/engines/sherlock/screen.h
-@@ -368,6 +368,19 @@ public:
+@@ -368,7 +368,21 @@ public:
  	void queueRoseTattooHiresSprite(const Common::String &resourceName, int frameIndex,
  		const Common::Point &nativePt);
  
@@ -53,10 +53,10 @@ expected at:
  	/**
  	 * Blends the accumulated hires sprite layer (see
  	 * queueRoseTattooHiresSprite()) on top of the composite - called from
-
+ 
 --- a/engines/sherlock/screen.cpp
 +++ b/engines/sherlock/screen.cpp
-@@ -403,6 +403,58 @@ void Screen::queueRoseTattooHiresSprite(const Common::String &resourceName, in
+@@ -403,7 +403,64 @@ void Screen::queueRoseTattooHiresSprite(const Common::String &resourceName, in
  	overrideSurface.free();
  }
  
@@ -120,10 +120,10 @@ expected at:
  void Screen::blendRoseTattooHiresSpriteLayer() {
  	if (_roseTattooHiresSpriteLayer.empty())
  		return;
-
+ 
 --- a/engines/sherlock/tattoo/tattoo_map.cpp
 +++ b/engines/sherlock/tattoo/tattoo_map.cpp
-@@ -308,10 +308,22 @@ void TattooMap::drawMapIcons() {
+@@ -308,8 +308,17 @@ void TattooMap::drawMapIcons() {
  		if (_data[idx]._iconNum != -1 && _vm->readFlags(idx + 1)) {
  			MapEntry &mapEntry = _data[idx];
  			ImageFrame &img = (*_iconImages)[mapEntry._iconNum];

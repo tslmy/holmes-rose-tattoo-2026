@@ -16,7 +16,7 @@ launches behave exactly as before when the environment variable is unset.
 diff --git a/engines/sherlock/tattoo/tattoo.cpp b/engines/sherlock/tattoo/tattoo.cpp
 --- a/engines/sherlock/tattoo/tattoo.cpp
 +++ b/engines/sherlock/tattoo/tattoo.cpp
-@@ -109,6 +109,17 @@
+@@ -109,5 +109,16 @@
  	// Starting scene
  	_scene->_goToScene = STARTING_INTRO_SCENE;
  
@@ -31,6 +31,5 @@ diff --git a/engines/sherlock/tattoo/tattoo.cpp b/engines/sherlock/tattoo/tattoo
 +			_scene->_goToScene = sceneNumber;
 +		}
 +	}
- 
  	// Load an initial palette
  	loadInitialPalette();

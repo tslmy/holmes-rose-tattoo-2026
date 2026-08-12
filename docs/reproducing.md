@@ -70,18 +70,76 @@ uv run python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse
 uv run python3 tools/upscale_rosetattoo_sprites.py --resources map_vgs mapicons_vgs --scale 2
 ```
 
+Also upscale the character/NPC walk-cycle sprites the
+`rosetattoo-hires-character-object-sprites.patch` engine patch (Step 4)
+looks for at runtime - both the player's own coat/hat states and the
+generic body-type sprite sheets Rose Tattoo reuses across many different
+one-off NPCs (see [`tools/README.md`](../tools/README.md#cursors-items-character-and-font-sprites)
+for the full resource list and why extracting these generic sheets is
+higher-leverage than named characters):
+
+```sh
+uv run python3 tools/extract_rosetattoo_sprites.py --palette-scene 1 --resources \
+  WATSON.VGS WIGGINS.VGS MYCROFT.VGS TOBY.VGS TUX.VGS \
+  SVGAWALK.VGS NOHAT.VGS COATWALK.VGS \
+  CTDOWNRI.VGS CTRIGHT.VGS CTUPRIGH.VGS HTDOWNRG.VGS HTRIGHT.VGS HTUPRIGH.VGS \
+  JTDOWNRG.VGS JTRIGHT.VGS JTUPRIGH.VGS TDOWNRG.VGS TRIGHT.VGS TUPRIGHT.VGS \
+  3TDOWNRG.VGS 3TRIGHT.VGS 3TUPRIGH.VGS GREEN.VGS \
+  GTDOWNRG.VGS GTRIGHT.VGS GTSDOWNR.VGS GTSRIGHT.VGS GTSUPRIG.VGS GTUPRIGH.VGS \
+  ITDOWNRG.VGS ITRIGHT.VGS ITUPRIGH.VGS QTDOWNRG.VGS QTRIGHT.VGS QTUPRIG.VGS \
+  TWDOWNRG.VGS TWRIGHT.VGS TWUPRIGH.VGS
+uv run python3 tools/upscale_rosetattoo_sprites.py --scale 2 --resources \
+  watson_vgs wiggins_vgs mycroft_vgs toby_vgs tux_vgs \
+  svgawalk_vgs nohat_vgs coatwalk_vgs \
+  ctdownri_vgs ctright_vgs ctuprigh_vgs htdownrg_vgs htright_vgs htuprigh_vgs \
+  jtdownrg_vgs jtright_vgs jtuprigh_vgs tdownrg_vgs tright_vgs tupright_vgs \
+  3tdownrg_vgs 3tright_vgs 3tuprigh_vgs green_vgs \
+  gtdownrg_vgs gtright_vgs gtsdownr_vgs gtsright_vgs gtsuprig_vgs gtuprigh_vgs \
+  itdownrg_vgs itright_vgs ituprigh_vgs qtdownrg_vgs qtright_vgs qtuprig_vgs \
+  twdownrg_vgs twright_vgs twuprigh_vgs
+uv run python3 tools/upscale_rosetattoo_sprites.py --resources item01_vgs item02_vgs ... item84_vgs --scale 2
+```
+
 Copy the results into the same mod directory as step 2's
 `--scummvm-overrides` (they read from the same `sprites/` subtree the
 background overrides use):
 
 ```sh
-cp -R enhanced/sprites/rmouse_vgs enhanced/sprites/omouse_vgs enhanced/sprites/map_vgs \
-  mods/neural-hires-backgrounds-faithful/sprites/
+cp -R enhanced/sprites/*_vgs mods/neural-hires-backgrounds-faithful/sprites/
 ```
 
-## Step 4 — Build and patch ScummVM
+## Step 4 — Build ScummVM
+
+Two equivalent ways to get a patched ScummVM checkout — pick one:
+
+**Option A: clone the pre-built fork branch (recommended, fastest)**
+
+All the patches below are already applied as commits on a branch of a
+personal fork:
 
 ```sh
+git clone --branch rosetattoo-hires-mod https://github.com/tslmy/scummvm.git scummvm-src
+cd scummvm-src
+./configure --enable-freetype2
+make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
+cd ..
+```
+
+**Option B: apply patches onto a fresh upstream checkout**
+
+⚠️ Known gap: these patches were extracted retroactively from an
+accumulated working checkout across many sessions, and at least one
+foundational hires-mode change (the `_roseTattooHiresScale`/
+`_roseTattooHiresFormat` scaffolding and `Screen::setPalette()` override
+that later patches build on) was never captured as its own patch file.
+Applying this list onto a *pristine* upstream checkout is known to fail
+partway through (around `rosetattoo-hires-cursor-fix.patch`) as a result.
+Use Option A until that gap is backfilled with an initial
+`rosetattoo-hires-scale-scaffolding.patch`-style patch; the list below is
+kept for reference/review of each individual change.
+
+```sh
+git clone https://github.com/scummvm/scummvm.git scummvm-src
 cd scummvm-src
 git apply ../patches/scummvm/rosetattoo-start-scene-env.patch
 git apply ../patches/scummvm/rosetattoo-fix-vertical-walk-delta-x.patch
@@ -94,21 +152,27 @@ git apply ../patches/scummvm/rosetattoo-hires-font-ttf-override.patch
 git apply ../patches/scummvm/rosetattoo-hires-tooltip-text-fix.patch
 git apply ../patches/scummvm/rosetattoo-hires-map-icons.patch
 git apply ../patches/scummvm/rosetattoo-hires-journal-glitch-fix.patch
+git apply ../patches/scummvm/rosetattoo-hires-character-object-sprites.patch
+git apply ../patches/scummvm/rosetattoo-hires-map-sprite-purge-fix.patch
+git apply ../patches/scummvm/rosetattoo-hires-scene-sprite-occlusion-fix.patch
 ./configure --enable-freetype2
 make -j$(sysctl -n hw.ncpu 2>/dev/null || nproc)
 cd ..
 ```
 
-`--enable-freetype2` is required for the hires TrueType tooltip-text patch;
-`configure` will otherwise silently compile without it and tooltip text
-falls back to upscaled bitmap glyphs. Also drop a TTF font file at
-`<mod-directory>/fonts/hires_font.ttf` (any legible serif/period-appropriate
-font works; this repository doesn't ship one for licensing reasons).
-
 Apply patches in the listed order — several are explicit follow-ups that
 touch the same files as an earlier patch (see
 [`patches/scummvm/README.md`](../patches/scummvm/README.md) for the full
-dependency notes).
+dependency notes). The patch files are the per-feature,
+individually-reviewable record of the same work; Option A's fork branch is
+just those same changes already applied and known to build.
+
+`--enable-freetype2` is required for the hires TrueType tooltip-text
+feature either way; `configure` will otherwise silently compile without it
+and tooltip text falls back to upscaled bitmap glyphs. Also drop a TTF font
+file at `<mod-directory>/fonts/hires_font.ttf` (any legible
+serif/period-appropriate font works; this repository doesn't ship one for
+licensing reasons).
 
 ## Step 5 — Play
 
