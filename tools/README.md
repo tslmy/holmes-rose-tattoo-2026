@@ -219,10 +219,22 @@ variants), the named NPCs (`MYCROFT.VGS`, `TOBY.VGS`, `TUX.VGS`,
 `GREEN.VGS` - Rose Tattoo reuses these same handful of sprite sheets across
 many different one-off/background NPCs scene to scene, so covering them has
 much higher leverage than extracting every named character individually),
-and every inventory/interactive item icon (`ITEM01.VGS`-`ITEM84.VGS`).
-`TALK.LIB`'s ~1400 talking-head portrait frames and the per-scene
-`RES##.VGS` resources (full 640x480 static images - closeups/cutscene
-stills, not sprites) are not yet extracted at all.
+every inventory/interactive item icon (`ITEM01.VGS`-`ITEM84.VGS`), the dart
+board minigame set (`DARTBD.VGS`, `DARTMAP.VGS`, `DARTS.VGS`,
+`DARTSLFT.VGS`), the opium den and disguise sprite sheets (`OPIUM.VGS`,
+`COAT3.VGS`), the pointing-hand cursor variants (`HAND1.VGS`, `HAND2.VGS`),
+the small interface glyph set (`INTRFACE.VGS`), the loading-spinner frames
+(`LOADING.VGS`, `LOADING0-2.VGS`), and the standalone full-frame stills
+(`JOURNAL.VGS`, `PAPER.VGS`) - every resource in `VGS.LIB` is now extracted
+and upscaled. The per-scene `RES##.VGS`/`RES##A.VGS`/`RES##B.VGS` resources
+(42 full 640x480 static closeup/cutscene stills, not sprites) are likewise
+fully extracted and upscaled, each with the numbered scene's own room
+palette passed via `--palette-scene N` (most of these resources embed their
+own VGA palette anyway, so the flag is a no-op for them, but is harmless to
+pass). `TALK.LIB`'s ~1400 entries are **not** portrait art at all - despite
+the name, every entry is a `.TLK` dialogue-script/branching-conversation
+file (see `Talk::loadTalkFile()` in `talk.cpp`), not an image resource, so
+there is nothing to extract there.
 
 An engine-side runtime override is wired up for the room cursor set
 (`Screen::loadRoseTattooHiresCursorOverride()` in the ScummVM fork), the
@@ -230,12 +242,17 @@ overhead map background (see below), and the live scene's walking
 characters and bg-shape objects (`Screen::queueRoseTattooHiresSceneSprite()`,
 wired into `TattooScene::drawAllShapes()`). Item/inventory icon overrides are
 wired up in `widget_inventory.cpp`. Any character/bg-shape whose current
-resource+frame has no matching override PNG on disk (e.g. one of the
-`RES##.VGS` per-scene specials, or a body-type sprite sheet not yet
-extracted) simply falls back to the plain nearest-neighbor-upscaled native
-art for that shape - a quiet degradation, not a crash - so extracting a
-missing resource with the commands above and copying it into a production
-mod's `sprites/` directory is always safe to do incrementally.
+resource+frame has no matching override PNG on disk simply falls back to
+the plain nearest-neighbor-upscaled native art for that shape - a quiet
+degradation, not a crash - so extracting a missing resource with the
+commands above and copying it into a production mod's `sprites/` directory
+is always safe to do incrementally. Note that several of the now-extracted
+resources (`RES##.VGS`, `JOURNAL.VGS`, `LOADING*.VGS`, `DART*.VGS`,
+`HAND*.VGS`, `INTRFACE.VGS`, `PAPER.VGS`, `OPIUM.VGS`) currently have **no
+engine-side consumer at all** for a hires override (unlike scene
+backgrounds/cursor/map/scene-sprites) - they are extracted and upscaled so
+the assets exist and are ready, but new engine wiring would be needed
+before they'd visibly affect gameplay.
 
 ### Fonts (`FONT1.VGS`-`FONT8.VGS`)
 
