@@ -1,51 +1,72 @@
-# Rose Tattoo Modernization Lab
+# High-resolution mod for [_The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo_][crt]
 
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-Tools and ScummVM patches for modernizing the graphics of *The Lost Files of
-Sherlock Holmes: The Case of the Rose Tattoo* — extracting its original 1996
-room backgrounds, sprites, cursors, and fonts; upscaling and neural-redrawing
-them into photorealistic high-resolution art; and patching a local ScummVM
-build to render them in-game at full resolution, without touching walkable
-geometry, hotspots, or puzzle-relevant object placement.
+To celebrate the 30th anniversary of this brilliant DOS game, I decided to
+enhance the visuals of it, by replacing the original art assets with AI-
+enhanced images. (Love it or hate it, AI does make such a comprehensive
+overhaul a one-person job.)
 
-This repository intentionally does not track original game files, extracted
-backgrounds, generated art, or a local ScummVM checkout. Keep those assets
-local under ignored directories such as `scummvm/`, `extracted/`, `enhanced/`,
-`generated/`, `mods/`, and `scummvm-src/`.
+[crt]: https://en.wikipedia.org/wiki/The_Lost_Files_of_Sherlock_Holmes:_The_Case_of_the_Rose_Tattoo
 
-## What and why
+## What
 
-The original game renders at 640x480 with 256-color palettized art. This
-project keeps the original engine logic, puzzle design, and walkable/hotspot
-geometry completely intact, but:
+I can't ship the asset pack itself, as it may be considered [derivative work]
+[drv] under copyright law. Instead, this git repo ships scripts that
+**generate** the mod. Those scripts:
 
-- redraws room backgrounds through a ControlNet-guided Stable Diffusion
-  pipeline into detailed, true-color, photorealistic-but-faithful art
-  (geometry-locked to the original composition — see
-  [`docs/reproducing.md`](docs/reproducing.md#history-and-why-the-pipeline-looks-like-this)
-  for why this doesn't just hallucinate a new scene);
-- upscales cursors and the overhead travel map with a non-diffusion
-  super-resolution model (no risk of hallucinating away small,
-  gameplay-critical silhouettes);
-- renders tooltip/UI text with a real vector TrueType font instead of the
-  original's blocky ~10px bitmap glyphs; and
-- patches a local ScummVM build with a true-color compositor that overlays
-  the game's native sprites/UI on top of the high-resolution background,
-  scaled mouse input, and several hires-specific rendering fixes (journal,
-  map, tooltip, cursor).
+[drv]: https://en.wikipedia.org/wiki/Derivative_work
 
-Before/after screenshots aren't checked into this repository, since both the
-original game screenshots and the neural-redrawn output are derived from
-copyrighted game assets (see [Safety](#safety) below). Generate your own
-comparison locally with `tools/generate_rosetattoo_candidates.py`, which
-produces a side-by-side `review_sheet.jpg` per scene.
+1. extract its original 1996 backgrounds, sprites, cursors, and fonts,
+2. upscale/redraw them into higher resolution, and
+3. patch [ScummVM][svm] to render them in-game at full resolution,
+
+without touching walkable geometry, hotspots, or puzzle-relevant object
+placement. The gameplay is kept intact.
+
+> [!NOTE]
+> Yes, this project is based on **[ScummVM][svm], not the original binaries**.
+If you haven't heard, _ScummVM_ is a collection of complete rewrites of old
+game engines, so that they can run natively on modern devices. To play a game
+like _Rose Tattoo_, just bring your legally-obtained copy of the game assets.
+_Consider donating to them this holiday season._
+
+[svm]: https://www.scummvm.org/
+
+### More technically...
+
+The original game renders at 640x480 with 256-color palettized art. We redraw
+the original assets into detailed, true-color, photorealistic-but-faithful
+renderings. This is achieved via a [Stable Diffusion][sdf] pipeline. 
+
+Since geometries (object boundaries, hotspots that respond to mouse events,
+walkable regions for playable characters) are important to a point-and-click
+RPG, we keep the geometries locked with a "sidecar" neural network called
+[ControlNet][ctn]. (See [`docs/reproducing.md`][rpd] for why this doesn't just
+hallucinate a new scene.)
+
+[rpd]: docs/reproducing.md#history-and-why-the-pipeline-looks-like-this
+
+For certain assets (cursors and the map of London), we upscale with a
+**non-diffusion** super-resolution model. This reduces the risk of
+hallucinating away small, gameplay-critical silhouettes.
+
+Besides upscaling/redrawing images, this mod also enhances text. It renders
+tooltip/UI text with a real vector TrueType font, instead of the original's
+blocky ~10px bitmap glyphs.
+
+Finally, this repo contains patches to ScummVM that, among other things, give
+it a true-color compositor that overlays the game's native sprites/UI on top
+of the high-resolution background, scaled mouse input, and several
+hires-specific rendering fixes (journal, map, tooltip, cursor).
+
+[ctn]: https://arxiv.org/abs/2302.05543
+[sdf]: https://en.wikipedia.org/wiki/Stable_Diffusion
 
 ## Setup
 
 Python tooling is managed with [`uv`](https://github.com/astral-sh/uv). Install
-uv, then sync the project's virtual environment (pins Pillow, the only
-third-party dependency, per `pyproject.toml`/`uv.lock`):
+uv (`brew install uv`), then sync the project's virtual environment:
 
 ```sh
 uv sync
@@ -57,11 +78,9 @@ Run any tool via `uv run`, e.g.:
 uv run python3 tools/extract_rosetattoo_assets.py --data-dir scummvm --scenes 1 2 18
 ```
 
-Every command in the docs below also works with a plain `python3` as long as
-Pillow is installed in the active interpreter (`uv run` is just the
-recommended, reproducible way to get there).
+## Usage
 
-## Steps to follow
+Follow these steps:
 
 1. **[Reproduce the full pipeline from scratch](docs/reproducing.md)** —
    the complete, ordered, end-to-end guide: extract assets, generate
