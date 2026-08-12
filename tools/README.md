@@ -1,0 +1,396 @@
+# Tools
+
+Python pipeline for extracting, upscaling, and validating Rose Tattoo graphics.
+Every command below also works with a plain `python3` as long as Pillow is
+installed in the active interpreter; `uv run python3 ...` is the recommended,
+reproducible way to get there (see the root [README](../README.md#setup)).
+
+## Background pipeline
+
+### 1. Extract room backgrounds and prompt metadata
+
+```sh
+python3 tools/extract_rosetattoo_assets.py --data-dir scummvm --scenes 1 2 18
+```
+
+Run all available room resources:
+
+```sh
+python3 tools/extract_rosetattoo_assets.py --data-dir scummvm
+```
+
+Outputs are written to `extracted/rosetattoo/`, which is ignored because it
+contains derived game artwork and extracted game text. Each `scene_NN/`
+directory includes `background.png`, `metadata.json` (object bounds, walk
+zones, hotspots, description text, and prompt terms), `prompt.txt`, and
+boundary-reference rasters `walk_zones_mask.png`, `hotspots_mask.png`,
+`structure_control.png` (both overlaid), and `protect_mask.png` (solid-filled
+union of walk zones + hotspots, used by the liberal-art masked pass below).
+
+### 2. Baseline (non-neural) upscaling
+
+Create deterministic enhanced outputs with Pillow's Lanczos resampler:
+
+```sh
+python3 tools/upscale_rosetattoo_backgrounds.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir enhanced/rosetattoo \
+  --scale 4 \
+  --method lanczos
+```
+
+The upscaler can also call an external model runner with `--method external`
+and an `--external-command` template.
+
+Create ScummVM-ready high-resolution background overrides:
+
+```sh
+python3 tools/upscale_rosetattoo_backgrounds.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir enhanced/rosetattoo-2x \
+  --scenes 2 18 36 \
+  --scale 2 \
+  --method lanczos \
+  --scummvm-overrides generated/overrides-2x
+```
+
+This writes normal enhancement outputs under `enhanced/` and copies validated
+runtime assets to `generated/overrides-2x/scene_NNN/background@2x.png`, along
+with prompt and metadata sidecars.
+
+Build a full playable 2x background override pack in one shot:
+
+```sh
+python3 tools/build_playable_rosetattoo_hires.py
+```
+
+This uses existing extracted assets when available, otherwise extracts from
+`scummvm/`, upscales every discovered room background with Lanczos, and
+writes a patched-ScummVM-ready mod pack to `mods/hires-backgrounds/`. The
+generated launch manifest defaults to the RGBA32 high-resolution compositor
+so enhanced backgrounds are no longer quantized back into the game's
+256-color palette. Add `--validate --scummvm scummvm-src/scummvm
+--scene-capture-after 1=8` for a quick in-game validation pass; the generated
+`manifest.json` records scene count, enhancement method, output paths, pixel
+format, and a launch command.
+
+### 3. Candidate review sheets
+
+```sh
+python3 tools/generate_rosetattoo_candidates.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/candidates \
+  --scenes 1 18 36 \
+  --scale 2
+```
+
+Each scene gets a `review_sheet.jpg`, `review.json`, candidate images, and
+per-candidate ScummVM override trees under `generated/candidates/overrides/`.
+Add `--capture-scummvm --scummvm scummvm-src/scummvm --data-dir scummvm
+--capture-after 4` to include live in-game composite captures in each review
+sheet.
+
+To compare finished output across several full mod/profile runs side by
+side (e.g. deciding between two `mods/` directories built with different
+neural profiles), use:
+
+```sh
+python3 tools/build_variant_contact_sheet.py --scenes 1 2 4 7 18 36
+```
+
+Rows are variant directories under `mods/` (plus the original extracted
+background for reference); columns are the given scene numbers.
+
+### 4. Neural photoreal redraw (Automatic1111/Forge)
+
+See [`docs/a1111-setup.md`](../docs/a1111-setup.md) for setting up the
+Stable Diffusion WebUI backend this step talks to.
+
+```sh
+python3 tools/neural_redraw_rosetattoo_backgrounds.py \
+  --api-url http://127.0.0.1:7860 \
+  --wait \
+  --settings-file profiles/neural/photographic-faithful.json \
+  --scenes 1 18 36 \
+  --scale 2 \
+  --scummvm-overrides mods/neural-hires-backgrounds
+```
+
+`profiles/neural/photographic-faithful.json` is the tracked production
+profile (see [`docs/reproducing.md`](../docs/reproducing.md) for the full
+rationale behind its settings and history). Compare calibration sheets under
+`validation/contact-sheets/` before committing to a full run. RMS drift
+(printed per scene and stored in each `background.json` sidecar) is only a
+tripwire, not a quality score.
+
+Useful flags:
+
+- `--skip-existing` — resume an interrupted/long batch without regenerating
+  finished scenes.
+- `--init-upscaler` (default `R-ESRGAN 4x+`) — builds the diffusion pass's
+  init image with a real super-resolution model instead of a naive Lanczos
+  resize, which keeps fine text/detail crisp instead of baking in the
+  original's dithering pattern. Pass `--init-upscaler lanczos` to restore the
+  old offline-only behavior.
+- `--edge-source {canny,walk-zones,hotspots,combined}` (default `canny`) —
+  chooses the ControlNet structural guidance image. `walk-zones`/`hotspots`/
+  `combined` use the game-semantic mask sidecars from step 1 instead of a
+  pixel-level Canny edge map, which tends to preserve navigable geometry and
+  interactive silhouettes without dictating brush-stroke detail.
+- `--liberal-art` / `--no-liberal-art` (default: **on**) — runs an automatic
+  second masked img2img pass after the base geometry-preserving redraw,
+  using each scene's `protect_mask.png` as Automatic1111's native inpainting
+  mask. The base redraw stays constrained to the game's original geometry;
+  this second pass is allowed a higher `--liberal-art-denoise` (default
+  `0.4`) so it can invent tasteful extra decorative detail purely in the
+  non-critical background, while the protected walk-zone/hotspot region
+  stays byte-identical. `--liberal-art-margin` (default `12` native pixels)
+  dilates the protected region before inverting it so freeform generation
+  can't creep up to the exact edge of critical geometry, and
+  `--liberal-art-mask-blur` (default `24`) softens the seam. The pre-pass
+  image is kept alongside the final output as
+  `background_faithful@<scale>x.png` for comparison.
+- Wide scrolling rooms are split into overlapping horizontal tiles by
+  default so panoramic backgrounds don't need one enormous diffusion
+  request; tune with `--tile-width`/`--tile-overlap`.
+
+For LLM-polished prompts (recommended — every scene gets one, with no
+per-scene manual overrides):
+
+```sh
+python3 tools/polish_rosetattoo_prompts.py \
+  --provider ollama \
+  --ollama-url http://127.0.0.1:11434 \
+  --ollama-model qwen3.5:9b-mlx \
+  --ollama-api generate \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/prompt-briefs
+```
+
+Ollama works well enough that LM Studio isn't needed; use a vision-capable
+model with thinking disabled (otherwise the model can spend its whole
+response budget on hidden reasoning and return no usable prompt text). The
+resulting `visual_brief.txt` files are short, transformed noun-phrase lists,
+not the game's original narrative prose, so they're checked into git under
+`profiles/neural/prompt-briefs/scene_NNN/` — future runs don't need to
+regenerate them (or have Ollama installed) unless a scene's extracted
+metadata changes. `neural_redraw_rosetattoo_backgrounds.py
+--prompt-brief-dir` defaults to this checked-in directory and only falls
+back to a scene's raw `prompt.txt` if a brief is genuinely missing.
+
+## Cursors, items, character, and font sprites
+
+Everything that *moves* in Rose Tattoo (mouse cursors, inventory/interactive
+item icons, and character walk-cycle sprites) is stored separately from room
+backgrounds, in a proprietary VGS frame format packed inside the game's
+`.LIB`/`.LIC` archives (`VGS.LIB`, `WALK.LIB`, `TALK.LIB`). Unlike room
+backgrounds (one full 640x480 frame per `.RRM`), each of these resources is a
+small sequence of individually-offset frames.
+
+```sh
+# Extract cursor frames (writes extracted/sprites/<resource>/frame_NNN.png + metadata.json)
+python3 tools/extract_rosetattoo_sprites.py --resources RMOUSE.VGS OMOUSE.VGS
+
+# Extract a character walk cycle - these have no palette of their own at
+# runtime (they reuse whichever room palette is currently loaded), so borrow
+# one from a specific room's export for correct-color output:
+python3 tools/extract_rosetattoo_sprites.py --resources WATSON.VGS --palette-scene 1
+
+# Upscale extracted frames via the same non-diffusion ESRGAN-family endpoint
+# used for the background pipeline's init-image step (no ControlNet/redraw -
+# these are small, silhouette/hotspot-critical elements where hallucinated
+# new content would break gameplay recognizability):
+python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
+```
+
+Each frame's alpha channel is separated before upscaling (flattened onto a
+neutral fill so ESRGAN doesn't invent detail in fully-transparent regions),
+then resized and re-thresholded independently, keeping the crisp binary
+cutout edges the engine itself always uses (no partial-alpha blending).
+Output filenames are scale-qualified (`frame_NNN@Sx.png`), matching the
+background pipeline's `background@Nx.png` convention.
+
+Beyond the room cursor set and Watson, the same pipeline has also been run
+over the player's own walk cycles across coat/hat states (`SVGAWALK.VGS`,
+`NOHAT.VGS`, `COATWALK.VGS`, and the `CT*`/`HT*`/`JT*`/`TDOWNRG` directional
+variants), the named NPCs (`MYCROFT.VGS`, `TOBY.VGS`, `TUX.VGS`,
+`WIGGINS.VGS`), and every inventory/interactive item icon
+(`ITEM01.VGS`-`ITEM84.VGS`). `TALK.LIB`'s ~1400 talking-head portrait frames
+and the per-scene `RES##.VGS` foreground sprite overlays are not yet
+extracted at all.
+
+An engine-side runtime override is wired up only for the room cursor set so
+far (`patches/scummvm/rosetattoo-hires-cursor-ai-override.patch`) and the
+overhead map background (see below). Character/item/animated-sprite runtime
+overrides are not yet wired into the engine — that would touch every
+sprite-draw call site (`people.cpp`, `objects.cpp`) and is a larger,
+higher-risk change than the cursor and background override paths.
+
+### Fonts (`FONT1.VGS`-`FONT8.VGS`)
+
+The in-game bitmap fonts are extracted and upscaled the same way, but through
+a dedicated `--mode font` path instead of the ESRGAN endpoint:
+
+```sh
+python3 tools/extract_rosetattoo_sprites.py --resources FONT1.VGS FONT2.VGS FONT3.VGS FONT4.VGS FONT5.VGS FONT6.VGS FONT7.VGS FONT8.VGS
+python3 tools/upscale_rosetattoo_sprites.py --resources font1_vgs font2_vgs font3_vgs font4_vgs font5_vgs font6_vgs font7_vgs font8_vgs --mode font --scale 4
+```
+
+Font glyphs are tiny (often under 10x10px) monochrome stencils — the RGB
+channel is always solid black, with the actual glyph shape living entirely in
+alpha. `--mode font` does a fast, local, no-API Lanczos resize of just the
+alpha channel, producing clean anti-aliased glyph edges instead of a blurry
+photographic upscale. This is a tooling-only deliverable for the *bitmap*
+glyphs; the engine's in-game tooltip/UI text instead uses a real vector font
+at runtime (see `patches/scummvm/rosetattoo-hires-font-ttf-override.patch`
+and its README entry in [`patches/scummvm/README.md`](../patches/scummvm/README.md)).
+
+### Overhead/travel map (`MAP.VGS`)
+
+Unlike room backgrounds, `MAP.VGS` stores no palette of its own — the engine
+loads a separate `MAP.PAL` resource for it — so extraction needs
+`--palette-resource` instead of `--palette-scene`:
+
+```sh
+python3 tools/extract_rosetattoo_sprites.py --resources MAP.VGS --palette-resource MAP.PAL
+python3 tools/extract_rosetattoo_sprites.py --resources MAPICONS.VGS --palette-resource MAP.PAL
+
+# The map is a single large (1280x960 native) illustration full of fine
+# engraving-style linework and ~30 clickable location pins, so - like
+# cursors/items - it gets the same non-diffusion real-ESRGAN upscale, not a
+# ControlNet redraw pass that could hallucinate away small geometry:
+python3 tools/upscale_rosetattoo_sprites.py --resources map_vgs mapicons_vgs --scale 2
+```
+
+The engine looks for the result at `sprites/map_vgs/frame_000@<scale>x.png`
+under `$SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES`, so copying
+`enhanced/sprites/map_vgs/` into the production mod's `sprites/` directory is
+enough to pick it up. Location-pin icons (`MAPICONS.VGS`) are also baked into
+the map's hires background via
+`patches/scummvm/rosetattoo-hires-map-icons.patch`.
+
+## Validation and playtesting
+
+Launch ScummVM for scene-jump validation:
+
+```sh
+python3 tools/run_rosetattoo_validation.py --save-slot 1 --scenes 1 2 18
+```
+
+On macOS the helper auto-detects
+`/Applications/ScummVM.app/Contents/MacOS/scummvm` when ScummVM is installed
+as an app bundle.
+
+For deterministic scene validation, apply the local ScummVM patch and launch
+a patched binary with `--start-scene`:
+
+```sh
+git apply patches/scummvm/rosetattoo-start-scene-env.patch
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --asset-overrides generated/overrides \
+  --capture-after 3 \
+  --capture-output validation/screenshots/desktop-scene-036.png
+```
+
+`--capture-after` captures the ScummVM window directly on macOS by default.
+Use `--capture-mode screen` only when a full-desktop capture is useful.
+
+The high-resolution renderer presents a true-color composite from
+`<override-dir>/scene_036/background@2x.png`:
+
+```sh
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --asset-overrides generated/overrides \
+  --hires-scale 2 \
+  --hires-format rgba32 \
+  --capture-after 5 \
+  --capture-output validation/screenshots/window-hires-scene-036.png
+```
+
+This keeps the original 640x480 game logic and sprite/UI composition, opens a
+1280x960 (or larger, for higher `--hires-scale`) ScummVM backend, and
+composites a true-color high-resolution room background underneath the
+native moving layers. Use `--hires-format clut8` to compare against the
+older palette-mapped compositor, or `--hires-format rgb565` as a lighter
+high-color fallback.
+
+Batch-capture several scenes and build a contact sheet:
+
+```sh
+python3 tools/batch_validate_rosetattoo.py \
+  --scummvm scummvm-src/scummvm \
+  --asset-overrides generated/overrides-2x \
+  --hires-scale 2 \
+  --hires-format rgba32 \
+  --scenes 1 2 18 36 \
+  --capture-after 4 \
+  --scene-capture-after 1=8 \
+  --output-dir validation/screenshots/batch-hires-2x
+```
+
+The batch helper records successful screenshots and failures in
+`validation/screenshots/batch-hires-2x/report.json`; failed scene launches do
+not prevent later scenes from being attempted unless `--fail-fast` is passed.
+
+Inspect high-resolution renderer layers with `--hires-debug`:
+
+```sh
+python3 tools/run_rosetattoo_validation.py \
+  --scummvm scummvm-src/scummvm \
+  --start-scene 36 \
+  --asset-overrides generated/overrides-2x \
+  --hires-scale 2 \
+  --hires-debug mask \
+  --capture-after 4 \
+  --capture-output validation/screenshots/scene-036-mask.png
+```
+
+Debug modes are `composite` (default), `background`, `mask`, and `native`.
+`mask` highlights the native pixels currently being drawn over the high-res
+background; this is the fastest way to find overlay or palette-animation
+mistakes.
+
+For your own playtesting (not just scripted scene captures), the standard
+launch command for a full high-resolution mod pack is:
+
+```sh
+python3 tools/run_rosetattoo_validation.py \
+    --scummvm scummvm-src/scummvm \
+    --asset-overrides mods/neural-hires-backgrounds-faithful \
+    --hires-scale 2 \
+    --hires-format rgba32 \
+    --save-dir "/Users/lmy/Library/Application Support/ScummVM/Savegames" \
+    --save-slot 1
+```
+
+## Calibration notes
+
+- **ControlNet checkpoint choice (contrast/exposure collapse fix)**: the
+  photographic profiles use `controlnet-canny-sdxl-1.0-xinsir-v2` (from
+  [`xinsir/controlnet-canny-sdxl-1.0`](https://huggingface.co/xinsir/controlnet-canny-sdxl-1.0)),
+  not the official `diffusers/controlnet-canny-sdxl-1.0` checkpoint, which
+  has a documented community issue producing genuinely reduced dynamic
+  range/contrast (not just underexposure) regardless of
+  denoising/CFG/seed. Download the file into Forge's `models/ControlNet/`
+  directory and update `controlnet_model` in the relevant
+  `profiles/neural/*.json` (and/or `--controlnet-model`) to match Forge's
+  `/controlnet/model_list` identifier for it.
+- Older `extracted/rosetattoo/scene_*` directories predating the mask
+  sidecars won't have `walk_zones_mask.png`/`hotspots_mask.png`/
+  `protect_mask.png`; the tool warns and falls back to `canny` edge guidance
+  (and skips the liberal-art pass) for those scenes. Re-run
+  `extract_rosetattoo_assets.py` to regenerate them.
+- Denoise strength above ~0.5 on the liberal-art pass was found to invent
+  whole new structures (e.g. an out-of-place iron gate) rather than just
+  texture/detail — keep it in the 0.35-0.45 range unless a scene
+  specifically calls for a bigger change, via `--settings-file` per-scene
+  overrides.
+
+See [`docs/reproducing.md`](../docs/reproducing.md) for the end-to-end,
+from-scratch reproduction guide, and
+[`docs/a1111-setup.md`](../docs/a1111-setup.md) for the Stable Diffusion
+WebUI backend setup this pipeline depends on.
