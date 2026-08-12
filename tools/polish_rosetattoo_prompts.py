@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create visual-only Stable Diffusion briefs from raw Rose Tattoo resource text."""
+"""Create visual-only photoreal img2img prompt briefs from raw Rose Tattoo resource text."""
 
 from __future__ import annotations
 
@@ -333,8 +333,8 @@ def polish_with_ollama(
 ) -> str:
     raw_prompt = trim_raw_prompt(raw_prompt, max_source_chars)
     system = (
-        "You convert raw adventure-game resource text and a source image into a compact visual inventory for Stable Diffusion img2img. "
-        "The source image, ControlNet edges, and original composition are authoritative. "
+        "You convert raw adventure-game resource text and a source image into a compact visual inventory for a photoreal img2img redraw. "
+        "The source image and original composition are authoritative. "
         "Keep only static details clearly visible in the background plate: architecture, furniture, props, surfaces, "
         "sign shapes, floor/wall boundaries, and puzzle-relevant objects. "
         "Remove biographies, dialogue, invisible/off-screen characters, actions, plot explanations, UI text, "

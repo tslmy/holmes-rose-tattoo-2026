@@ -17,9 +17,8 @@ the patched engine is tracked as a Git submodule.
   or a plain venv with Pillow installed.
 - The `scummvm-src/` Git submodule, initialized (`git submodule update
   --init --recursive`), for building the patched engine.
-- A Stable Diffusion WebUI backend (AUTOMATIC1111 or Forge) with the
-  ControlNet extension and the models described in
-  [`docs/a1111-setup.md`](a1111-setup.md) — required for the neural
+- The FLUX.1 + diffusers pipeline set up per
+  [`docs/flux-setup.md`](flux-setup.md) — required for the neural
   background redraw step, optional if you only want the non-neural Lanczos
   baseline.
 - Optional: [Ollama](https://ollama.com) with a vision-capable model (e.g.
@@ -43,25 +42,25 @@ map frames).
 
 ## Step 2 — Generate neural photoreal backgrounds
 
-Bring up the WebUI backend per [`docs/a1111-setup.md`](a1111-setup.md), then
-run the full batch against the tracked production profile:
+Set up the FLUX.1 + diffusers pipeline per
+[`docs/flux-setup.md`](flux-setup.md) (one-time `uv sync --extra flux` plus
+model downloads), then run the full batch:
 
 ```sh
-uv run python3 tools/neural_redraw_rosetattoo_backgrounds.py \
-  --api-url http://127.0.0.1:7860 \
-  --wait \
-  --settings-file profiles/neural/photographic-faithful.json \
+uv run python3 tools/flux_redraw_rosetattoo_backgrounds.py \
   --scale 2 \
+  --steps 12 \
+  --strength 0.25 \
   --skip-existing \
-  --output-dir generated/neural-redraws-faithful \
-  --scummvm-overrides mods/neural-hires-backgrounds-faithful
+  --output-dir generated/flux-redraws \
+  --scummvm-overrides mods/flux-hires-backgrounds
 ```
 
 Omit `--scenes` to process every extracted scene. `--skip-existing` makes
-this safely resumable if the backend is interrupted partway through an
-80-scene batch (expect several hours on a single consumer GPU). Spot-check
-output quality with the contact-sheet review tool
-(`tools/generate_rosetattoo_candidates.py`) before trusting a full run.
+this safely resumable if interrupted partway through an 80-scene batch
+(expect several hours on Apple Silicon). Spot-check output quality with the
+generated contact sheet (`validation/contact-sheets/flux-redraws.jpg`)
+before trusting a full run.
 
 ## Step 3 — Upscale cursors and the map
 
@@ -105,7 +104,7 @@ Copy the results into the same mod directory as step 2's
 background overrides use):
 
 ```sh
-cp -R enhanced/sprites/*_vgs mods/neural-hires-backgrounds-faithful/sprites/
+cp -R enhanced/sprites/*_vgs mods/flux-hires-backgrounds/sprites/
 ```
 
 ## Step 4 — Build ScummVM
@@ -135,7 +134,7 @@ licensing reasons).
 ```sh
 python3 tools/run_rosetattoo_validation.py \
     --scummvm scummvm-src/scummvm \
-    --asset-overrides mods/neural-hires-backgrounds-faithful \
+    --asset-overrides mods/flux-hires-backgrounds \
     --hires-scale 2 \
     --hires-format rgba32 \
     --save-dir "$HOME/Library/Application Support/ScummVM/Savegames" \
@@ -148,29 +147,28 @@ palette-mapped rendering.
 
 ## History and why the pipeline looks like this
 
-- **One production profile, not two.** Earlier sessions ran two competing
-  photoreal profiles (`photographic-faithful` and `photographic-cinematic`)
-  in parallel while debugging a "gray/washed-out" output complaint. That
-  turned out to stem from the *ControlNet checkpoint* choice (the official
-  `diffusers/controlnet-canny-sdxl-1.0` has a documented contrast-collapse
-  issue), not an inherent need for two profiles — once both profiles were
-  switched to the `xinsir` ControlNet checkpoint, a single well-tuned
-  profile (`photographic-faithful`) produces non-washed-out results in one
-  pass. `photographic-cinematic` is kept as an alternate style (warmer,
-  non-Turbo checkpoint, more steps) rather than a required second pass.
+- **FLUX.1 + diffusers replaced the earlier Stable Diffusion/Automatic1111
+  pipeline.** An SDXL + ControlNet + Automatic1111-API pipeline was the
+  original approach, but FLUX.1-schnell (run locally via `diffusers` on
+  Apple's `mps` backend) produces comparable or better photorealism without
+  needing a WebUI server, a ControlNet checkpoint, or a two-pass
+  base-redraw-plus-masked-decorative-pass design to hold structure — a
+  single low-strength img2img pass against the original background as the
+  init image is enough to keep geometry, walk zones, and small embedded
+  text (signage, door numbers) intact. See
+  [`tools/flux_redraw_rosetattoo_backgrounds.py`](../tools/flux_redraw_rosetattoo_backgrounds.py)
+  and [`docs/flux-setup.md`](flux-setup.md) for the current pipeline, and
+  its module docstring/`tools/README.md` for the strength/steps calibration
+  that was found by visual inspection (`--steps 12 --strength 0.25`, the
+  point past which higher strengths reliably garble small text and start
+  inventing extra people/props).
 - **Every scene gets an LLM-generated prompt brief, no manual overrides.**
   An earlier iteration hand-curated verbatim prompt text for a handful of
   fragile scenes while leaving the rest to raw extracted text, which meant
   different scenes silently went through different prompt pipelines. All
   scenes now go through the same `polish_with_ollama()` path with uniform
-  sanitization.
-- **The liberal-art masked second pass is intentional, not a workaround.**
-  It runs automatically after the geometry-preserving base redraw, using
-  Automatic1111's native inpainting `mask` parameter against each scene's
-  `protect_mask.png`, so decorative embellishment only ever touches pixels
-  outside walk zones/hotspots. This is a deliberate two-stage design (base
-  redraw + masked decorative pass), distinct from the abandoned
-  two-*profile* approach above.
+  sanitization, and the resulting briefs are backend-agnostic (used by the
+  FLUX pipeline the same way they were used by the earlier SD pipeline).
 - **Character/animated sprites are extracted and upscaled but not yet
   engine-wired.** The cursor set and the overhead map background/icons have
   full runtime override support; walk-cycle sprites for Watson, the player,
