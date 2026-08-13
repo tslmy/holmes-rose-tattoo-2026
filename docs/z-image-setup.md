@@ -29,7 +29,7 @@ geometry-locked production candidate. On the 32 GB M2 Max, start at
 2x diffusion pass needs substantially more unified memory.
 
 Z-Image Turbo Union ControlNet is available upstream through MFLUX, but it
-requires separate model weights and is not used by this baseline until it has
-passed the same geometry and visual validation. Do not use the regular
+requires a separate 6.7 GB checkpoint and is being evaluated through
+`tools/img2img/z_image_controlnet.py`. Do not use the regular
 Z-Image runner to build a playable pack: it can change door, storefront, and
 walkway geometry even at very low strength.

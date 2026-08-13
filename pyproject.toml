@@ -32,3 +32,6 @@ zimage = [
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+mflux = { git = "https://github.com/mflux-community/mflux.git" }
