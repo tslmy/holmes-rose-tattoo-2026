@@ -23,6 +23,9 @@ esrgan = [
     "torch>=2.3",
     "spandrel>=0.4",
 ]
+openai = [
+    "openai>=1.0",
+]
 
 [tool.uv]
 package = false

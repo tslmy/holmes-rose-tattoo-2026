@@ -41,6 +41,20 @@ The masks are useful for image
 editing experiments, but the flag values in a player's save game still need to
 be selected by the caller; the ordinary union mask remains the safe default.
 
+An optional cloud benchmark can submit every scene to GPT Image in one
+resumable pass:
+
+```sh
+uv sync --extra openai
+OPENAI_API_KEY=... uv run python3 tools/openai_image_rosetattoo_pass.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/openai-image-pass
+```
+
+It uses `protect_mask.png` as an inpainting mask and writes request metadata
+and hashes beside each output. ChatGPT Plus is not API access; this backend
+requires a separately billed API key.
+
 ### 2. Baseline (non-neural) upscaling
 
 Create deterministic enhanced outputs with Pillow's Lanczos resampler:
