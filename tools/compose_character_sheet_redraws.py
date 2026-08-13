@@ -58,8 +58,7 @@ def opaque_bbox(rgba: np.ndarray) -> tuple[int, int, int, int] | None:
 
 
 def fit_generated_to_target(generated: np.ndarray, target: np.ndarray) -> np.ndarray:
-    """Fit generated subject RGB to target bbox and retain target alpha."""
-    target_alpha = target[..., 3]
+    """Fit generated subject RGB and alpha into the native frame envelope."""
     target_box = opaque_bbox(target)
     source_box = opaque_bbox(generated)
     result = target.copy()
@@ -71,10 +70,14 @@ def fit_generated_to_target(generated: np.ndarray, target: np.ndarray) -> np.nda
     crop = crop.resize((tx1 - tx0, ty1 - ty0), Image.Resampling.LANCZOS)
     fitted = np.asarray(crop, dtype=np.uint8)
     fitted_alpha = fitted[..., 3] > 127
-    target_region = result[ty0:ty1, tx0:tx1, :3]
-    target_region[fitted_alpha] = fitted[..., :3][fitted_alpha]
-    result[ty0:ty1, tx0:tx1, :3] = target_region
-    result[..., 3] = target_alpha
+    target_region = result[ty0:ty1, tx0:tx1]
+    target_region[..., :3] = fitted[..., :3]
+    target_region[..., 3] = np.where(fitted_alpha, 255, 0).astype(np.uint8)
+    result[ty0:ty1, tx0:tx1] = target_region
+    result[:ty0, ..., 3] = 0
+    result[ty1:, ..., 3] = 0
+    result[:, :tx0, 3] = 0
+    result[:, tx1:, 3] = 0
     return result
 
 
@@ -133,7 +136,7 @@ def main() -> None:
             "character_sheet_reference": reference_path.name,
             "character_sheet_keyframes": key_indices,
             "character_sheet_frame_policy": "nearest-pose-every-frame" if not args.seed_only else "keyframes-only",
-            "alpha_policy": "original-source-mask",
+            "alpha_policy": "generated-chroma-keyed-silhouette-with-native-frame-envelope",
         }
         (output_dir / "metadata.json").write_text(json.dumps(out_metadata, indent=2) + "\n", encoding="utf-8")
         print(f"{name}: seeded {len(key_indices)} identity-consistent keyframes")
