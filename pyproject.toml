@@ -26,6 +26,9 @@ esrgan = [
 openai = [
     "openai>=1.0",
 ]
+zimage = [
+    "mflux>=0.18.1",
+]
 
 [tool.uv]
 package = false

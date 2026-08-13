@@ -5,6 +5,16 @@ Every command below also works with a plain `python3` as long as Pillow is
 installed in the active interpreter; `uv run python3 ...` is the recommended,
 reproducible way to get there (see the root [README](../README.md#setup)).
 
+## Native img2img backends
+
+The neural backends live under `tools/img2img/`: `flux.py` (FLUX.1),
+`gpt_image.py` (optional API), `sdxl_controlnet.py` (local SDXL Canny
+ControlNet), and `z_image.py` (local Z-Image Turbo). SDXL uses the extracted
+`protect_mask.png` during generation; every local backend restores resource,
+object, and edge boundaries deterministically afterward. The optional GPT
+runner is a hosted API client, so unlike the other three it cannot run a model
+locally.
+
 ## Background pipeline
 
 ### 1. Extract room backgrounds and prompt metadata
