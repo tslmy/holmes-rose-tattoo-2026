@@ -88,6 +88,28 @@ regions. Generated pixels must still be composited only into the unprotected
 interior and validated against the original border pixels; an image model's
 mask adherence is not itself a gameplay guarantee.
 
+### Optional GPT Image pass
+
+The project also includes an all-scenes GPT Image backend. It is intentionally
+optional and separate from the reproducible local production profile. ChatGPT
+Plus does not include API access; this command uses an `OPENAI_API_KEY` and
+separate API billing:
+
+```sh
+uv sync --extra openai
+OPENAI_API_KEY=... uv run python3 tools/openai_image_rosetattoo_pass.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/openai-image-pass \
+  --model gpt-image-2 \
+  --quality medium
+```
+
+This submits every extracted scene once, uses the conservative union
+`protect_mask.png` as an edit mask, and records source/output hashes and model
+settings in `generated/openai-image-pass/manifest.json`. The output is a
+benchmark candidate, not a playable pack, until deterministic border and
+runtime validation passes.
+
 ## Step 3 — Upscale cursors and the map
 
 ```sh
