@@ -17,7 +17,9 @@ For each target frame it:
    search (the VGS offsets provide the common sprite coordinate system);
 3. aggregates residuals only where the neighbour agrees in source colour and
    opacity, so moving limbs and changing silhouettes are never smeared; and
-4. restores the target frame's exact binary alpha mask.
+4. preserves the input detail frame's binary alpha mask. Identity-redrawn
+   sequences therefore retain their generated visible silhouette, while
+   ordinary ESRGAN sequences retain the extracted game mask.
 
 The result is intentionally conservative: a slightly less "creative" detail
 pass is preferable to a flickering hand, face, or coat edge in a game sprite.

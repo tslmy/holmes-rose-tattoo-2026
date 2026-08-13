@@ -4,9 +4,10 @@
 The generative pass operates on a 5x2 pose sheet so one character identity is
 resolved jointly across front, profile, back, and walking views. This tool
 fits each generated pose into the original frame's exact opaque bounding box,
-then restores the original frame alpha. The result is safe to feed into the
-temporal residual stabilizer: generated key poses provide life-like detail,
-while neighbouring original poses retain their exact game geometry.
+then uses the generated subject's chroma-keyed alpha as the visible
+silhouette. The result is safe to feed into the temporal residual stabilizer:
+generated key poses provide life-like detail, while the original frame
+dimensions, offsets, timing, and gameplay geometry remain authoritative.
 
 Reference sheets are intentionally external/generated artifacts. A sheet is
 never used as the runtime image itself; only its ten pose cells are extracted
