@@ -101,58 +101,40 @@ python3 tools/build_variant_contact_sheet.py --scenes 1 2 4 7 18 36
 Rows are variant directories under `mods/` (plus the original extracted
 background for reference); columns are the given scene numbers.
 
-### 4. Neural photoreal redraw (Automatic1111/Forge)
+### 4. Neural photoreal redraw (FLUX.1 + diffusers, local/mps)
 
-See [`docs/a1111-setup.md`](../docs/a1111-setup.md) for setting up the
-Stable Diffusion WebUI backend this step talks to.
+`tools/flux_redraw_rosetattoo_backgrounds.py` loads a GGUF-quantized
+FLUX.1-schnell pipeline directly in-process with Hugging Face `diffusers`,
+running on Apple's Metal (`mps`) backend — no server/API to run. See
+[`docs/flux-setup.md`](../docs/flux-setup.md) for one-time model setup,
+then:
 
 ```sh
-python3 tools/neural_redraw_rosetattoo_backgrounds.py \
-  --api-url http://127.0.0.1:7860 \
-  --wait \
-  --settings-file profiles/neural/photographic-faithful.json \
-  --scenes 1 18 36 \
-  --scale 2 \
-  --scummvm-overrides mods/neural-hires-backgrounds
+python3 tools/flux_redraw_rosetattoo_backgrounds.py \
+  --scenes 1 18 36 --scale 2 --steps 12 --strength 0.25 \
+  --scummvm-overrides mods/flux-hires-backgrounds
 ```
 
-`profiles/neural/photographic-faithful.json` is the tracked production
-profile (see [`docs/reproducing.md`](../docs/reproducing.md) for the full
-rationale behind its settings and history). Compare calibration sheets under
-`validation/contact-sheets/` before committing to a full run. RMS drift
-(printed per scene and stored in each `background.json` sidecar) is only a
-tripwire, not a quality score.
+It writes a two-column original-vs-redraw contact sheet (default
+`validation/contact-sheets/flux-redraws.jpg`) for quick visual review, and
+optionally a ScummVM-ready override pack (`background@Nx.png` + prompt/
+metadata sidecars).
 
 Useful flags:
 
 - `--skip-existing` — resume an interrupted/long batch without regenerating
   finished scenes.
-- `--init-upscaler` (default `R-ESRGAN 4x+`) — builds the diffusion pass's
-  init image with a real super-resolution model instead of a naive Lanczos
-  resize, which keeps fine text/detail crisp instead of baking in the
-  original's dithering pattern. Pass `--init-upscaler lanczos` to restore the
-  old offline-only behavior.
-- `--edge-source {canny,walk-zones,hotspots,combined}` (default `canny`) —
-  chooses the ControlNet structural guidance image. `walk-zones`/`hotspots`/
-  `combined` use the game-semantic mask sidecars from step 1 instead of a
-  pixel-level Canny edge map, which tends to preserve navigable geometry and
-  interactive silhouettes without dictating brush-stroke detail.
-- `--liberal-art` / `--no-liberal-art` (default: **on**) — runs an automatic
-  second masked img2img pass after the base geometry-preserving redraw,
-  using each scene's `protect_mask.png` as Automatic1111's native inpainting
-  mask. The base redraw stays constrained to the game's original geometry;
-  this second pass is allowed a higher `--liberal-art-denoise` (default
-  `0.4`) so it can invent tasteful extra decorative detail purely in the
-  non-critical background, while the protected walk-zone/hotspot region
-  stays byte-identical. `--liberal-art-margin` (default `12` native pixels)
-  dilates the protected region before inverting it so freeform generation
-  can't creep up to the exact edge of critical geometry, and
-  `--liberal-art-mask-blur` (default `24`) softens the seam. The pre-pass
-  image is kept alongside the final output as
-  `background_faithful@<scale>x.png` for comparison.
-- Wide scrolling rooms are split into overlapping horizontal tiles by
-  default so panoramic backgrounds don't need one enormous diffusion
-  request; tune with `--tile-width`/`--tile-overlap`.
+- `--strength` — img2img denoise strength; lower preserves more of the
+  original geometry and embedded text. `--steps` is the *base* step count,
+  from which `strength * steps` actual denoising steps are run (FLUX.1-
+  schnell's distillation targets 1-4 *actual* steps, so a low strength needs
+  a higher base `--steps` to still land in that range). `--steps 12
+  --strength 0.25` (3 real steps) was found to be the best-quality point by
+  visual inspection: strength ≥0.35 reliably garbles small embedded text
+  (signage, door numbers) and starts inventing extra people/props not in
+  the original scene.
+- `--prompt-brief-dir` (default `profiles/neural/prompt-briefs`) — per-scene
+  LLM-polished prompt briefs; see below for how to (re)generate them.
 
 For LLM-polished prompts (recommended — every scene gets one, with no
 per-scene manual overrides):
@@ -174,9 +156,9 @@ resulting `visual_brief.txt` files are short, transformed noun-phrase lists,
 not the game's original narrative prose, so they're checked into git under
 `profiles/neural/prompt-briefs/scene_NNN/` — future runs don't need to
 regenerate them (or have Ollama installed) unless a scene's extracted
-metadata changes. `neural_redraw_rosetattoo_backgrounds.py
---prompt-brief-dir` defaults to this checked-in directory and only falls
-back to a scene's raw `prompt.txt` if a brief is genuinely missing.
+metadata changes. `flux_redraw_rosetattoo_backgrounds.py --prompt-brief-dir`
+defaults to this checked-in directory and only falls back to a scene's raw
+`prompt.txt` if a brief is genuinely missing.
 
 ## Cursors, items, character, and font sprites
 
@@ -197,9 +179,9 @@ python3 tools/extract_rosetattoo_sprites.py --resources RMOUSE.VGS OMOUSE.VGS
 python3 tools/extract_rosetattoo_sprites.py --resources WATSON.VGS --palette-scene 1
 
 # Upscale extracted frames via the same non-diffusion ESRGAN-family endpoint
-# used for the background pipeline's init-image step (no ControlNet/redraw -
-# these are small, silhouette/hotspot-critical elements where hallucinated
-# new content would break gameplay recognizability):
+# used for cursors/items/map below (no ControlNet/redraw - these are small,
+# silhouette/hotspot-critical elements where hallucinated new content would
+# break gameplay recognizability):
 python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
 ```
 
@@ -398,28 +380,19 @@ python3 tools/run_rosetattoo_validation.py \
 
 ## Calibration notes
 
-- **ControlNet checkpoint choice (contrast/exposure collapse fix)**: the
-  photographic profiles use `controlnet-canny-sdxl-1.0-xinsir-v2` (from
-  [`xinsir/controlnet-canny-sdxl-1.0`](https://huggingface.co/xinsir/controlnet-canny-sdxl-1.0)),
-  not the official `diffusers/controlnet-canny-sdxl-1.0` checkpoint, which
-  has a documented community issue producing genuinely reduced dynamic
-  range/contrast (not just underexposure) regardless of
-  denoising/CFG/seed. Download the file into Forge's `models/ControlNet/`
-  directory and update `controlnet_model` in the relevant
-  `profiles/neural/*.json` (and/or `--controlnet-model`) to match Forge's
-  `/controlnet/model_list` identifier for it.
-- Older `extracted/rosetattoo/scene_*` directories predating the mask
-  sidecars won't have `walk_zones_mask.png`/`hotspots_mask.png`/
-  `protect_mask.png`; the tool warns and falls back to `canny` edge guidance
-  (and skips the liberal-art pass) for those scenes. Re-run
-  `extract_rosetattoo_assets.py` to regenerate them.
-- Denoise strength above ~0.5 on the liberal-art pass was found to invent
-  whole new structures (e.g. an out-of-place iron gate) rather than just
-  texture/detail — keep it in the 0.35-0.45 range unless a scene
-  specifically calls for a bigger change, via `--settings-file` per-scene
-  overrides.
+- **FLUX img2img strength/steps**: `flux_redraw_rosetattoo_backgrounds.py`'s
+  `--steps` is a *base* step count, from which `strength * steps` actual
+  denoising steps run (FLUX.1-schnell's distillation targets 1-4 *actual*
+  steps). `--steps 12 --strength 0.25` (3 real steps) was found by visual
+  inspection (contact sheets under `validation/contact-sheets/`) to be the
+  best-quality point: strength ≥0.35 reliably garbles small embedded text
+  (signage, door numbers) and starts inventing extra people/props not in
+  the original scene.
+- Compare calibration sheets under `validation/contact-sheets/` before
+  committing to a full ~80-scene run — it takes several hours on Apple
+  Silicon.
 
 See [`docs/reproducing.md`](../docs/reproducing.md) for the end-to-end,
 from-scratch reproduction guide, and
-[`docs/a1111-setup.md`](../docs/a1111-setup.md) for the Stable Diffusion
-WebUI backend setup this pipeline depends on.
+[`docs/flux-setup.md`](../docs/flux-setup.md) for the FLUX.1 + diffusers
+pipeline setup this project depends on.

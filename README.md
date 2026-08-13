@@ -37,13 +37,16 @@ _Consider donating to them this holiday season._
 
 The original game renders at 640x480 with 256-color palettized art. We redraw
 the original assets into detailed, true-color, photorealistic-but-faithful
-renderings. This is achieved via a [Stable Diffusion][sdf] pipeline. 
+renderings. This is achieved via a [FLUX.1][flux] image-to-image pipeline,
+run locally with Hugging Face `diffusers` on Apple's Metal (`mps`) backend.
 
 Since geometries (object boundaries, hotspots that respond to mouse events,
 walkable regions for playable characters) are important to a point-and-click
-RPG, we keep the geometries locked with a "sidecar" neural network called
-[ControlNet][ctn]. (See [`docs/reproducing.md`][rpd] for why this doesn't just
-hallucinate a new scene.)
+RPG, the redraw uses a low img2img denoise strength against the original
+background as the init image, which keeps composition, walk zones, and small
+embedded text (signage, door numbers) intact rather than hallucinating a new
+scene. (See [`docs/reproducing.md`][rpd] for the calibration history behind
+that choice.)
 
 [rpd]: docs/reproducing.md#history-and-why-the-pipeline-looks-like-this
 
@@ -61,8 +64,7 @@ native sprites/UI on top of the high-resolution background, scaled mouse
 input, and several hires-specific rendering fixes (journal, map, tooltip,
 cursor).
 
-[ctn]: https://arxiv.org/abs/2302.05543
-[sdf]: https://en.wikipedia.org/wiki/Stable_Diffusion
+[flux]: https://blackforestlabs.ai/announcing-black-forest-labs/
 
 ## Setup
 
@@ -87,9 +89,10 @@ Follow these steps:
    the complete, ordered, end-to-end guide: extract assets, generate
    photoreal backgrounds, upscale sprites, patch and build ScummVM, and
    play. Start here.
-2. **[Set up the Stable Diffusion WebUI backend](docs/a1111-setup.md)** —
-   Automatic1111/Forge install, ControlNet extension, model downloads, and
-   known API quirks. Needed before step 1's neural redraw stage.
+2. **[Set up the FLUX.1 + diffusers pipeline](docs/flux-setup.md)** —
+   model downloads (GGUF-quantized transformer + text encoders/VAE), one-time
+   `uv sync --extra flux` setup, and calibration notes. Needed before step 1's
+   neural redraw stage.
 3. **[Tools reference](tools/README.md)** — flag-by-flag documentation for
    every script under `tools/`: extraction, upscaling, neural redraw,
    candidate review, sprite/font/map handling, and in-game validation.
@@ -136,4 +139,4 @@ Do not commit:
 - original `RES*.RRM`, `SPEECH*.LIB`, `TALK.LIB`, `WALK.LIB`, or DOS install
   files
 - extracted room PNGs or prompt files generated from copyrighted game data
-- Stable Diffusion outputs derived from the game assets
+- FLUX-redrawn outputs derived from the game assets

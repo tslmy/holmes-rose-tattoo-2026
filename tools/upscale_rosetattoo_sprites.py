@@ -6,16 +6,15 @@ extract_rosetattoo_sprites.py (extracted/sprites/<resource>/frame_NNN.png +
 metadata.json) and produces upscaled RGBA PNGs under a matching output tree,
 preserving per-frame transparency and offsets.
 
-Unlike the background pipeline (neural_redraw_rosetattoo_backgrounds.py),
-this intentionally does NOT run a diffusion/ControlNet redraw pass: these
-are small, silhouette-critical interactive elements (cursors, inventory
-items, walk-cycle frames) where hallucinated new detail or a shifted
+Unlike the background pipeline (`flux_redraw_rosetattoo_backgrounds.py`),
+this intentionally does NOT run a generative redraw pass: these are small,
+silhouette-critical interactive elements (cursors, inventory items,
+walk-cycle frames) where hallucinated new detail or a shifted
 hotspot/hand-position would break gameplay recognizability. Instead this
-reuses the same Automatic1111 `/sdapi/v1/extra-single-image` real
-super-resolution endpoint used for the background pipeline's init-image
-step (see upscale_via_api() in neural_redraw_rosetattoo_backgrounds.py),
-which reconstructs plausible high-frequency detail without redrawing
-content - appropriate for cleanly scaling up existing brush strokes.
+uses an Automatic1111/Forge `/sdapi/v1/extra-single-image` real
+super-resolution endpoint (see `tools/sd_api_utils.py`), which reconstructs
+plausible high-frequency detail without redrawing content - appropriate for
+cleanly scaling up existing brush strokes.
 
 Since ESRGAN-family models expect an opaque RGB image, each frame's alpha
 channel is separated first: the RGB is flattened onto a neutral fill color
@@ -36,7 +35,7 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from neural_redraw_rosetattoo_backgrounds import upscale_via_api  # noqa: E402
+from sd_api_utils import upscale_via_api  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 FLATTEN_FILL = (128, 128, 128)

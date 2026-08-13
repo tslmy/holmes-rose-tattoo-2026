@@ -453,7 +453,7 @@ def render_rect_mask(
 ) -> Image.Image:
     """Render a set of {x, y, w, h} rectangles as a black-background mask.
 
-    Used to turn walk zones and object hotspot bounds into ControlNet-ready
+    Used to turn walk zones and object hotspot bounds into structural
     boundary images: clean rectangle outlines instead of noisy pixel-level
     edges from the painted background art.
     """
@@ -656,8 +656,7 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
     if walk_zones or hotspots:
         # Solid-filled (not outline) union of both rect sets, used to protect
         # pathfinding-critical geometry when a redraw pass is allowed extra
-        # artistic freedom elsewhere (e.g. neural_redraw_rosetattoo_backgrounds.py's
-        # --liberal-art inpainting pass): white = walkable floor or clickable
+        # artistic freedom elsewhere: white = walkable floor or clickable
         # hotspot bounds that must stay pixel-faithful, black = everywhere else,
         # free to receive extra invented detail.
         protect_mask = render_rect_mask(
@@ -705,11 +704,10 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
             "hotspots are clickable/examinable object bounds excluding pure floor-logic "
             "zones (nowalk_zone/blank_zone/script_zone), rendered to hotspots_mask.png.",
             "structure_control.png overlays both masks (blue=walk zones, yellow=hotspots) "
-            "as a cleaner boundary reference for ControlNet than pixel-level image edges.",
+            "as a cleaner boundary reference than pixel-level image edges.",
             "protect_mask.png is a solid-filled (not outline) union of both rect sets: "
             "white = walkable floor or hotspot bounds that must stay pixel-faithful, "
-            "black = decorative background free for extra invented detail (see "
-            "neural_redraw_rosetattoo_backgrounds.py's --liberal-art pass).",
+            "black = decorative background free for extra invented detail.",
         ],
     }
     (scene_dir / "metadata.json").write_text(
