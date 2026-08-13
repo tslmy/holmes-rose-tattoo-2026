@@ -81,19 +81,34 @@ uv run python3 tools/flux_redraw_rosetattoo_backgrounds.py \
 ```
 
 The defaults (`--strength 0.85 --steps 24`) intentionally give FLUX
-**artistic freedom**, not a faithful restoration: only the overall room
-layout, walkable floor area, and doorway/object silhouettes need to keep
-roughly lining up with the original scene (ScummVM's hotspot/walk-zone
-metadata is coordinate-based and independent of the rendered art), so
-FLUX is free to reimagine materials, decor, props, and lighting as
-richer, more cinematic concept art. Small embedded text/signage is
-**not** preserved at this strength and will typically render as garbled
-gibberish — the `STYLE_PROMPT` asks the model to avoid inventing new
-readable text, but doesn't attempt to preserve existing text.
+**artistic freedom**, not a faithful restoration: FLUX is free to
+reimagine materials, decor, props, and lighting as richer, more cinematic
+concept art. Small embedded text/signage is **not** preserved at this
+strength and will typically render as garbled gibberish — the
+`STYLE_PROMPT` asks the model to avoid inventing new readable text, but
+doesn't attempt to preserve existing text.
+
+This game still has to remain playable, though, and high-strength img2img
+alone gives *no actual geometric guarantee* the redraw stays close enough
+to the original layout for that. So by default this tool runs
+`FluxInpaintPipeline` instead of plain img2img, using the inverse of each
+scene's `protect_mask.png` (emitted by `tools/extract_rosetattoo_assets.py`
+— a solid-filled union of the room's walk-zone and hotspot rectangles) as
+`mask_image`: white (free to redraw) everywhere except those rectangles,
+which stay pixel-close to the original. Unlike alpha-compositing two
+separately-generated images (which produces a visible lighting "ghost"
+seam), inpainting conditions the diffusion on the kept pixels at every
+step, so the boundary blends naturally. Pass `--no-protect` to disable
+this and do a single unprotected pass over the whole scene (not
+recommended for the final mod pack). `--protect-feather` (default `8.0`)
+controls how soft the transition is between protected and free regions.
 
 Calibration notes from visual inspection
 (`validation/contact-sheets/flux-strength-sweep.jpg`, comparing
-strength=0.5/0.7/0.85 with steps=16/20/24 respectively):
+strength=0.5/0.7/0.85 with steps=16/20/24 respectively, and
+`validation/contact-sheets/flux-inpaint-protect-test.jpg`, confirming the
+walk-zone/hotspot mask keeps protected regions ~3x closer to the original
+by mean pixel difference than the freely-redrawn regions):
 
 - `--strength` is the img2img denoise strength; `--steps` is the *base*
   step count from which `strength * steps` actual denoising steps are run.
