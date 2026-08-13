@@ -27,6 +27,20 @@ boundary-reference rasters `walk_zones_mask.png`, `hotspots_mask.png`,
 `structure_control.png` (both overlaid), and `protect_mask.png` (solid-filled
 union of walk zones + hotspots, used by the liberal-art masked pass below).
 
+To enumerate story-flag configurations without running ScummVM:
+
+```sh
+python3 tools/generate_rosetattoo_state_masks.py \
+  --input-dir extracted/rosetattoo
+```
+
+This writes `scene_NNN/state_masks.json` and per-configuration masks under
+`scene_NNN/states/`. It uses the same two-required-flag/all-must-pass rule,
+including negative flag literals, as `Scene::checkSceneFlags()` in the engine.
+The masks are useful for image
+editing experiments, but the flag values in a player's save game still need to
+be selected by the caller; the ordinary union mask remains the safe default.
+
 ### 2. Baseline (non-neural) upscaling
 
 Create deterministic enhanced outputs with Pillow's Lanczos resampler:
