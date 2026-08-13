@@ -218,6 +218,8 @@ def process_scene(
     result = pipe(
         prompt=prompt,
         image=init_image,
+        height=init_image.height,
+        width=init_image.width,
         strength=strength,
         num_inference_steps=steps,
         guidance_scale=0.0,  # FLUX.1-schnell is a CFG-free distilled model.
@@ -226,6 +228,16 @@ def process_scene(
     redraw = result.images[0]
     elapsed = time.monotonic() - started
     print(f"  scene {scene_id}: done in {elapsed:.1f}s")
+    if redraw.size != init_image.size:
+        # Defensive safety net: FluxImg2ImgPipeline silently defaults height/
+        # width to 1024x1024 (its default_sample_size * vae_scale_factor)
+        # whenever they're omitted, ignoring the init image's own size - we
+        # pass them explicitly above, but resize here too in case a future
+        # diffusers version reintroduces its own internal rounding/cropping,
+        # so ScummVM never sees an override with unexpected dimensions.
+        print(f"  scene {scene_id}: resizing {redraw.size} -> {init_image.size} "
+              f"to match the requested init size")
+        redraw = redraw.resize(init_image.size, Image.LANCZOS)
 
     scene_output_dir.mkdir(parents=True, exist_ok=True)
     redraw.save(output_path)
