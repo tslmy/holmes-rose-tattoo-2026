@@ -7,7 +7,7 @@ import argparse
 import time
 from pathlib import Path
 
-from common import ROOT, prompt_for, restore_geometry, save_scene, scaled_source, scene_dirs
+from common import ROOT, prompt_for, save_scene, scaled_source, scene_dirs
 
 
 DEFAULT_MODEL = "filipstrand/Z-Image-Turbo-mflux-4bit"
@@ -32,7 +32,7 @@ def main() -> None:
     parser.add_argument("--quantize", type=int, choices=(4, 8))
     parser.add_argument("--scenes", type=int, nargs="*")
     parser.add_argument("--scale", type=float, default=1.0)
-    parser.add_argument("--strength", type=float, default=0.45)
+    parser.add_argument("--strength", type=float, default=0.28)
     parser.add_argument("--steps", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-existing", action="store_true")
@@ -58,7 +58,11 @@ def main() -> None:
             height=init.height,
             guidance=0.0,
         )
-        image = restore_geometry(generated.image.resize(init.size), scene_dir, original)
+        # Z-Image Turbo's standard img2img API has no inpaint-mask input.
+        # Do not paste rectangular metadata bounds over its output: that turns
+        # the original 256-colour art into visible seams. It is a visual
+        # candidate backend, not the geometry-guaranteed production backend.
+        image = generated.image.resize(init.size)
         path = save_scene(args.output_dir, "zimage", scene_dir, image, {**vars(args), "backend": "z-image-turbo-mflux"}, args.scale)
         print(f"{scene_dir.name}: {path} ({time.monotonic() - started:.1f}s)")
 

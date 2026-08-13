@@ -68,6 +68,13 @@ def _boundary(mask: Image.Image, radius: int) -> Image.Image:
 
 
 def geometry_lock(scene_dir: Path, original: Image.Image, target_size: tuple[int, int]) -> Image.Image:
+    """Lock only semantic game-resource boundaries, never texture-derived edges.
+
+    A Canny-style edge map from the 256-colour original captures its dithering
+    and brick texture. Compositing those pixels back after generation makes a
+    photoreal redraw look contaminated, while providing no extra gameplay
+    guarantee beyond the extracted resource geometry.
+    """
     lock = Image.new("L", original.size, 0)
     protect_path = scene_dir / "protect_mask.png"
     if protect_path.exists():
@@ -85,8 +92,7 @@ def geometry_lock(scene_dir: Path, original: Image.Image, target_size: tuple[int
             if 0 <= x < original.width and 0 <= y < original.height and 1 <= width <= original.width and 1 <= height <= original.height:
                 draw.rectangle((x, y, x + width - 1, y + height - 1), fill=255)
         lock = ImageChops.lighter(lock, _boundary(objects, 8))
-    edges = canny_like(original).convert("L").filter(ImageFilter.MaxFilter(3))
-    return ImageChops.lighter(lock, edges).resize(target_size, Image.NEAREST)
+    return lock.resize(target_size, Image.NEAREST)
 
 
 def restore_geometry(redraw: Image.Image, scene_dir: Path, original: Image.Image) -> Image.Image:

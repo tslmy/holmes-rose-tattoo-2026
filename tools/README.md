@@ -10,10 +10,10 @@ reproducible way to get there (see the root [README](../README.md#setup)).
 The neural backends live under `tools/img2img/`: `flux.py` (FLUX.1),
 `gpt_image.py` (optional API), `sdxl_controlnet.py` (local SDXL Canny
 ControlNet), and `z_image.py` (local Z-Image Turbo). SDXL uses the extracted
-`protect_mask.png` during generation; every local backend restores resource,
-object, and edge boundaries deterministically afterward. The optional GPT
-runner is a hosted API client, so unlike the other three it cannot run a model
-locally.
+`protect_mask.png` during generation and provides the geometry-guaranteed
+production path. Z-Image Turbo is a low-strength visual candidate until its
+Union ControlNet integration is validated. The optional GPT runner is a hosted
+API client, so unlike the other three it cannot run a model locally.
 
 ## Background pipeline
 
