@@ -2,11 +2,10 @@
 """Assemble a complete Rose Tattoo runtime override tree.
 
 The playable tree is deliberately built from validated, scale-qualified
-backgrounds and the temporal sprite set. Identity-consistent character redraws
-can be copied in for offline inspection, but are not enabled by the runtime
-unless its experimental scene-sprite overlay is explicitly requested. Keeping
-this as an explicit assembly step prevents a partial experiment from being
-mistaken for a complete playable pack.
+backgrounds and the temporal sprite set. Pose-matched animation redraws may
+replace individual frames; any omitted frame remains the temporal fallback.
+The runtime consumes both in the original scene draw order, so this is safe to
+assemble progressively without freezing a walk cycle.
 """
 
 from __future__ import annotations
@@ -46,9 +45,9 @@ def main() -> None:
         default=ROOT / "enhanced" / "sprites-temporal",
     )
     parser.add_argument(
-        "--lifelike-sprite-dir",
+        "--animation-redraw-dir",
         type=Path,
-        default=ROOT / "enhanced" / "sprites-lifelike-v2",
+        default=ROOT / "generated" / "animation-redraws",
     )
     parser.add_argument(
         "--output-dir",
@@ -56,19 +55,18 @@ def main() -> None:
         default=ROOT / "generated" / "playable-overrides-2x",
     )
     parser.add_argument(
-        "--include-experimental-lifelike-sprites",
+        "--include-animation-redraws",
         action="store_true",
         help=(
-            "Overlay generated character sequences for offline review only. "
-            "They require SCUMMVM_SHERLOCK_TATTOO_EXPERIMENTAL_SCENE_SPRITES=1 "
-            "and are not part of the safe playable default."
+            "Replace only explicitly pose-matched generated frames. Missing "
+            "frames retain the temporal fallback."
         ),
     )
     args = parser.parse_args()
 
     required_inputs = [args.background_dir, args.sprite_dir]
-    if args.include_experimental_lifelike_sprites:
-        required_inputs.append(args.lifelike_sprite_dir)
+    if args.include_animation_redraws:
+        required_inputs.append(args.animation_redraw_dir)
     for required in required_inputs:
         if not required.is_dir():
             raise SystemExit(f"missing input directory: {required}")
@@ -78,12 +76,11 @@ def main() -> None:
     sprite_root = args.output_dir / "sprites"
     sprite_count = copy_files(args.sprite_dir, sprite_root, "frame_*@2x.png")
     copy_files(args.sprite_dir, sprite_root, "metadata.json")
-    lifelike_count = 0
-    if args.include_experimental_lifelike_sprites:
-        lifelike_count = copy_files(
-            args.lifelike_sprite_dir, sprite_root, "frame_*@2x.png"
+    animation_redraw_count = 0
+    if args.include_animation_redraws:
+        animation_redraw_count = copy_files(
+            args.animation_redraw_dir, sprite_root, "frame_*@2x.png"
         )
-        copy_files(args.lifelike_sprite_dir, sprite_root, "metadata.json")
 
     scene_count = len(list(args.output_dir.glob("scene_*/background@2x.png")))
     resource_names = sorted(
@@ -94,12 +91,12 @@ def main() -> None:
         "scale": 2,
         "background_source": str(args.background_dir.resolve()),
         "temporal_sprite_source": str(args.sprite_dir.resolve()),
-        "lifelike_sprite_source": str(args.lifelike_sprite_dir.resolve()),
+        "animation_redraw_source": str(args.animation_redraw_dir.resolve()),
         "scene_count": scene_count,
         "background_files_copied": background_count,
         "temporal_sprite_frames_copied": sprite_count,
-        "lifelike_sprite_frames_overlaid": lifelike_count,
-        "experimental_lifelike_sprites_included": args.include_experimental_lifelike_sprites,
+        "pose_matched_animation_frames_replaced": animation_redraw_count,
+        "animation_redraws_included": args.include_animation_redraws,
         "sprite_resource_count": len(resource_names),
         "sprite_resources": resource_names,
         "runtime_contract": {

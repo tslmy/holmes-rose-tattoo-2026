@@ -5,9 +5,11 @@ The generative pass operates on a 5x2 pose sheet so one character identity is
 resolved jointly across front, profile, back, and walking views. This tool
 fits each generated pose into the original frame's exact opaque bounding box,
 then uses the generated subject's chroma-keyed alpha as the visible
-silhouette. The result is safe to feed into the temporal residual stabilizer:
-generated key poses provide life-like detail, while the original frame
-dimensions, offsets, timing, and gameplay geometry remain authoritative.
+silhouette. A sheet is an identity reference, not an animation: it may only
+replace the source frames explicitly represented by the sheet. All other
+frames retain their temporal-upscale fallback until a pose-matched redraw is
+available. This is deliberately conservative: copying a nearby pose into a
+walk cycle freezes the legs and creates the appearance of sliding.
 
 Reference sheets are intentionally external/generated artifacts. A sheet is
 never used as the runtime image itself; only its ten pose cells are extracted
@@ -90,11 +92,6 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "enhanced" / "sprites-lifelike-seeded")
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument("--resources", nargs="+", default=None)
-    parser.add_argument(
-        "--seed-only",
-        action="store_true",
-        help="Only replace the ten sheet keyframes; by default the nearest sheet pose is fitted into every frame.",
-    )
     args = parser.parse_args()
 
     names = args.resources or sorted(p.stem for p in args.references_dir.glob("*.png"))
@@ -120,13 +117,12 @@ def main() -> None:
             base_path = base_dir / base_record["file"]
             target_path = source_dir / record["file"]
             target = load_rgba(target_path)
-            if not args.seed_only or frame_index in key_images:
+            if frame_index in key_images:
                 # The target alpha is low-resolution; the base image is the
                 # scale-qualified frame that will receive generated RGB.
                 base = load_rgba(base_path)
                 target_hi = np.asarray(Image.fromarray(target, "RGBA").resize(base.shape[1::-1], Image.Resampling.NEAREST))
-                nearest_key = min(key_indices, key=lambda key: abs(key - frame_index))
-                fitted = fit_generated_to_target(key_images[nearest_key], target_hi)
+                fitted = fit_generated_to_target(key_images[frame_index], target_hi)
                 Image.fromarray(fitted, "RGBA").save(output_dir / base_record["file"])
             else:
                 shutil.copy2(base_path, output_dir / base_record["file"])
@@ -136,7 +132,7 @@ def main() -> None:
             "upscaler": "identity-consistent-character-sheet-seed",
             "character_sheet_reference": reference_path.name,
             "character_sheet_keyframes": key_indices,
-            "character_sheet_frame_policy": "nearest-pose-every-frame" if not args.seed_only else "keyframes-only",
+            "character_sheet_frame_policy": "explicit-sheet-keyframes-only",
             "alpha_policy": "generated-chroma-keyed-silhouette-with-native-frame-envelope",
         }
         (output_dir / "metadata.json").write_text(json.dumps(out_metadata, indent=2) + "\n", encoding="utf-8")
