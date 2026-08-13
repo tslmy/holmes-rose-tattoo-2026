@@ -7,7 +7,9 @@ import argparse
 import time
 from pathlib import Path
 
-from common import ROOT, canny_like, freedom_mask, prompt_for, restore_geometry, save_scene, scaled_source, scene_dirs
+from PIL import ImageFilter
+
+from common import ROOT, boundary_freedom_mask, canny_like, freedom_mask, prompt_for, restore_geometry, save_scene, scaled_source, scene_dirs
 
 
 DEFAULT_FORGE = Path("/Users/lmy/Projects/stable-diffusion-webui-forge/models")
@@ -41,10 +43,21 @@ def main() -> None:
     parser.add_argument("--device", default="mps")
     parser.add_argument("--scenes", type=int, nargs="*")
     parser.add_argument("--scale", type=float, default=1.0)
-    parser.add_argument("--strength", type=float, default=0.45)
+    parser.add_argument("--strength", type=float, default=0.25)
     parser.add_argument("--steps", type=int, default=28)
     parser.add_argument("--control-scale", type=float, default=0.85)
+    parser.add_argument(
+        "--mask-mode",
+        choices=("boundary", "full"),
+        default="boundary",
+        help="Protect narrow gameplay boundaries (default) or entire gameplay regions.",
+    )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--hard-geometry-lock",
+        action="store_true",
+        help="Composite source pixels over resource masks after generation (debug only; visibly boxy for rectangular hotspots).",
+    )
     parser.add_argument("--skip-existing", action="store_true")
     args = parser.parse_args()
     if not args.checkpoint.exists() or not args.controlnet.exists():
@@ -56,17 +69,27 @@ def main() -> None:
         if args.skip_existing and output.exists():
             print(f"{scene_dir.name}: exists")
             continue
-        original, init = scaled_source(scene_dir, args.scale)
+        # Keep the true-colour extracted pixels as the img2img reference. A
+        # palette-dither blur is useful for FLUX, but SDXL's VAE already
+        # smooths the source and a blurred protected region becomes a visible
+        # rectangle when inpainting is used.
+        original, init = scaled_source(scene_dir, args.scale, blur_radius=0.0)
         started = time.monotonic()
+        mask = boundary_freedom_mask(scene_dir, init.size) if args.mask_mode == "boundary" else freedom_mask(scene_dir, init.size)
         image = pipe(
             prompt=prompt_for(scene_dir), negative_prompt="text, letters, people, changed perspective, extra objects",
-            image=init, mask_image=freedom_mask(scene_dir, init.size), control_image=canny_like(init),
+            # The source art is palette-dithered. Keep it sharp for img2img
+            # conditioning, but suppress its texture before extracting Canny
+            # edges so ControlNet receives architecture rather than noise.
+            image=init, mask_image=mask, control_image=canny_like(init.filter(ImageFilter.GaussianBlur(2.0)), low=60),
             strength=args.strength, num_inference_steps=args.steps, guidance_scale=5.5,
             controlnet_conditioning_scale=args.control_scale,
             generator=torch.Generator(device="cpu").manual_seed(args.seed),
             height=init.height, width=init.width,
         ).images[0]
-        image = restore_geometry(image.resize(init.size), scene_dir, original)
+        image = image.resize(init.size)
+        if args.hard_geometry_lock:
+            image = restore_geometry(image, scene_dir, original)
         path = save_scene(args.output_dir, "sdxl", scene_dir, image, {**vars(args), "backend": "sdxl-controlnet"}, args.scale)
         print(f"{scene_dir.name}: {path} ({time.monotonic() - started:.1f}s)")
 

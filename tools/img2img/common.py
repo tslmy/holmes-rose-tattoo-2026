@@ -53,6 +53,18 @@ def freedom_mask(scene_dir: Path, size: tuple[int, int], feather: float = 6.0) -
     return editable.filter(ImageFilter.GaussianBlur(feather)) if feather else editable
 
 
+def boundary_freedom_mask(scene_dir: Path, size: tuple[int, int], radius: int = 3, feather: float = 2.0) -> Image.Image:
+    """Allow redraw except for a thin band around resource-derived regions."""
+    protect_path = scene_dir / "protect_mask.png"
+    if not protect_path.exists():
+        return Image.new("L", size, 255)
+    protected = Image.open(protect_path).convert("L")
+    boundary = _boundary(protected, radius)
+    locked = boundary.resize(size, Image.NEAREST)
+    editable = ImageOps.invert(locked)
+    return editable.filter(ImageFilter.GaussianBlur(feather)) if feather else editable
+
+
 def canny_like(image: Image.Image, low: int = 40) -> Image.Image:
     """Dependency-free structural control image for ControlNet."""
     edges = image.convert("L").filter(ImageFilter.GaussianBlur(1.0)).filter(ImageFilter.FIND_EDGES)
