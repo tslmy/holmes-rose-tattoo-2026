@@ -52,8 +52,8 @@ model downloads), then run the full batch:
 ```sh
 uv run python3 tools/flux_redraw_rosetattoo_backgrounds.py \
   --scale 2 \
-  --steps 12 \
-  --strength 0.25 \
+  --steps 24 \
+  --strength 0.60 \
   --skip-existing \
   --output-dir generated/flux-redraws \
   --scummvm-overrides mods/flux-hires-backgrounds
@@ -162,9 +162,8 @@ palette-mapped rendering.
   [`tools/flux_redraw_rosetattoo_backgrounds.py`](../tools/flux_redraw_rosetattoo_backgrounds.py)
   and [`docs/flux-setup.md`](flux-setup.md) for the current pipeline, and
   its module docstring/`tools/README.md` for the strength/steps calibration
-  that was found by visual inspection (`--steps 12 --strength 0.25`, the
-  point past which higher strengths reliably garble small text and start
-  inventing extra people/props).
+  that uses the hard resource/edge geometry lock; the lock, rather than a
+  low denoise strength alone, is the gameplay guarantee.
 - **Every scene gets an LLM-generated prompt brief, no manual overrides.**
   An earlier iteration hand-curated verbatim prompt text for a handful of
   fragile scenes while leaving the rest to raw extracted text, which meant

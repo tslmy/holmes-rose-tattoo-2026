@@ -15,8 +15,8 @@ those components are comparatively small and quantizing them would degrade
 prompt fidelity (T5) or color accuracy (VAE) disproportionately.
 
 FLUX.1-schnell is a distilled, CFG-free, few-step (1-4) model, but this tool
-overrides that with a higher `--strength`/`--steps` (0.85 / 24 by default,
-picked via a visual strength sweep) so FLUX has real artistic freedom to
+overrides that with a moderate `--strength`/`--steps` (0.60 / 24 by default,
+chosen to balance material change against structure) so FLUX has artistic freedom to
 reimagine materials, decor, and lighting as rich cinematic concept art.
 
 However, high-strength img2img alone gives *no actual geometric guarantee* -
@@ -60,7 +60,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 DEFAULT_MODEL_DIR = Path("models/flux-schnell")
 DEFAULT_GGUF = Path("models/flux-schnell-gguf/flux1-schnell-Q4_K_S.gguf")
@@ -155,6 +155,83 @@ def load_freedom_mask(scene_dir: Path, target_size: tuple[int, int], feather: fl
     if feather > 0:
         freedom = freedom.filter(ImageFilter.GaussianBlur(radius=feather))
     return freedom
+
+
+def _dilate(mask: Image.Image, radius: int) -> Image.Image:
+    if radius <= 0:
+        return mask
+    return mask.filter(ImageFilter.MaxFilter(radius * 2 + 1))
+
+
+def _boundary(mask: Image.Image, radius: int) -> Image.Image:
+    """Return only the outline of a filled region, not its low-res interior."""
+    if radius <= 0:
+        return mask
+    expanded = mask.filter(ImageFilter.MaxFilter(radius * 2 + 1))
+    eroded = mask.filter(ImageFilter.MinFilter(radius * 2 + 1))
+    return ImageChops.subtract(expanded, eroded)
+
+
+def load_geometry_lock_mask(
+    scene_dir: Path,
+    original: Image.Image,
+    target_size: tuple[int, int],
+    protect_dilation: int,
+    resource_object_dilation: int,
+    edge_dilation: int,
+    edge_threshold: int,
+) -> Image.Image:
+    """Build a hard white=preserve mask for gameplay-relevant geometry.
+
+    Metadata rectangles often describe click anchors, not visible silhouettes.
+    The source edge map and extracted structure-control lines cover those
+    silhouettes and architectural boundaries as well.
+    """
+    lock = Image.new("L", original.size, 0)
+    protect_path = scene_dir / "protect_mask.png"
+    if protect_path.exists():
+        protect = Image.open(protect_path).convert("L")
+        lock = ImageChops.lighter(lock, _boundary(protect, protect_dilation))
+
+    metadata_path = scene_dir / "metadata.json"
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        object_mask = Image.new("L", original.size, 0)
+        draw = ImageDraw.Draw(object_mask)
+        for obj in metadata.get("objects", []):
+            bounds = obj.get("bounds")
+            if not bounds or obj.get("action_type") in {"nowalk_zone", "blank_zone", "script_zone"}:
+                continue
+            x, y, w, h = (bounds.get(key, 0) for key in ("x", "y", "w", "h"))
+            if not (0 <= x < original.width and 0 <= y < original.height):
+                continue
+            if not (1 <= w <= original.width and 1 <= h <= original.height):
+                continue
+            name = str(obj.get("name", "")).strip()
+            if not name and not (obj.get("examine") or obj.get("uses")):
+                continue
+            draw.rectangle((x, y, x + w - 1, y + h - 1), fill=255)
+        lock = ImageChops.lighter(lock, _boundary(object_mask, resource_object_dilation))
+
+    # Suppress ordered-dither noise before finding edges. Raw FIND_EDGES can
+    # otherwise lock nearly every pixel in the old 256-colour backgrounds.
+    edges = original.convert("L").filter(ImageFilter.GaussianBlur(radius=1.0))
+    edges = edges.filter(ImageFilter.FIND_EDGES)
+    edges = edges.point(lambda value: 255 if value >= edge_threshold else 0)
+    lock = ImageChops.lighter(lock, _dilate(edges, edge_dilation))
+
+    structure_path = scene_dir / "structure_control.png"
+    if structure_path.exists():
+        structure = Image.open(structure_path).convert("RGB").convert("L")
+        structure = structure.point(lambda value: 255 if value >= 24 else 0)
+        lock = ImageChops.lighter(lock, _dilate(structure, edge_dilation))
+    return lock.resize(target_size, Image.NEAREST)
+
+
+def apply_geometry_lock(redraw: Image.Image, original: Image.Image, lock_mask: Image.Image) -> Image.Image:
+    """Restore exact source pixels wherever the hard geometry lock is white."""
+    source = original.convert("RGB").resize(redraw.size, Image.LANCZOS)
+    return Image.composite(source, redraw.convert("RGB"), lock_mask)
 
 
 def load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -297,6 +374,11 @@ def process_scene(
     denoise_radius: float = 1.0,
     protect: bool = True,
     protect_feather: float = 8.0,
+    geometry_lock: bool = True,
+    protect_dilation: int = 3,
+    edge_dilation: int = 1,
+    edge_threshold: int = 50,
+    resource_object_dilation: int = 8,
 ) -> tuple[Image.Image, Image.Image] | None:
     scene_id = scene_id_from_dir(scene_dir)
     background_path = scene_dir / "background.png"
@@ -332,6 +414,20 @@ def process_scene(
         freedom_mask = Image.new("L", init_image.size, 255)
     started = time.monotonic()
     redraw = _run_flux_pass(pipe, prompt, init_image, freedom_mask, strength, steps, seed)
+    geometry_lock_mask = None
+    if geometry_lock:
+        # Use the unblurred source for exact boundaries; blur is only a model
+        # input aid and must never become the geometry reference.
+        geometry_lock_mask = load_geometry_lock_mask(
+            scene_dir,
+            original,
+            init_image.size,
+            protect_dilation,
+            resource_object_dilation,
+            edge_dilation,
+            edge_threshold,
+        )
+        redraw = apply_geometry_lock(redraw, original, geometry_lock_mask)
     elapsed = time.monotonic() - started
     print(f"  scene {scene_id}: done in {elapsed:.1f}s")
 
@@ -354,6 +450,11 @@ def process_scene(
                 "denoise_radius": denoise_radius,
                 "protected": protected,
                 "protect_feather": protect_feather if protected else None,
+                "geometry_lock": geometry_lock,
+                "protect_dilation": protect_dilation if geometry_lock else None,
+                "resource_object_dilation": resource_object_dilation if geometry_lock else None,
+                "edge_dilation": edge_dilation if geometry_lock else None,
+                "edge_threshold": edge_threshold if geometry_lock else None,
                 "guidance_scale": 0.0,
                 "init_size": [init_image.width, init_image.height],
                 "elapsed_seconds": round(elapsed, 1),
@@ -362,6 +463,9 @@ def process_scene(
         ),
         encoding="utf-8",
     )
+    if geometry_lock_mask is not None:
+        geometry_lock_mask.save(scene_output_dir / f"geometry_lock@{scale:g}x.png")
+        ImageOps.invert(geometry_lock_mask).save(scene_output_dir / f"geometry_free@{scale:g}x.png")
     return original, redraw
 
 
@@ -386,11 +490,10 @@ def main() -> None:
     parser.add_argument("--prompt-brief-dir", type=Path, default=Path("profiles/neural/prompt-briefs"))
     parser.add_argument("--scenes", type=int, nargs="*", default=None)
     parser.add_argument("--scale", type=float, default=2.0)
-    parser.add_argument("--strength", type=float, default=0.85,
+    parser.add_argument("--strength", type=float, default=0.60,
                          help="img2img denoise strength; lower preserves more of the original geometry. "
-                              "0.85 gives FLUX substantial artistic freedom - only the overall room "
-                              "layout/walkable floor area/doorway positions need to survive, not exact "
-                              "text or decor fidelity.")
+                              "The final hard geometry lock preserves resource-declared boundaries "
+                              "regardless of this setting.")
     parser.add_argument("--steps", type=int, default=24,
                          help="FLUX.1-schnell is trained for 1-4 steps, but higher strength img2img needs "
                               "more steps to converge cleanly; 24 was chosen via a strength/steps sweep.")
@@ -408,7 +511,18 @@ def main() -> None:
                               "hotspots union from tools/extract_rosetattoo_assets.py) before passing it to "
                               "FluxInpaintPipeline as mask_image, so the redrawn/protected regions meet "
                               "with a soft edge instead of a hard seam.")
+    parser.add_argument("--no-geometry-lock", dest="geometry_lock", action="store_false",
+                        help="Disable the hard post-generation geometry lock (A/B comparison only).")
+    parser.add_argument("--protect-dilation", type=int, default=3,
+                        help="Native-pixel dilation around walk/hotspot metadata before hard locking.")
+    parser.add_argument("--resource-object-dilation", type=int, default=8,
+                        help="Native-pixel dilation around every resource-declared object state.")
+    parser.add_argument("--edge-dilation", type=int, default=1,
+                        help="Native-pixel dilation around source/structure edges before hard locking.")
+    parser.add_argument("--edge-threshold", type=int, default=50,
+                        help="Minimum blurred FIND_EDGES response retained for the hard lock.")
     parser.set_defaults(protect=True)
+    parser.set_defaults(geometry_lock=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="mps")
     parser.add_argument("--skip-existing", action="store_true")
@@ -443,6 +557,11 @@ def main() -> None:
             args.denoise_radius,
             protect=args.protect,
             protect_feather=args.protect_feather,
+            geometry_lock=args.geometry_lock,
+            protect_dilation=args.protect_dilation,
+            resource_object_dilation=args.resource_object_dilation,
+            edge_dilation=args.edge_dilation,
+            edge_threshold=args.edge_threshold,
         )
         if result is None:
             continue
