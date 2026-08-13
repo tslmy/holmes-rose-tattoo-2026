@@ -193,6 +193,20 @@ cutout edges the engine itself always uses (no partial-alpha blending).
 Output filenames are scale-qualified (`frame_NNN@Sx.png`), matching the
 background pipeline's `background@Nx.png` convention.
 
+For animated resources, run the temporal consistency pass after the ordinary
+ESRGAN pass:
+
+```sh
+python3 tools/temporal_upscale_rosetattoo_sprites.py --scale 2
+```
+
+This writes `enhanced/sprites-temporal/`. It keeps the original frame count,
+frame timing, dimensions, offsets, and binary alpha masks. The pass aligns
+nearby source frames and aggregates only ESRGAN high-frequency residuals where
+the source pixels agree; it stabilizes persistent detail without blending
+moving limbs or changing animation logic. Single-frame assets are copied
+through unchanged.
+
 Beyond the room cursor set and Watson, the same pipeline has also been run
 over the player's own walk cycles across coat/hat states (`SVGAWALK.VGS`,
 `NOHAT.VGS`, `COATWALK.VGS`, and the `CT*`/`HT*`/`JT*`/`TDOWNRG` directional

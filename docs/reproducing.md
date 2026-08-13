@@ -179,6 +179,22 @@ palette-mapped rendering.
   them into `people.cpp`'s draw call sites is a larger, higher-risk change
   that hasn't been attempted yet (see `tools/README.md`).
 
+### Temporal consistency for animated sprites
+
+Independent ESRGAN calls can produce small frame-to-frame detail changes even
+when the underlying game art is stable. Do not combine animation frames into
+one tiled image: tile borders become image content and the model cannot reason
+about motion. Use the animation-native temporal pass instead:
+
+```sh
+uv run python3 tools/temporal_upscale_rosetattoo_sprites.py --scale 2
+```
+
+It performs conservative source-space alignment and neighbour residual
+aggregation while preserving VGS frame indices and timing. It writes the
+stabilized tree to `enhanced/sprites-temporal/`; copy that tree into the
+production mod in place of `enhanced/sprites/` for animated resources.
+
 ## Investigated but not implemented: animation framerate interpolation
 
 An earlier investigation looked at whether animated sprites (character walk
