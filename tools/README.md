@@ -207,6 +207,53 @@ the source pixels agree; it stabilizes persistent detail without blending
 moving limbs or changing animation logic. Single-frame assets are copied
 through unchanged.
 
+For character animations where ESRGAN cannot recover recognizable faces or
+wardrobe, use the identity-consistent redraw pass. It generates a single
+multi-pose reference sheet per character/body type, composites each pose back
+onto the original frame's exact alpha silhouette, and then runs the temporal
+pass. This keeps a character's face, clothing, and accessories consistent
+while preserving the original frame count, hotspots, offsets, and collision
+geometry:
+
+```sh
+python3 tools/compose_character_sheet_redraws.py \
+  --resources watson_vgs mycroft_vgs toby_vgs tux_vgs wiggins_vgs \
+    svgawalk_vgs nohat_vgs coatwalk_vgs \
+    3tright_vgs 3tuprigh_vgs 3tdownrg_vgs gtsright_vgs gtsuprig_vgs \
+    gtsdownr_vgs itright_vgs ituprigh_vgs itdownrg_vgs \
+    qtright_vgs qtuprig_vgs qtdownrg_vgs twright_vgs twuprigh_vgs \
+    twdownrg_vgs tright_vgs tupright_vgs tdownrg_vgs \
+  --scale 2 --output-dir enhanced/sprites-lifelike-seeded
+
+python3 tools/temporal_upscale_rosetattoo_sprites.py \
+  --input-dir enhanced/sprites-lifelike-seeded \
+  --output-dir enhanced/sprites-lifelike \
+  --scale 2 --radius 3 --blend 0.75
+```
+
+The redraw pass is intentionally identity/profile driven: `TOBY` is a dog,
+`WIGGINS` is the scruffy boy in a flat cap and checked scarf, and the Holmes,
+Watson, Mycroft, and Tux profiles are kept distinct. Do not substitute a
+generic “Victorian detective” prompt for these profiles.
+
+To assemble a complete playable override tree, copy the validated background
+set and all temporally stabilized sprites, then overlay the life-like
+character cycles:
+
+```sh
+python3 tools/assemble_rosetattoo_playable_pack.py \
+  --background-dir generated/neural-redraws-cinematic-full \
+  --sprite-dir enhanced/sprites-temporal \
+  --lifelike-sprite-dir enhanced/sprites-lifelike \
+  --output-dir generated/playable-overrides-2x
+```
+
+The assembler writes a manifest and checks cleanly against the runtime
+contract: `scene_NNN/background@2x.png` and
+`sprites/<resource>/frame_NNN@2x.png`. It is safe to use the resulting tree
+with `SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES`; missing individual overrides
+still fall back to native art.
+
 Beyond the room cursor set and Watson, the same pipeline has also been run
 over the player's own walk cycles across coat/hat states (`SVGAWALK.VGS`,
 `NOHAT.VGS`, `COATWALK.VGS`, and the `CT*`/`HT*`/`JT*`/`TDOWNRG` directional
