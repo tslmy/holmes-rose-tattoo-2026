@@ -2,9 +2,10 @@
 """Assemble a complete Rose Tattoo runtime override tree.
 
 The playable tree is deliberately built from validated, scale-qualified
-backgrounds and the temporal sprite set, with identity-consistent redraws
-overlaid only for the character cycles that benefit from them.  Keeping this
-as an explicit assembly step prevents a partial experiment from being
+backgrounds and the temporal sprite set. Identity-consistent character redraws
+can be copied in for offline inspection, but are not enabled by the runtime
+unless its experimental scene-sprite overlay is explicitly requested. Keeping
+this as an explicit assembly step prevents a partial experiment from being
 mistaken for a complete playable pack.
 """
 
@@ -54,9 +55,21 @@ def main() -> None:
         type=Path,
         default=ROOT / "generated" / "playable-overrides-2x",
     )
+    parser.add_argument(
+        "--include-experimental-lifelike-sprites",
+        action="store_true",
+        help=(
+            "Overlay generated character sequences for offline review only. "
+            "They require SCUMMVM_SHERLOCK_TATTOO_EXPERIMENTAL_SCENE_SPRITES=1 "
+            "and are not part of the safe playable default."
+        ),
+    )
     args = parser.parse_args()
 
-    for required in (args.background_dir, args.sprite_dir, args.lifelike_sprite_dir):
+    required_inputs = [args.background_dir, args.sprite_dir]
+    if args.include_experimental_lifelike_sprites:
+        required_inputs.append(args.lifelike_sprite_dir)
+    for required in required_inputs:
         if not required.is_dir():
             raise SystemExit(f"missing input directory: {required}")
 
@@ -65,10 +78,12 @@ def main() -> None:
     sprite_root = args.output_dir / "sprites"
     sprite_count = copy_files(args.sprite_dir, sprite_root, "frame_*@2x.png")
     copy_files(args.sprite_dir, sprite_root, "metadata.json")
-    lifelike_count = copy_files(
-        args.lifelike_sprite_dir, sprite_root, "frame_*@2x.png"
-    )
-    copy_files(args.lifelike_sprite_dir, sprite_root, "metadata.json")
+    lifelike_count = 0
+    if args.include_experimental_lifelike_sprites:
+        lifelike_count = copy_files(
+            args.lifelike_sprite_dir, sprite_root, "frame_*@2x.png"
+        )
+        copy_files(args.lifelike_sprite_dir, sprite_root, "metadata.json")
 
     scene_count = len(list(args.output_dir.glob("scene_*/background@2x.png")))
     resource_names = sorted(
@@ -84,6 +99,7 @@ def main() -> None:
         "background_files_copied": background_count,
         "temporal_sprite_frames_copied": sprite_count,
         "lifelike_sprite_frames_overlaid": lifelike_count,
+        "experimental_lifelike_sprites_included": args.include_experimental_lifelike_sprites,
         "sprite_resource_count": len(resource_names),
         "sprite_resources": resource_names,
         "runtime_contract": {

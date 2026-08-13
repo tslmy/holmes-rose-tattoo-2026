@@ -207,13 +207,10 @@ the source pixels agree; it stabilizes persistent detail without blending
 moving limbs or changing animation logic. Single-frame assets are copied
 through unchanged.
 
-For character animations where ESRGAN cannot recover recognizable faces or
-wardrobe, use the identity-consistent redraw pass. It generates a single
-multi-pose reference sheet per character/body type, composites each pose back
-onto the original frame's exact alpha silhouette, and then runs the temporal
-pass. This keeps a character's face, clothing, and accessories consistent
-while preserving the original frame count, hotspots, offsets, and collision
-geometry:
+For character-animation research where ESRGAN cannot recover recognizable
+faces or wardrobe, use the identity-consistent redraw pass. It generates a
+single multi-pose reference sheet per character/body type and composites the
+poses into extracted frames for offline review:
 
 ```sh
 python3 tools/compose_character_sheet_redraws.py \
@@ -236,17 +233,23 @@ The redraw pass is intentionally identity/profile driven: `TOBY` is a dog,
 Watson, Mycroft, and Tux profiles are kept distinct. Do not substitute a
 generic “Victorian detective” prompt for these profiles.
 
-To assemble a complete playable override tree, copy the validated background
-set and all temporally stabilized sprites, then overlay the life-like
-character cycles:
+To assemble a safe playable override tree, copy the validated background set
+and temporally stabilized sprites. The engine keeps live scene characters on
+its native draw path, which preserves the original walk-cycle timing and
+z-order. The generated character-sheet output must not be overlaid in a normal
+playthrough: a ten-pose sheet is not a substitute for each original motion
+frame.
 
 ```sh
 python3 tools/assemble_rosetattoo_playable_pack.py \
   --background-dir generated/neural-redraws-cinematic-full \
   --sprite-dir enhanced/sprites-temporal \
-  --lifelike-sprite-dir enhanced/sprites-lifelike \
   --output-dir generated/playable-overrides-2x
 ```
+
+Use `--include-experimental-lifelike-sprites` only for offline examination
+alongside `SCUMMVM_SHERLOCK_TATTOO_EXPERIMENTAL_SCENE_SPRITES=1`; it is not a
+supported playable configuration.
 
 The assembler writes a manifest and checks cleanly against the runtime
 contract: `scene_NNN/background@2x.png` and
@@ -282,15 +285,12 @@ there is nothing to extract there.
 
 An engine-side runtime override is wired up for the room cursor set
 (`Screen::loadRoseTattooHiresCursorOverride()` in the ScummVM fork), the
-overhead map background (see below), and the live scene's walking
-characters and bg-shape objects (`Screen::queueRoseTattooHiresSceneSprite()`,
-wired into `TattooScene::drawAllShapes()`). Item/inventory icon overrides are
-wired up in `widget_inventory.cpp`. Any character/bg-shape whose current
-resource+frame has no matching override PNG on disk simply falls back to
-the plain nearest-neighbor-upscaled native art for that shape - a quiet
-degradation, not a crash - so extracting a missing resource with the
-commands above and copying it into a production mod's `sprites/` directory
-is always safe to do incrementally. Note that several of the now-extracted
+overhead map background (see below), and item/inventory icons
+(`widget_inventory.cpp`). Live scene characters and bg-shapes deliberately
+stay on the native renderer in a normal playthrough: the external-PNG overlay
+is only an experimental diagnostic path because a late overlay cannot
+preserve the engine's complete z-order and animation contract. Note that
+several of the now-extracted
 resources (`RES##.VGS`, `JOURNAL.VGS`, `LOADING*.VGS`, `DART*.VGS`,
 `HAND*.VGS`, `INTRFACE.VGS`, `PAPER.VGS`, `OPIUM.VGS`) currently have **no
 engine-side consumer at all** for a hires override (unlike scene
