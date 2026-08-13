@@ -77,29 +77,72 @@ game or generated art.
 
 ```sh
 uv run python3 tools/flux_redraw_rosetattoo_backgrounds.py \
-  --scenes 1 18 36 --scale 2 --steps 12 --strength 0.25
+  --scenes 1 18 36 --scale 2
 ```
 
-Calibration notes from visual inspection (`validation/contact-sheets/`):
+The defaults (`--strength 0.85 --steps 24`) intentionally give FLUX
+**artistic freedom**, not a faithful restoration: only the overall room
+layout, walkable floor area, and doorway/object silhouettes need to keep
+roughly lining up with the original scene (ScummVM's hotspot/walk-zone
+metadata is coordinate-based and independent of the rendered art), so
+FLUX is free to reimagine materials, decor, props, and lighting as
+richer, more cinematic concept art. Small embedded text/signage is
+**not** preserved at this strength and will typically render as garbled
+gibberish — the `STYLE_PROMPT` asks the model to avoid inventing new
+readable text, but doesn't attempt to preserve existing text.
+
+Calibration notes from visual inspection
+(`validation/contact-sheets/flux-strength-sweep.jpg`, comparing
+strength=0.5/0.7/0.85 with steps=16/20/24 respectively):
 
 - `--strength` is the img2img denoise strength; `--steps` is the *base*
-  step count from which `strength * steps` actual denoising steps are run
-  (FLUX.1-schnell's distillation targets 1-4 steps *total*, not 1-4 steps
-  regardless of strength, so a low strength needs a higher base `--steps` to
-  still get 2-3 actual steps — `steps=12, strength=0.25` yields 3 real
-  steps, which was the best-quality point found: enough to add real
-  photographic texture/lighting without garbling small embedded text like
-  the "EXTRA" newsstand sign or door house numbers, which higher strengths
-  (0.35+) reliably corrupt into gibberish and start inventing extra people
-  and props not in the original scene).
+  step count from which `strength * steps` actual denoising steps are run.
+  Higher strength needs proportionally more steps to converge cleanly —
+  `strength=0.85, steps=24` (~20 real steps) was the best match for the
+  "cinematic movie-set diorama" look the project is going for.
+- `--denoise-radius` (default `1.0`) applies a light Gaussian pre-blur to
+  the init image before upscaling. The original 256-color game art uses
+  ordered dithering to fake smooth gradients (very visible on flat
+  surfaces like ceilings); without this pre-blur FLUX tends to preserve
+  that dithering noise instead of erasing it. Set to `0` to disable.
 - `guidance_scale` is fixed at `0.0` in the script — FLUX.1-schnell is a
   CFG-distilled model and does not use classifier-free guidance.
-- Generation is slow relative to SDXL/Forge (roughly 30-100s/step on an M2
-  Max depending on thermal state and image size at `--scale 2`), so a full
-  ~80-scene pack run takes several hours; use `--skip-existing` to resume
-  an interrupted run, and `--scenes` to spot-check a handful first.
+- On Apple `mps`, generation is slow relative to SDXL/Forge (roughly
+  25-30s/iteration on an M2 Max at `--scale 2`), so a full ~80-scene pack
+  run takes several hours; use `--skip-existing` to resume an interrupted
+  run, and `--scenes` to spot-check a handful first. See below for a much
+  faster CUDA option if a discrete NVIDIA GPU is available.
 
 Add `--scummvm-overrides mods/flux-hires-backgrounds` to also write a
 ScummVM-ready `background@Nx.png` override pack per scene (see the main
 [`tools/README.md`](../tools/README.md) and
 `tools/run_rosetattoo_validation.py` for how to launch/validate a pack).
+
+## 4. Optional: run on a discrete NVIDIA GPU instead of Apple `mps`
+
+Pass `--device cuda` to run this same script on any machine with an
+NVIDIA GPU and a CUDA-enabled PyTorch install (`pip install torch
+torchvision --index-url https://download.pytorch.org/whl/cu124`, plus the
+same `diffusers`/`transformers`/`accelerate`/`sentencepiece`/`protobuf`/
+`gguf` packages as the `flux` extra). Copy `models/flux-schnell`,
+`models/flux-schnell-gguf`, and `extracted/rosetattoo/` to the GPU
+machine, then run the same command as above with `--device cuda`.
+
+On `cuda`, `load_pipeline()` calls `enable_model_cpu_offload()` instead of
+`pipe.to(device)`, keeping only the actively-running submodule resident
+on the GPU. This matters on cards with less VRAM than the combined model
+size (transformer + fp16 T5 text encoder + VAE, roughly 17GB total) —
+without offloading, PyTorch silently spills into slow shared/system
+memory instead of raising an out-of-memory error, which looks like it's
+"working" (100% `nvidia-smi` utilization) while running far slower than
+plain CPU/unified memory. With offloading enabled, a 12GB RTX 4070 Ti
+runs at roughly **2-3s/iteration** — about 8-12x faster than an M2 Max on
+`mps` — since the T5/VAE/transformer swap in and out of VRAM as needed
+instead of all sitting resident at once.
+
+For a long unattended run over SSH on Windows, launch via a Windows
+Scheduled Task (`schtasks /Create ... && schtasks /Run ...`) pointed at a
+`.bat` file that calls the full path to the Python interpreter (bare
+`python` resolves to a non-functional Windows Store alias under Task
+Scheduler's non-interactive session). This keeps the job running
+independently of the SSH connection.
