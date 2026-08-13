@@ -178,10 +178,11 @@ python3 tools/extract_rosetattoo_sprites.py --resources RMOUSE.VGS OMOUSE.VGS
 # one from a specific room's export for correct-color output:
 python3 tools/extract_rosetattoo_sprites.py --resources WATSON.VGS --palette-scene 1
 
-# Upscale extracted frames via the same non-diffusion ESRGAN-family endpoint
-# used for cursors/items/map below (no ControlNet/redraw - these are small,
-# silhouette/hotspot-critical elements where hallucinated new content would
-# break gameplay recognizability):
+# Upscale extracted frames via a local ESRGAN-family super-resolution model
+# (spandrel + PyTorch, no server - see docs/esrgan-setup.md for the one-time
+# `uv sync --extra esrgan` + model weight download). No ControlNet/redraw -
+# these are small, silhouette/hotspot-critical elements where hallucinated
+# new content would break gameplay recognizability:
 python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
 ```
 

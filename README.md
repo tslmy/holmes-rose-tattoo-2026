@@ -93,10 +93,13 @@ Follow these steps:
    model downloads (GGUF-quantized transformer + text encoders/VAE), one-time
    `uv sync --extra flux` setup, and calibration notes. Needed before step 1's
    neural redraw stage.
-3. **[Tools reference](tools/README.md)** — flag-by-flag documentation for
+3. **[Set up the local ESRGAN pipeline](docs/esrgan-setup.md)** — one-time
+   `uv sync --extra esrgan` setup and a single model weight download. Needed
+   before step 1's cursor/item/character/map sprite upscaling stage.
+4. **[Tools reference](tools/README.md)** — flag-by-flag documentation for
    every script under `tools/`: extraction, upscaling, neural redraw,
    candidate review, sprite/font/map handling, and in-game validation.
-4. **[ScummVM Strategy](#scummvm-strategy)** (below) — how the patched
+5. **[ScummVM Strategy](#scummvm-strategy)** (below) — how the patched
    engine is tracked as a Git submodule and how to build it.
 
 ## ScummVM Strategy

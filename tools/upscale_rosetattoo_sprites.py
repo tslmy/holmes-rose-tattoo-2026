@@ -11,10 +11,16 @@ this intentionally does NOT run a generative redraw pass: these are small,
 silhouette-critical interactive elements (cursors, inventory items,
 walk-cycle frames) where hallucinated new detail or a shifted
 hotspot/hand-position would break gameplay recognizability. Instead this
-uses an Automatic1111/Forge `/sdapi/v1/extra-single-image` real
-super-resolution endpoint (see `tools/sd_api_utils.py`), which reconstructs
-plausible high-frequency detail without redrawing content - appropriate for
-cleanly scaling up existing brush strokes.
+runs a real (non-generative) ESRGAN-family super-resolution model locally
+via the `spandrel` model-loading library and PyTorch (CPU/CUDA/Apple `mps`),
+which reconstructs plausible high-frequency detail without redrawing
+content - appropriate for cleanly scaling up existing brush strokes.
+
+This is entirely local/offline: no server process, no Automatic1111/Forge
+WebUI install required - just `uv sync --extra esrgan` and a one-time model
+weight download (see docs/esrgan-setup.md). `spandrel` loads the model's
+native `.pth` checkpoint directly (no legacy `basicsr` dependency), so any
+ESRGAN/RealESRGAN-family checkpoint works as a drop-in `--model-path`.
 
 Since ESRGAN-family models expect an opaque RGB image, each frame's alpha
 channel is separated first: the RGB is flattened onto a neutral fill color
@@ -29,33 +35,49 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sd_api_utils import upscale_via_api  # noqa: E402
-
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_MODEL_PATH = ROOT / "models" / "esrgan" / "RealESRGAN_x4plus.pth"
 FLATTEN_FILL = (128, 128, 128)
 ALPHA_THRESHOLD = 128
 
 
-def upscale_frame(
-    frame: Image.Image,
-    scale: int,
-    api_url: str,
-    api_timeout: int,
-    upscaler: str,
-) -> Image.Image:
+def load_esrgan_model(model_path: Path, device: str):
+    from spandrel import ModelLoader
+
+    model = ModelLoader().load_from_file(str(model_path))
+    return model.to(device).eval()
+
+
+def run_esrgan(model, device: str, image: Image.Image) -> Image.Image:
+    """Runs one RGB PIL image through a spandrel-loaded ESRGAN model.
+
+    Returns an image upscaled by the model's own native scale factor (e.g.
+    4x for RealESRGAN_x4plus) - callers resize to the requested --scale
+    afterwards if it differs.
+    """
+    import torch
+
+    arr = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).to(device)
+    with torch.no_grad():
+        output = model(tensor)
+    output = output.clamp(0, 1).squeeze(0).permute(1, 2, 0).cpu().numpy()
+    return Image.fromarray((output * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+
+
+def upscale_frame(frame: Image.Image, scale: int, model, device: str) -> Image.Image:
     rgba = frame.convert("RGBA")
     alpha = rgba.getchannel("A")
 
     flattened = Image.new("RGB", rgba.size, FLATTEN_FILL)
     flattened.paste(rgba, mask=alpha)
 
-    upscaled_rgb = upscale_via_api(api_url, api_timeout, flattened, scale, upscaler)
+    upscaled_rgb = run_esrgan(model, device, flattened)
     target_size = (rgba.width * scale, rgba.height * scale)
     if upscaled_rgb.size != target_size:
         upscaled_rgb = upscaled_rgb.resize(target_size, Image.Resampling.LANCZOS)
@@ -97,9 +119,9 @@ def upscale_resource_dir(
     input_dir: Path,
     output_dir: Path,
     scale: int,
-    api_url: str,
-    api_timeout: int,
-    upscaler: str,
+    model,
+    device: str,
+    model_name: str,
     mode: str = "photo",
 ) -> dict:
     metadata_path = input_dir / "metadata.json"
@@ -113,7 +135,7 @@ def upscale_resource_dir(
             if mode == "font":
                 upscaled = upscale_font_glyph(frame, scale)
             else:
-                upscaled = upscale_frame(frame, scale, api_url, api_timeout, upscaler)
+                upscaled = upscale_frame(frame, scale, model, device)
         # Scale-qualified filename (frame_NNN@Sx.png), matching the
         # background pipeline's background@Nx.png convention - this lets the
         # engine's loadRoseTattooHiresCursorOverride() pick the exact scale
@@ -135,7 +157,7 @@ def upscale_resource_dir(
     out_metadata = {
         **metadata,
         "scale": scale,
-        "upscaler": upscaler if mode != "font" else "lanczos-alpha",
+        "upscaler": model_name if mode != "font" else "lanczos-alpha",
         "frames": out_frames,
     }
     (output_dir / "metadata.json").write_text(
@@ -148,9 +170,9 @@ def upscale_resource_dir(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Upscale extracted Rose Tattoo sprite/cursor/character frames via "
-            "an Automatic1111-compatible real super-resolution model, "
-            "preserving per-frame transparency and offsets."
+            "Upscale extracted Rose Tattoo sprite/cursor/character frames via a "
+            "local ESRGAN-family real super-resolution model (spandrel + "
+            "PyTorch), preserving per-frame transparency and offsets."
         )
     )
     parser.add_argument(
@@ -177,20 +199,20 @@ def main() -> None:
     )
     parser.add_argument("--scale", type=int, default=4, help="Upscale factor (default: 4x).")
     parser.add_argument(
-        "--upscaler",
-        default="R-ESRGAN 4x+",
-        help="Automatic1111 upscaler model name (see /sdapi/v1/upscalers).",
+        "--model-path",
+        type=Path,
+        default=DEFAULT_MODEL_PATH,
+        help="Local ESRGAN-family .pth checkpoint (see docs/esrgan-setup.md).",
     )
-    parser.add_argument("--api-url", default="http://127.0.0.1:7860")
-    parser.add_argument("--api-timeout", type=int, default=120)
+    parser.add_argument("--device", default="mps", help="torch device: mps, cuda, or cpu.")
     parser.add_argument(
         "--mode",
         choices=["photo", "font"],
         default="photo",
         help=(
-            "'photo' (default) upscales via the ESRGAN-family API, suitable "
+            "'photo' (default) upscales via the local ESRGAN model, suitable "
             "for cursors/items/characters. 'font' does a fast local "
-            "Lanczos-smoothed alpha-only upscale with no API call, "
+            "Lanczos-smoothed alpha-only upscale with no model call, "
             "appropriate for tiny monochrome bitmap font glyphs "
             "(FONT1.VGS-FONT8.VGS) where photographic detail would blur "
             "thin strokes rather than help legibility."
@@ -205,6 +227,13 @@ def main() -> None:
             d for d in args.input_dir.iterdir() if d.is_dir() and (d / "metadata.json").exists()
         )
 
+    model = None
+    if args.mode != "font":
+        if not args.model_path.exists():
+            raise SystemExit(f"ESRGAN model not found: {args.model_path}. See docs/esrgan-setup.md.")
+        print(f"Loading ESRGAN model from {args.model_path} onto {args.device} ...")
+        model = load_esrgan_model(args.model_path, args.device)
+
     for resource_dir in resource_dirs:
         if not resource_dir.exists():
             print(f"  warning: {resource_dir} not found, skipping")
@@ -214,9 +243,9 @@ def main() -> None:
             resource_dir,
             output_dir,
             args.scale,
-            args.api_url,
-            args.api_timeout,
-            args.upscaler,
+            model,
+            args.device,
+            args.model_path.stem,
             mode=args.mode,
         )
         print(

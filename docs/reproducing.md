@@ -21,6 +21,9 @@ the patched engine is tracked as a Git submodule.
   [`docs/flux-setup.md`](flux-setup.md) — required for the neural
   background redraw step, optional if you only want the non-neural Lanczos
   baseline.
+- The local ESRGAN pipeline set up per
+  [`docs/esrgan-setup.md`](esrgan-setup.md) — required for the cursor/item/
+  character/map sprite upscaling step.
 - Optional: [Ollama](https://ollama.com) with a vision-capable model (e.g.
   `qwen3.5:9b-mlx`) for LLM-polished prompts. The repo ships pre-generated
   prompt briefs under `profiles/neural/prompt-briefs/`, so this is only

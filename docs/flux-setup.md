@@ -100,7 +100,6 @@ Calibration notes from visual inspection (`validation/contact-sheets/`):
   an interrupted run, and `--scenes` to spot-check a handful first.
 
 Add `--scummvm-overrides mods/flux-hires-backgrounds` to also write a
-ScummVM-ready `background@Nx.png` override pack per scene, matching the
-directory convention the SD pipeline's override packs use (see the main
+ScummVM-ready `background@Nx.png` override pack per scene (see the main
 [`tools/README.md`](../tools/README.md) and
 `tools/run_rosetattoo_validation.py` for how to launch/validate a pack).

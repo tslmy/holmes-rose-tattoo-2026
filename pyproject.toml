@@ -19,6 +19,10 @@ flux = [
     "protobuf>=4.25",
     "gguf>=0.10",
 ]
+esrgan = [
+    "torch>=2.3",
+    "spandrel>=0.4",
+]
 
 [tool.uv]
 package = false
