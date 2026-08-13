@@ -43,6 +43,23 @@ Produces `extracted/rosetattoo/scene_NNN/` (backgrounds, prompts, walk
 zone/hotspot/protect masks) and `extracted/sprites/<resource>/` (cursor and
 map frames).
 
+Generate story-state-specific masks from the room object records:
+
+```sh
+uv run python3 tools/generate_rosetattoo_state_masks.py \
+  --input-dir extracted/rosetattoo
+```
+
+Each scene receives `state_masks.json` and masks under
+`scene_NNN/states/flags_.../`. The extractor mirrors ScummVM's Rose Tattoo
+rule: an object is active only when every non-zero required flag literal in its
+room record passes ScummVM's `readFlags()` rule (negative literals require the
+underlying flag to be false). Scenes with a small number of flags get every combination;
+larger scenes get a deterministic bounded set containing the empty state, the
+fully-enabled state, and each individual flag. The original union masks stay
+as the conservative production default because a normal build does not know
+the player's save-game flags.
+
 ## Step 2 — Generate neural photoreal backgrounds
 
 Set up the FLUX.1 + diffusers pipeline per
@@ -64,6 +81,12 @@ this safely resumable if interrupted partway through an 80-scene batch
 (expect several hours on Apple Silicon). Spot-check output quality with the
 generated contact sheet (`validation/contact-sheets/flux-redraws.jpg`)
 before trusting a full run.
+
+For an image-editing backend that can consume masks, use the state directory
+matching the intended save-game configuration as the source of its protected
+regions. Generated pixels must still be composited only into the unprotected
+interior and validated against the original border pixels; an image model's
+mask adherence is not itself a gameplay guarantee.
 
 ## Step 3 — Upscale cursors and the map
 
