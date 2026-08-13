@@ -80,8 +80,9 @@ uv run python3 tools/flux_redraw_rosetattoo_backgrounds.py \
   --scenes 1 18 36 --scale 2
 ```
 
-The defaults (`--strength 0.85 --steps 24`) intentionally give FLUX
-**artistic freedom**, not a faithful restoration: FLUX is free to
+The defaults (`--strength 0.60 --steps 24`) give FLUX useful **artistic
+freedom** while a hard geometry lock keeps gameplay-critical boundaries fixed:
+FLUX is free to
 reimagine materials, decor, props, and lighting as richer, more cinematic
 concept art. Small embedded text/signage is **not** preserved at this
 strength and will typically render as garbled gibberish — the
@@ -89,19 +90,18 @@ strength and will typically render as garbled gibberish — the
 doesn't attempt to preserve existing text.
 
 This game still has to remain playable, though, and high-strength img2img
-alone gives *no actual geometric guarantee* the redraw stays close enough
-to the original layout for that. So by default this tool runs
-`FluxInpaintPipeline` instead of plain img2img, using the inverse of each
-scene's `protect_mask.png` (emitted by `tools/extract_rosetattoo_assets.py`
-— a solid-filled union of the room's walk-zone and hotspot rectangles) as
-`mask_image`: white (free to redraw) everywhere except those rectangles,
-which stay pixel-close to the original. Unlike alpha-compositing two
-separately-generated images (which produces a visible lighting "ghost"
-seam), inpainting conditions the diffusion on the kept pixels at every
-step, so the boundary blends naturally. Pass `--no-protect` to disable
-this and do a single unprotected pass over the whole scene (not
-recommended for the final mod pack). `--protect-feather` (default `8.0`)
-controls how soft the transition is between protected and free regions.
+alone gives *no actual geometric guarantee*. The tool therefore uses two
+layers of protection. `FluxInpaintPipeline` receives the inverse of each
+scene's `protect_mask.png` for semantic conditioning. After generation, a
+hard geometry lock restores only the boundaries of walk zones and all
+resource-declared object states, plus a narrow edge map from the original
+room and the explicit `structure_control.png` lines. This matters because a
+hotspot record can be a 1x1 click anchor rather than the visible door or prop;
+the union of all resource states and image boundaries covers both cases while
+leaving interiors available for photoreal repainting. `--no-geometry-lock` is
+available only for A/B experiments. `--protect-feather` (default `8.0`)
+controls the soft inpaint conditioning transition; it does not weaken the
+final hard lock.
 
 Calibration notes from visual inspection
 (`validation/contact-sheets/flux-strength-sweep.jpg`, comparing
