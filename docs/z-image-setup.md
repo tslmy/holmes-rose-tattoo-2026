@@ -28,8 +28,41 @@ geometry-locked production candidate. On the 32 GB M2 Max, start at
 `--scale 1`; use a later deterministic upscaler for the 2x runtime asset. A
 2x diffusion pass needs substantially more unified memory.
 
-Z-Image Turbo Union ControlNet is available upstream through MFLUX, but it
-requires a separate 6.7 GB checkpoint and is being evaluated through
-`tools/img2img/z_image_controlnet.py`. Do not use the regular
-Z-Image runner to build a playable pack: it can change door, storefront, and
-walkway geometry even at very low strength.
+## CUDA Union-ControlNet (production candidate)
+
+The Apple MFLUX Union runner is useful for experiments, but MFLUX is
+Apple-MLX-only. The geometry-preserving CUDA candidate is
+`tools/img2img/z_image_controlnet_cuda.py`, which wraps the official
+VideoX-Fun Python library. It uses the current `lite-2602-8steps` Union checkpoint
+with a clean Canny control image and the extracted resource-derived mask: white
+regions are redrawn, while walk-zone and hotspot regions remain anchored to
+the source scene during inpainting.
+
+On the Windows RTX machine, clone the runtime and install its declared
+dependencies once:
+
+```powershell
+git clone https://github.com/aigc-apps/VideoX-Fun.git D:\shcrt\VideoX-Fun
+python -m pip install -r D:\shcrt\VideoX-Fun\requirements.txt
+python -m pip install triton-windows==3.2.0.post21
+```
+
+Download the official weights into the ignored project model cache:
+
+```powershell
+python D:\shcrt\tools\img2img\download_zimage_cuda_models.py
+```
+
+Then run a deterministic two-times calibration scene:
+
+```powershell
+python D:\shcrt\tools\img2img\z_image_controlnet_cuda.py `
+  --videox-root D:\shcrt\VideoX-Fun `
+  --model D:\shcrt\models\z-image-cuda\Z-Image-Turbo `
+  --controlnet D:\shcrt\models\z-image-cuda\controlnet\Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors `
+  --scenes 1 --scale 2
+```
+
+Do not use the regular Z-Image runner to build a playable pack: it can change
+door, storefront, and walkway geometry even at very low strength. Accept a
+CUDA Union-ControlNet output only after visual and game-level validation.

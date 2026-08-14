@@ -9,12 +9,15 @@ reproducible way to get there (see the root [README](../README.md#setup)).
 
 The neural backends live under `tools/img2img/`: `flux.py` (FLUX.1),
 `gpt_image.py` (optional API), `sdxl_controlnet.py` (local SDXL Canny
-ControlNet), `z_image.py` (local Z-Image Turbo), and
-`z_image_controlnet.py` (local Z-Image Turbo Union ControlNet). SDXL uses the extracted
+ControlNet), `z_image.py` (local Z-Image Turbo),
+`z_image_controlnet.py` (Apple-MLX Z-Image Turbo Union ControlNet), and
+`z_image_controlnet_cuda.py` (native CUDA VideoX-Fun Z-Image Union ControlNet). SDXL uses the extracted
 `protect_mask.png` during generation and provides the geometry-guaranteed
-production path. Z-Image Turbo is a low-strength visual candidate until its
-Union ControlNet integration is validated. The optional GPT runner is a hosted
-API client, so unlike the other three it cannot run a model locally.
+production candidate. The CUDA Union runner combines the resource-derived inpaint
+mask with Canny geometry control and is the Z-Image production candidate until
+its outputs are validated. Z-Image Turbo alone is a low-strength visual
+candidate. The optional GPT runner is a hosted API client, so unlike the other
+backends it cannot run a model locally.
 
 ## Background pipeline
 
