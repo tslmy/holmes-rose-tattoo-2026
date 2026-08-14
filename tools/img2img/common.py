@@ -65,6 +65,28 @@ def boundary_freedom_mask(scene_dir: Path, size: tuple[int, int], radius: int = 
     return editable.filter(ImageFilter.GaussianBlur(feather)) if feather else editable
 
 
+def structural_freedom_mask(
+    scene_dir: Path,
+    source: Image.Image,
+    size: tuple[int, int],
+    edge_threshold: int = 42,
+    edge_radius: int = 9,
+) -> Image.Image:
+    """Allow material repainting while retaining canonical room geometry.
+
+    Game resources identify collision and hotspot rectangles, but a background
+    plate also contains non-interactable geometry such as doorway frames and
+    window mullions. Blur before detecting edges to discard palette dithering,
+    then keep a thick source-derived contour band alongside resource regions.
+    """
+    blurred = source.convert("L").filter(ImageFilter.GaussianBlur(2.0))
+    edges = blurred.filter(ImageFilter.FIND_EDGES).point(lambda value: 255 if value >= edge_threshold else 0)
+    edge_band = edges.filter(ImageFilter.MaxFilter(edge_radius * 2 + 1)).resize(size, Image.NEAREST)
+    protected = ImageOps.invert(freedom_mask(scene_dir, size, feather=0.0))
+    locked = ImageChops.lighter(edge_band, protected)
+    return ImageOps.invert(locked)
+
+
 def canny_like(image: Image.Image, low: int = 40) -> Image.Image:
     """Dependency-free structural control image for ControlNet."""
     edges = image.convert("L").filter(ImageFilter.GaussianBlur(1.0)).filter(ImageFilter.FIND_EDGES)

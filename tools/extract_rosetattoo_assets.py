@@ -23,6 +23,11 @@ SCREEN_WIDTH = 640
 SCREEN_HEIGHT = 480
 PALETTE_SIZE = 256 * 3
 OBJECT_RECORD_SIZE = 625
+# Rose Tattoo reserves 625 bytes per background shape in the compressed
+# resource buffer, but Object::load() consumes a 591-byte serialized record.
+# The trailing 34 bytes are padding at the end of the decompressed buffer, not
+# between records. Slicing at 625 corrupts every object after the first.
+ROSE_OBJECT_SERIALIZED_SIZE = 591
 # Size in bytes of one CAnim table entry for Rose Tattoo, per CAnim::load()'s
 # non-Serrated-Scalpel branch in engines/sherlock/objects.cpp: 12 (name) +
 # 4 (dataSize) + 2+2 (position) + 1 (flags) + 2 (scaleVal) + 3*2*2 (goto x2) +
@@ -590,7 +595,9 @@ def extract_scene(rrm_path: Path, scene_name: str, output_root: Path, term_limit
 
     objects = [
         parse_object_record(
-            shape_bytes[i * OBJECT_RECORD_SIZE : (i + 1) * OBJECT_RECORD_SIZE],
+            shape_bytes[
+                i * ROSE_OBJECT_SERIALIZED_SIZE : (i + 1) * ROSE_OBJECT_SERIALIZED_SIZE
+            ],
             desc_text,
             i + 1,
         )

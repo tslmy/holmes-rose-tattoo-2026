@@ -34,9 +34,10 @@ The Apple MFLUX Union runner is useful for experiments, but MFLUX is
 Apple-MLX-only. The geometry-preserving CUDA candidate is
 `tools/img2img/z_image_controlnet_cuda.py`, which wraps the official
 VideoX-Fun Python library. It uses the current `lite-2602-8steps` Union checkpoint
-with a clean Canny control image and the extracted resource-derived mask: white
-regions are redrawn, while walk-zone and hotspot regions remain anchored to
-the source scene during inpainting.
+with a clean Canny control image and a structural mask. It locks resource
+regions plus a blurred source-edge band, so doorway/window/facade contours
+remain anchored even when no game hotspot covers them; only material interiors
+are repainted.
 
 On the Windows RTX machine, clone the runtime and install its declared
 dependencies once:

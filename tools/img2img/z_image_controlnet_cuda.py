@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PIL import Image, ImageFilter
 
-from common import ROOT, freedom_mask, prompt_for, save_scene, scaled_source, scene_dirs
+from common import ROOT, freedom_mask, prompt_for, save_scene, scaled_source, scene_dirs, structural_freedom_mask
 
 
 DEFAULT_MODEL = "Tongyi-MAI/Z-Image-Turbo"
@@ -91,6 +91,8 @@ def main() -> None:
     parser.add_argument("--scale", type=float, default=2.0)
     parser.add_argument("--steps", type=int, default=8)
     parser.add_argument("--control-scale", type=float, default=0.9)
+    parser.add_argument("--mask-mode", choices=("resources", "structure"), default="structure")
+    parser.add_argument("--no-hard-structural-lock", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-existing", action="store_true")
     args = parser.parse_args()
@@ -105,7 +107,12 @@ def main() -> None:
             continue
         _, source = scaled_source(scene_dir, args.scale, blur_radius=0.0)
         control = canny_control(source)
-        mask = freedom_mask(scene_dir, source.size, feather=4.0)
+        mask = (
+            structural_freedom_mask(scene_dir, source, source.size)
+            if args.mask_mode == "structure"
+            else freedom_mask(scene_dir, source.size, feather=4.0)
+        )
+        structural_lock = ImageOps.invert(mask)
         started = time.monotonic()
         with torch.no_grad():
             result = pipeline(
@@ -121,12 +128,17 @@ def main() -> None:
                 num_inference_steps=args.steps,
                 control_context_scale=args.control_scale,
             ).images[0]
+        if not args.no_hard_structural_lock:
+            # Diffusion conditioning guides layout but does not make it exact.
+            # Reapply only the narrow, source-derived contour bands to make the
+            # structural boundary a real invariant without rectangular seams.
+            result = Image.composite(source, result, structural_lock)
         path = save_scene(
             args.output_dir,
             "zimage_controlnet_cuda",
             scene_dir,
             result,
-            {**vars(args), "backend": "z-image-turbo-fun-union-2.1-2602", "control": "canny", "mask": "resource-derived"},
+            {**vars(args), "backend": "z-image-turbo-fun-union-2.1-2602", "control": "canny", "mask": args.mask_mode},
             args.scale,
         )
         print(f"{scene_dir.name}: {path} ({time.monotonic() - started:.1f}s)")
