@@ -156,3 +156,7 @@ are spot checks, not guarantees against seams or animation flicker.
 An initial full extraction audit decoded the source streams again and
 matched all extracted frames for all 80 local PC room files. The audit checks
 asset fidelity to the decoder; it does not replace engine-side playtesting.
+An isolated scene-26 pilot exercised the three lamp frames and 31 bartender
+frames in a running engine; a matched capture showed the character, lamp,
+bartender, bar and foreground patron in the expected order. This does not
+cover all animation frames, palette transitions or game interactions.
