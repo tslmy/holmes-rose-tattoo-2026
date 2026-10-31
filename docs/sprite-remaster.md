@@ -250,3 +250,11 @@ drawn rectangle. Missing, corrupt and mismatched-palette sidecars fell back to
 native art, including after a prior cache hit. The pilot contained only one
 qualified Watson frame; continuity, normal scene entry and palette effects
 still need in-game testing.
+
+A subsequent fixture-driven scene-26 walk used all available Watson frames
+for that room palette. Across four runs, 343 observed lookups hit and 51
+distinct frame indices were exercised. One directed path reached standing;
+a return path was interrupted and was not validated to completion. The
+nearest and bilinear captures agreed on frame, position, scale and flip, with
+the sampled table occlusion retained. This is not a natural-entry playthrough
+or a sustained frame-rate benchmark; subtle animation shimmer remains a risk.
