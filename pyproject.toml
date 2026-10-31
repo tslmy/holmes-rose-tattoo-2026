@@ -23,6 +23,10 @@ esrgan = [
     "torch>=2.3",
     "spandrel>=0.4",
 ]
+contour-audit = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
 openai = [
     "openai>=1.0",
 ]
