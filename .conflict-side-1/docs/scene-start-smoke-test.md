@@ -131,3 +131,14 @@ and
 Real-game negative checks also produced no marker with the opt-in variable
 absent, with scene 36's RRM omitted from an isolated game-data directory, and
 with an empty isolated save directory (scene 36 only; no user save was touched).
+
+The later all-80 run used `mods/rosetattoo-contour-candidate-20261031` with
+`--haze-native-fallback` and the combined patched engine. All 80 requested
+initial frames reached the marker; 35 SDL blit-error attempts occurred across
+21 scenes before successful retries. The binary SHA-256 was
+`066622f0907f4b75312ea26a1b8d85c8367f55a3665d5abbade2c59e6911189f`, and the
+pack manifest SHA-256 was
+`e96a33f4f01ea64b26ab94ea0dfd4b213dea8f5f76c40d44950a1db9c974e567`.
+The ignored local report is
+`validation/contour-candidate-scene-smoke-haze-safe-20261031/report.json`.
+This remains a post-load initial-frame check, not a gameplay or visual pass.

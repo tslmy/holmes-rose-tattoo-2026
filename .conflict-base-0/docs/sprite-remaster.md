@@ -273,7 +273,12 @@ The local candidate assembled from all five audited trees is
 resources and 87,656 frames. Its post-copy SHA-256 check matched every frame,
 resource manifest and palette sidecar to the selected audit inputs, and every
 background to its assembly input. The original source trees and earlier packs
-remain untouched. This candidate still needs broader visual and gameplay tests.
+remain untouched. A separate decoded-source-hash and sidecar audit passed all
+87,656 frames and 80 background dimensions. A fixture-driven Holmes walk
+against the assembled pack captured 75 ticks with 76/76 logged qualified
+sprite lookups; a separate 18-frame cAnim fixture ran, but did not log its
+override lookups. Neither fixture is a natural-entry playthrough. This
+candidate still needs broader visual and gameplay tests.
 
 For the 33,189 local scripted-animation frames, the same audit found no RGB
 or support changes, but one frame in `scene_044/canim_004` changed its

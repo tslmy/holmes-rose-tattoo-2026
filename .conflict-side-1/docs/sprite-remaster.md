@@ -171,9 +171,12 @@ game: include moving characters, foreground occlusion, scripted animations,
 scrolling rooms, palette transitions, UI, inventory, map and save/load.
 The optional [scene-start smoke test](scene-start-smoke-test.md) launches each
 scene with an isolated save copy and waits for an actual rendered-frame marker.
-All 80 local rooms emitted the marker in a preliminary pilot-pack run, but this
-does not validate their natural entrances, story flags or later gameplay; repeat
-it against the finished pack.
+All 80 local rooms emitted the marker in the candidate-pack run with the haze
+safety fallback enabled. The dummy SDL backend recorded 35 failed startup
+attempts across 21 scenes before successful retries; its cause is unknown.
+The earlier candidate run without fallback rendered 79/80 scenes, and scene 19
+rendered in a separate retry. Neither run validates natural entrances, story
+flags, actual override use in every scene, or later gameplay.
 
 For a manual test with a patched `scummvm-src/scummvm` binary and a **copy**
 of a save in slot 0, for example:
