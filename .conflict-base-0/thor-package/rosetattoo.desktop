@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sherlock Holmes: Case of the Rose Tattoo
+Comment=Launch The Lost Files of Sherlock Holmes: Case of the Rose Tattoo via ScummVM
+Exec=/var/home/armada/Games/RoseTattoo/launch-rosetattoo.sh
+Icon=/var/home/armada/Games/RoseTattoo/artwork/archive-cover.jpg
+Terminal=false
+Categories=Game;

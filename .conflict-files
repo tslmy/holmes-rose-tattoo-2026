@@ -1,0 +1,3 @@
+ancestorEntries = []
+ourEntries = ["docs/sprite-remaster.md", "tools/assemble_rosetattoo_modernized.py", "tools/tests/test_modernized_assembly.py"]
+theirEntries = ["docs/sprite-remaster.md", "tools/assemble_rosetattoo_modernized.py", "tools/tests/test_modernized_assembly.py"]
