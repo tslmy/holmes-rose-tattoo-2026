@@ -431,7 +431,9 @@ python3 tools/run_rosetattoo_validation.py \
   --capture-output validation/screenshots/scene-036-mask.png
 ```
 
-Debug modes are `composite` (default), `background`, `mask`, and `native`.
+Debug modes are `composite` (default), `background`, `mask`, `native`, and
+`native-reference`. The latter presents the native indexed scene and UI as a
+comparison for haze/mask testing; it is not an enhanced-art mode.
 `mask` highlights the native pixels currently being drawn over the high-res
 background; this is the fastest way to find overlay or palette-animation
 mistakes.

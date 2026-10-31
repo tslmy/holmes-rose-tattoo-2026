@@ -213,7 +213,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--hires-debug",
-        choices=["composite", "background", "mask", "native"],
+        choices=["composite", "background", "mask", "native", "native-reference"],
         help=(
             "Select an experimental high-resolution renderer debug view. Sets "
             "SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG."
