@@ -254,6 +254,11 @@ thresholded hole count. The planned local pack keeps the entire 10-frame
 resource on its original Lanczos alpha, avoiding a mask change midway through
 that animation. This is a conservative fallback, not proof that the remaining
 animations are visually correct.
+`assemble_rosetattoo_modernized.py --fallback-sprite scene_044/canim_004
+enhanced/canimations-new` selects that whole baseline resource when assembling
+from a contour tree; the assembler checks its metadata against the candidate
+and records the fallback in the pack manifest. Repeat the audit for each game
+copy rather than assuming this particular fallback list is universal.
 
 ## Local experiment notes
 
