@@ -258,3 +258,8 @@ a return path was interrupted and was not validated to completion. The
 nearest and bilinear captures agreed on frame, position, scale and flip, with
 the sampled table occlusion retained. This is not a natural-entry playthrough
 or a sustained frame-rate benchmark; subtle animation shimmer remains a risk.
+A follow-up compared nearest, bilinear and edge-only filtering over 62
+matched walk-to-standing ticks. The edge-only mode matched nearest on all
+1,036,955 tested opaque output samples and matched bilinear at the tested
+non-opaque positions. Each mode had 63 qualified PNG hits and no fallbacks;
+this is still a single fixture, not proof for every scene or animation.
