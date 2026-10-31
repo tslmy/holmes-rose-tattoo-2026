@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -91,13 +93,29 @@ def safe_file(directory: Path, name: object) -> Path:
     return path
 
 
-def load_metadata(path: Path) -> dict:
+def read_metadata_bytes(path: Path) -> bytes:
     if path.is_symlink():
         raise ValueError("symlink metadata is not accepted")
-    metadata = json.loads(path.read_text(encoding="utf-8"))
+    return path.read_bytes()
+
+
+def parse_metadata(data: bytes) -> dict:
+    metadata = json.loads(data.decode("utf-8"))
     if not isinstance(metadata, dict):
         raise ValueError("metadata must be an object")
     return metadata
+
+
+def load_metadata(path: Path) -> dict:
+    return parse_metadata(read_metadata_bytes(path))
+
+
+def file_digest(data: bytes, label: str, issues: list[str]) -> str | None:
+    try:
+        return hashlib.sha256(data).hexdigest()
+    except (OSError, ValueError) as error:
+        issues.append(f"{label}: cannot hash file: {error}")
+        return None
 
 
 def discover(root: Path) -> tuple[dict[str, Path], dict[str, Path], dict[str, set[str]], list[str]]:
@@ -164,7 +182,8 @@ def records(metadata: dict, label: str, issues: list[str]) -> dict[int, dict]:
     return result
 
 
-def sidecars(metadata: dict, directory: Path, label: str, issues: list[str]) -> dict[str, bytes]:
+def sidecars(metadata: dict, directory: Path, label: str, issues: list[str],
+             hashes: dict[str, str]) -> dict[str, bytes]:
     names = metadata.get("sidecars", [])
     if (not isinstance(names, list) or any(not isinstance(n, str) for n in names)
             or len(set(names)) != len(names)):
@@ -178,6 +197,10 @@ def sidecars(metadata: dict, directory: Path, label: str, issues: list[str]) -> 
             result[name] = safe_file(directory, name).read_bytes()
         except (OSError, ValueError) as error:
             issues.append(f"{label}: sidecar {name!r}: {error}")
+            continue
+        digest = file_digest(result[name], f"{label}: sidecar {name!r}", issues)
+        if digest is not None:
+            hashes[name] = digest
     if (directory / "palette.bin").exists() and "palette.bin" not in names:
         issues.append(f"{label}: palette.bin is not declared as a sidecar")
     return result
@@ -200,9 +223,18 @@ def compare_metadata(base: dict, candidate: dict, source: dict | None, issues: l
             issues.append(f"{label}: invalid scale")
 
 
-def open_rgba(path: Path, record: dict, label: str, issues: list[str]) -> tuple[np.ndarray, dict] | None:
+def open_rgba(directory: Path, record: dict, label: str, issues: list[str],
+              result: dict, hash_key: str) -> tuple[np.ndarray, dict] | None:
     try:
-        with Image.open(path) as image:
+        data = safe_file(directory, record.get("file")).read_bytes()
+    except (OSError, ValueError) as error:
+        issues.append(f"{label}: cannot read frame: {error}")
+        return None
+    digest = file_digest(data, f"{label}: frame", issues)
+    if digest is not None:
+        result[hash_key] = digest
+    try:
+        with Image.open(io.BytesIO(data)) as image:
             if image.mode != "RGBA":
                 raise ValueError(f"expected RGBA, got {image.mode}")
             image.load()
@@ -223,10 +255,15 @@ def compare_frame(index: int, base_dir: Path, candidate_dir: Path, source_dir: P
         issues.append("frame missing from baseline or candidate metadata")
     if source_dir is not None and source is None:
         issues.append("frame missing from source metadata")
+    old, new = None, None
+    if base is not None:
+        result["baseline_file"] = base.get("file")
+        old = open_rgba(base_dir, base, "baseline", issues, result, "baseline_png_sha256")
+    if candidate is not None:
+        result["candidate_file"] = candidate.get("file")
+        new = open_rgba(candidate_dir, candidate, "candidate", issues, result, "candidate_png_sha256")
     if base is None or candidate is None:
         return result
-    result["baseline_file"] = base.get("file")
-    result["candidate_file"] = candidate.get("file")
     for key in sorted(set(base) | set(candidate)):
         if key not in base or key not in candidate or base[key] != candidate[key]:
             issues.append(f"baseline/candidate frame metadata differs: {key}")
@@ -239,14 +276,6 @@ def compare_frame(index: int, base_dir: Path, candidate_dir: Path, source_dir: P
             for key in GEOMETRY:
                 if type(source.get(key)) is not int or base.get(key) != source[key] * scale:
                     issues.append(f"source/baseline scaled geometry differs: {key}")
-    try:
-        base_path = safe_file(base_dir, base.get("file"))
-        candidate_path = safe_file(candidate_dir, candidate.get("file"))
-    except (OSError, ValueError) as error:
-        issues.append(str(error))
-        return result
-    old = open_rgba(base_path, base, "baseline", issues)
-    new = open_rgba(candidate_path, candidate, "candidate", issues)
     if old is None or new is None:
         return result
     old_pixels, old_info = old
@@ -258,16 +287,17 @@ def compare_frame(index: int, base_dir: Path, candidate_dir: Path, source_dir: P
         issues.append("candidate: missing or invalid source_sha256")
     if old_hash != new_hash:
         issues.append("baseline/candidate source_sha256 differs")
-    if "alpha_input_sha256" in new_info:
-        try:
-            if new_info["alpha_input_sha256"] != hashlib.sha256(base_path.read_bytes()).hexdigest():
-                issues.append("candidate: alpha_input_sha256 differs from baseline file")
-        except OSError as error:
-            issues.append(f"baseline: cannot hash file: {error}")
+    if ("alpha_input_sha256" in new_info and "baseline_png_sha256" in result
+            and new_info["alpha_input_sha256"] != result["baseline_png_sha256"]):
+        issues.append("candidate: alpha_input_sha256 differs from baseline file")
     if source is not None and source_dir is not None:
         try:
             source_path = safe_file(source_dir, source.get("file"))
-            with Image.open(source_path) as image:
+            source_data = source_path.read_bytes()
+            source_file_hash = file_digest(source_data, "source: frame", issues)
+            if source_file_hash is not None:
+                result["source_png_sha256"] = source_file_hash
+            with Image.open(io.BytesIO(source_data)) as image:
                 image.load()
                 if image.size != (source.get("width"), source.get("height")):
                     issues.append("source: image dimensions differ from metadata")
@@ -288,7 +318,10 @@ def compare_frame(index: int, base_dir: Path, candidate_dir: Path, source_dir: P
 def audit_resource(relative: str, base_root: Path, candidate_root: Path, source_root: Path | None,
                    base_path: Path | None, candidate_path: Path | None,
                    base_images: set[str], candidate_images: set[str]) -> dict:
-    result = {"resource": relative, "issues": [], "frames": []}
+    file_hashes = {label: {"sidecars": {}} for label in ("baseline", "candidate")}
+    if source_root is not None:
+        file_hashes["source"] = {"sidecars": {}}
+    result = {"resource": relative, "issues": [], "frames": [], "file_sha256": file_hashes}
     issues = result["issues"]
     metas = []
     source_directory = source_root / relative if source_root else None
@@ -309,8 +342,17 @@ def audit_resource(relative: str, base_root: Path, candidate_root: Path, source_
             metas.append(None)
             continue
         try:
-            metas.append(load_metadata(path))
+            data = read_metadata_bytes(path)
         except (OSError, ValueError, UnicodeError) as error:
+            issues.append(f"{label}: cannot read metadata: {error}")
+            metas.append(None)
+            continue
+        digest = file_digest(data, f"{label}: metadata", issues)
+        if digest is not None:
+            file_hashes[label]["metadata"] = digest
+        try:
+            metas.append(parse_metadata(data))
+        except (ValueError, UnicodeError) as error:
             issues.append(f"{label}: cannot read metadata: {error}")
             metas.append(None)
     base, candidate, source = metas
@@ -338,7 +380,8 @@ def audit_resource(relative: str, base_root: Path, candidate_root: Path, source_
             issues.append("baseline/candidate frame index order differs")
         if source is not None and list(maps[0]) != list(maps[2]):
             issues.append("source/baseline frame index order differs")
-    copies = [sidecars(meta, directory, label, issues) if meta is not None else {} for meta, directory, label in
+    copies = [sidecars(meta, directory, label, issues, file_hashes[label]["sidecars"]) if meta is not None else {}
+              for meta, directory, label in
               zip(metas, dirs, ("baseline", "candidate", "source"))]
     if base is not None and candidate is not None and copies[0] != copies[1]:
         issues.append("baseline/candidate sidecars differ")
@@ -394,6 +437,7 @@ def audit(base_root: Path, candidate_root: Path, source_root: Path | None) -> di
                  for relative in sorted(relatives)]
     return {
         "schema_version": 1,
+        "file_hashes_version": 1,
         "inputs": {"baseline": str(base_root), "candidate": str(candidate_root),
                    "source": str(source_root) if source_root else None},
         "source_verification": "decoded_rgba" if source_root else "matching_png_tags_only",
@@ -424,15 +468,26 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("report must be outside all input trees")
     if not report_path.parent.is_dir():
         parser.error("report parent directory must already exist")
-    # Exclusive creation prevents accidental replacement, even for an existing symlink.
+    # Publish a complete report with an exclusive hard link; existing files and
+    # symlinks are never replaced, even if another writer races this process.
+    if os.path.lexists(args.report):
+        parser.error("cannot create new report: path already exists")
     try:
-        fd = os.open(args.report, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        fd, temporary = tempfile.mkstemp(prefix=".sprite-contour-audit-", suffix=".tmp",
+                                         dir=report_path.parent)
     except OSError as error:
         parser.error(f"cannot create new report: {error}")
-    with os.fdopen(fd, "w", encoding="utf-8") as output:
-        report = audit(*roots)
-        json.dump(report, output, ensure_ascii=False, separators=(",", ":"))
-        output.write("\n")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            report = audit(*roots)
+            json.dump(report, output, ensure_ascii=False, separators=(",", ":"))
+            output.write("\n")
+        try:
+            os.link(temporary, report_path)
+        except OSError as error:
+            parser.error(f"cannot publish new report: {error}")
+    finally:
+        os.unlink(temporary)
     summary = report["summary"]
     print(f"{summary['frames_compared']} frames compared; {summary['suspect_frames']} suspect frames; "
           f"{summary['suspect_resources']}/{summary['resources']} suspect resources; "

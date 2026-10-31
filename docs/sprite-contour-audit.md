@@ -33,11 +33,14 @@ From the repository root, an example pilot comparison is:
 
 The report must be a **new** file outside every input tree, in an existing
 directory. `validation/` is ignored; use a different report name on each run.
-Creation is exclusive, so an existing file or symlink is never replaced. If
-the process is interrupted or fails unexpectedly, the newly created file can
-be incomplete; choose a different name to rerun. Exit status 0 means no flags;
-1 means the completed report contains suspects or global errors; 2 means an
-invalid invocation. Do not equate 0 with a playtest pass.
+The tool writes a private temporary file in that directory, then publishes the
+completed report with an exclusive hard link; an existing file or symlink is
+never replaced, including in a race. The destination filesystem must support
+hard links. Ordinary errors clean up the temporary file; an abrupt process or
+system termination can leave it behind. Atomic publication is not a guarantee
+of crash-durable storage. Exit status 0 means no flags; 1 means the completed
+report contains suspects or global errors; 2 means an invalid invocation or
+publication failure. Do not equate 0 with a playtest pass.
 
 `--source` may be omitted, but then matching `source_sha256` PNG tags are
 only compared with one another, not verified against extracted pixels. A
@@ -93,6 +96,45 @@ per-frame percentage. Missing/unreadable frames are not included in pixel
 aggregates; check `frames_compared`, resource issues, and global errors before
 using them.
 
+## Hashes and stale reports
+
+New reports retain `schema_version: 1` and existing fields, and add
+`file_hashes_version: 1`. Each resource contains `file_sha256` with `baseline`
+and `candidate` objects, and a `source` object when `--source` was requested.
+Each object has a `metadata` SHA-256 for the exact `metadata.json` bytes and a
+`sidecars` map from each declared filename to its exact byte SHA-256. Each frame
+has `baseline_png_sha256` and `candidate_png_sha256`; a source-backed frame
+also has `source_png_sha256` when source verification was reached. These are
+lowercase SHA-256 digests of the **entire file**, not decoded pixels or the
+PNG's `source_sha256` tag. The same bytes are used for decoding/comparison and
+for hashing, so even a PNG metadata change or insignificant JSON whitespace
+change is detectable.
+
+Hashes are omitted if the file could not be read or hashed, with an issue on
+the corresponding resource or frame. Successfully read but invalid PNG/JSON
+bytes may still have a hash; the decode/parse failure is separately flagged.
+An unpaired frame can have only the available side's hash. Unreferenced files
+are flagged rather than included in per-frame hashes. Scene summary metadata
+is compared but is not included in resource file hashes.
+
+Before a future selector trusts a report, it must require
+`file_hashes_version: 1`, reject missing or malformed required hashes and
+read/hash errors, rediscover the complete resource and frame sets, and compare
+fresh hashes for every relevant PNG, resource metadata file and declared
+sidecar, including source files if source verification is relied upon. It must
+also account for global errors, suspect flags and any scene summary metadata;
+this tool does not implement that selector. A report produced by the previous
+script, including one still running from an earlier loaded copy, lacks the
+hash-version marker and must be rerun to a **new** report path. Merely seeing
+`schema_version: 1` is not sufficient.
+
+These digests are not signatures or a filesystem snapshot. Files can change
+during the audit or between a later recheck and use; keep the trees immutable
+for both operations. New or deleted resource/summary files must be detected by
+rediscovery, not just by checking previously listed hashes. Hashing does not
+prove that a report was produced by a trusted program or that its images are
+safe in-game.
+
 Counts alone miss positional and shape changes that preserve component/hole
 counts. Preserving nonzero support and palette bytes also does not verify
 runtime composition, hit ownership, animation timing, visual quality, or
@@ -103,7 +145,8 @@ this tool cannot prove safety or select a threshold for you.
 
 On 2026-10-31 the three source-backed comparisons below used Python 3.12.11,
 NumPy 2.5.4, SciPy 1.18.1, and Pillow 13.0.0 on an Apple M2 Max. The pilot
-reports are local ignored files; the command lines were:
+reports are local ignored files from the earlier script without file hashes;
+they require new runs for freshness checking. The command lines were:
 
 ```sh
 PY=/private/var/folders/kr/hnndgkzd7wddlz37gv3py84r0000gn/T/opencode/sprite-audit-venv/bin/python
@@ -127,3 +170,12 @@ benchmark of 87,000 frames. Cost depends on image sizes, PNG decode and storage;
 the program holds the report and discovered filename lists in memory, so
 memory grows with frame count. Time a representative full corpus and inspect
 memory before relying on it for production-scale review.
+
+After adding file hashes, the same three pilot commands were rerun with new
+report paths `validation/contour-audit-{watson26,room26,canim26}-terra-hashes-20261031.json`
+(replace the brace expression with each name). The previous report fields
+matched exactly, and all 723 baseline/candidate/source PNG hashes were checked
+against the corresponding files. Concurrent wall times were 1.08 s, 0.90 s,
+and 0.58 s respectively; these small warm-cache samples do not establish
+full-corpus hash overhead or freshness. They do not update any older or
+still-running all-scene reports.
