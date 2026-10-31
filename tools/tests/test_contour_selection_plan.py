@@ -386,6 +386,10 @@ class SelectionPlanTests(unittest.TestCase):
         manifest["frame_count"] = 999
         path.write_text(json.dumps(manifest), encoding="utf-8")
         self.assert_rejected("counts differ")
+        manifest["frame_count"] = 4
+        manifest["format"] = "unrecognized-format"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assert_rejected("unrecognized source root manifest format")
 
     def test_room_summary_counts_are_cross_checked_against_manifests(self):
         frame = {"index": 0, "file": "frame.png", "width": 1, "height": 1,
@@ -398,6 +402,103 @@ class SelectionPlanTests(unittest.TestCase):
         summary["rooms"][0]["frame_count"] = 2
         with self.assertRaisesRegex(validator.ValidationError, "frame_count"):
             validator.verify_summary(tree, "scene_044", summary)
+
+    def palette_manifest_fixture(self):
+        root = self.root / "palette-fixture"
+        root.mkdir()
+        resource, digest = "WATSON.VGS", "1" * 32
+        mode = {"skipPal": False, "animImages": False}
+        projections = []
+        for scene in (1, 2):
+            payload = b"RT-PAL1\0" + bytes([scene])
+            palette = hashlib.md5(payload, usedforsecurity=False).hexdigest()
+            relative = f"watson_vgs/variants/{digest}-s0a0/palettes/{palette}"
+            directory = root / relative
+            directory.mkdir(parents=True)
+            (directory / "palette.bin").write_bytes(payload)
+            meta = {"resource_name": resource, "resource_md5": digest, "decode_mode": mode,
+                    "palette_format": "RT-PAL1", "palette_md5": palette, "sidecars": ["palette.bin"],
+                    "source_scenes": [scene], "frame_count": 1,
+                    "frames": [{"index": 0, "file": "frame.png", "width": 1, "height": 1,
+                                "offset_x": 0, "offset_y": 0}]}
+            (directory / "metadata.json").write_text(json.dumps(meta))
+            projections.append({"resource": resource, "resource_md5": digest, "palette_md5": palette,
+                                "path": relative, "scenes": [scene], "frames": 1})
+        manifest = {"format": "RT-palette-walk-sources-v1", "decode_mode": mode,
+                    "scenes": [1, 2], "scene_count": 2, "resources": [resource], "resource_count": 1,
+                    "identity_count": 1, "projection_count": 2, "frame_count": 2, "projections": projections}
+        return root, manifest
+
+    def test_palette_manifest_checks_identity_counts_and_scene_coverage(self):
+        root, manifest = self.palette_manifest_fixture()
+        path = root / "manifest.json"
+        path.write_text(json.dumps(manifest))
+        tree = validator.discover(root)
+        validator.verify_variant_manifest(tree)
+        mutations = (
+            lambda m: m.update(format="unknown"),
+            lambda m: m.update(scene_count=3),
+            lambda m: m.update(identity_count=2),
+            lambda m: m.update(projection_count=1),
+            lambda m: m.update(frame_count=3),
+            lambda m: m.update(resources=["OTHER.VGS"]),
+            lambda m: m["projections"][0].update(path="../outside"),
+            lambda m: m["projections"][0].update(resource_md5="2" * 32),
+            lambda m: m["projections"][0].update(scenes=[2]),
+            lambda m: m["projections"][0].update(frames=2),
+            lambda m: m["projections"].append(copy.deepcopy(m["projections"][0])),
+            lambda m: m["projections"].pop(),
+        )
+        for mutate in mutations:
+            bad = copy.deepcopy(manifest)
+            mutate(bad)
+            path.write_text(json.dumps(bad))
+            with self.subTest(mutation=mutate), self.assertRaises(validator.ValidationError):
+                validator.verify_variant_manifest(tree)
+        path.write_text(json.dumps(manifest))
+        sidecar = root / manifest["projections"][0]["path"] / "palette.bin"
+        sidecar.write_bytes(b"not the palette")
+        with self.assertRaisesRegex(validator.ValidationError, "sidecar identity"):
+            validator.verify_variant_manifest(tree)
+
+    def test_room_root_manifest_matches_summaries_and_resources(self):
+        root = self.root / "room-fixture"
+        directory = root / "scene_044/room_001"
+        directory.mkdir(parents=True)
+        metadata = {"room_index": 1, "frame_count": 1,
+                    "frames": [{"index": 0, "file": "frame.png", "width": 1, "height": 1,
+                                "offset_x": 0, "offset_y": 0}]}
+        (directory / "metadata.json").write_text(json.dumps(metadata))
+        summary = {"scene_id": 44, "room_count": 1, "frame_count": 1,
+                   "rooms": [{"room_index": 1, "directory": "room_001", "frame_count": 1}]}
+        (directory.parent / "metadata.json").write_text(json.dumps(summary))
+        manifest = {"data_dir": "game", "scene_count": 1, "room_count": 1,
+                    "frame_count": 1, "scenes": [summary]}
+        path = root / "manifest.json"
+        path.write_text(json.dumps(manifest))
+        tree = validator.discover(root)
+        validator.verify_variant_manifest(tree)
+        mutations = (
+            lambda m: m.update(scene_count=2),
+            lambda m: m.update(room_count=2),
+            lambda m: m.update(frame_count=2),
+            lambda m: m["scenes"][0].update(scene_id=45),
+            lambda m: m["scenes"][0].update(frame_count=2),
+            lambda m: m["scenes"].append(copy.deepcopy(m["scenes"][0])),
+            lambda m: m.update(scenes=[]),
+        )
+        for mutate in mutations:
+            bad = copy.deepcopy(manifest)
+            mutate(bad)
+            path.write_text(json.dumps(bad))
+            with self.subTest(mutation=mutate), self.assertRaises(validator.ValidationError):
+                validator.verify_variant_manifest(tree)
+        path.write_text(json.dumps(manifest))
+        extra = root / "scene_044/unlisted"
+        extra.mkdir()
+        (extra / "metadata.json").write_text(json.dumps(metadata))
+        with self.assertRaisesRegex(validator.ValidationError, "resource set differs"):
+            validator.verify_variant_manifest(validator.discover(root))
 
     def test_new_exclusive_plan_and_input_safety(self):
         plan = self.validate()

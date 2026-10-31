@@ -22,7 +22,9 @@ from typing import NamedTuple
 
 
 HASH = re.compile(r"[0-9a-f]{64}\Z")
+MD5 = re.compile(r"[0-9a-f]{32}\Z")
 SCENE = re.compile(r"scene_\d+\Z")
+WALK_NAME = re.compile(r"[A-Z0-9_]{1,8}\.VGS\Z")
 GEOMETRY = ("width", "height", "offset_x", "offset_y")
 LABELS = ("baseline", "candidate", "source")
 CROSSING = "threshold_128_crossing"
@@ -311,6 +313,14 @@ def verify_variant_manifest(tree: Tree) -> None:
     raw = read_regular(path, contents=True)
     assert isinstance(raw, bytes)
     manifest = parse_json(raw, str(path))
+    if manifest.get("format") == "RT-palette-walk-sources-v1":
+        verify_palette_manifest(tree, manifest, path)
+        return
+    if "format" not in manifest and "scenes" in manifest:
+        verify_room_manifest(tree, manifest, path)
+        return
+    if "format" in manifest:
+        fail(f"{path}: unrecognized source root manifest format")
     variants = manifest.get("variants")
     if not isinstance(variants, list):
         fail(f"{path}: unrecognized source root manifest")
@@ -351,6 +361,103 @@ def verify_variant_manifest(tree: Tree) -> None:
             or integer(manifest.get("resource_count"), f"{path}: resource_count") != len(names)
             or integer(manifest.get("frame_count"), f"{path}: frame_count") != total):
         fail(f"{path}: variant summary counts differ")
+
+
+def verify_palette_manifest(tree: Tree, manifest: dict, path: Path) -> None:
+    """Cross-check a palette-walk extraction index against its current tree."""
+    mode = {"skipPal": False, "animImages": False}
+    if not same_json(manifest.get("decode_mode"), mode):
+        fail(f"{path}: unsupported palette walk decode mode")
+    scenes, resources, projections = (manifest.get(key) for key in ("scenes", "resources", "projections"))
+    if (not isinstance(scenes, list) or not scenes or
+            any(type(n) is not int or n < 0 for n in scenes) or len(set(scenes)) != len(scenes)):
+        fail(f"{path}: invalid palette scene list")
+    if (not isinstance(resources, list) or not resources or
+            any(not isinstance(n, str) or not WALK_NAME.fullmatch(n) for n in resources)
+            or len(set(resources)) != len(resources)):
+        fail(f"{path}: invalid palette resource list")
+    if not isinstance(projections, list) or not projections:
+        fail(f"{path}: invalid palette projections")
+    found, identities, names, covered, total = set(), set(), set(), {}, 0
+    for projection in projections:
+        if not isinstance(projection, dict):
+            fail(f"{path}: invalid palette projection")
+        relative = relative_name(projection.get("path"))
+        if relative in found or relative not in tree.resources:
+            fail(f"{path}: duplicate or missing palette projection: {relative}")
+        found.add(relative)
+        name, digest, palette = (projection.get(key) for key in ("resource", "resource_md5", "palette_md5"))
+        if (not isinstance(name, str) or not WALK_NAME.fullmatch(name) or
+                not isinstance(digest, str) or not MD5.fullmatch(digest) or
+                not isinstance(palette, str) or not MD5.fullmatch(palette)):
+            fail(f"{path}: invalid palette projection identity: {relative}")
+        expected = f"{name.lower().replace('.', '_')}/variants/{digest}-s0a0/palettes/{palette}"
+        if relative != expected:
+            fail(f"{path}: palette projection path differs: {relative}")
+        meta = tree.resources[relative].data
+        if (meta.get("resource_name") != name or meta.get("resource_md5") != digest or
+                meta.get("palette_md5") != palette or meta.get("palette_format") != "RT-PAL1" or
+                meta.get("sidecars") != ["palette.bin"] or not same_json(meta.get("decode_mode"), mode)):
+            fail(f"{path}: palette projection metadata differs: {relative}")
+        palette_data = read_regular(tree.root / relative / "palette.bin", contents=True)
+        assert isinstance(palette_data, bytes)
+        if hashlib.md5(palette_data, usedforsecurity=False).hexdigest() != palette:
+            fail(f"{path}: palette sidecar identity differs: {relative}")
+        selection = projection.get("scenes")
+        if (not isinstance(selection, list) or not selection or
+                any(type(n) is not int or n not in scenes for n in selection) or
+                len(set(selection)) != len(selection) or not same_json(selection, meta.get("source_scenes"))):
+            fail(f"{path}: palette projection scenes differ: {relative}")
+        identity = (name, digest)
+        prior = covered.setdefault(identity, set())
+        if prior.intersection(selection):
+            fail(f"{path}: duplicate scene in palette projections: {relative}")
+        prior.update(selection)
+        identities.add(identity)
+        names.add(name)
+        count = len(frame_records(meta, relative))
+        if integer(projection.get("frames"), f"{relative}: projection frames") != count:
+            fail(f"{path}: palette projection frame count differs: {relative}")
+        total += count
+    if found != set(tree.resources) or names != set(resources):
+        fail(f"{path}: palette resource set differs")
+    if any(value != set(scenes) for value in covered.values()):
+        fail(f"{path}: palette projections do not cover the scene set")
+    for field, expected in (("scene_count", len(scenes)), ("resource_count", len(names)),
+                            ("identity_count", len(identities)), ("projection_count", len(projections)),
+                            ("frame_count", total)):
+        if integer(manifest.get(field), f"{path}: {field}") != expected:
+            fail(f"{path}: palette summary counts differ: {field}")
+
+
+def verify_room_manifest(tree: Tree, manifest: dict, path: Path) -> None:
+    """Cross-check the room extraction index with source scene summaries."""
+    scenes = manifest.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        fail(f"{path}: invalid room scenes")
+    found, rooms, frames = set(), 0, 0
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            fail(f"{path}: invalid room scene")
+        scene_id = integer(scene.get("scene_id"), f"{path}: scene_id")
+        relative = f"scene_{scene_id:03d}"
+        if relative in found or relative not in tree.summaries:
+            fail(f"{path}: duplicate or missing room scene: {relative}")
+        found.add(relative)
+        if not same_json(scene, tree.summaries[relative].data):
+            fail(f"{path}: root/scene summary differs: {relative}")
+        verify_summary(tree, relative, scene)
+        rooms += integer(scene.get("room_count"), f"{relative}: room_count")
+        frames += integer(scene.get("frame_count"), f"{relative}: frame_count")
+    if found != set(tree.summaries):
+        fail(f"{path}: room scene summary set differs")
+    if any(PurePosixPath(resource).parent.as_posix() not in found for resource in tree.resources):
+        fail(f"{path}: room resource outside declared scenes")
+    if len(tree.resources) != rooms:
+        fail(f"{path}: room resource set differs from summaries")
+    for field, expected in (("scene_count", len(found)), ("room_count", rooms), ("frame_count", frames)):
+        if integer(manifest.get(field), f"{path}: {field}") != expected:
+            fail(f"{path}: room summary counts differ: {field}")
 
 
 def verify_trees(trees: tuple[Tree, Tree, Tree], report_resources: dict[str, dict]) -> None:
