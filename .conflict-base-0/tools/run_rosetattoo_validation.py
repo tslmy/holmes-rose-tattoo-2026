@@ -239,6 +239,8 @@ def main() -> None:
         "--sprite-filter", choices=["nearest", "bilinear", "edge"],
         help="Select the patched engine's experimental hires sprite sampling filter.",
     )
+    parser.add_argument("--haze-native-fallback", action="store_true",
+                        help="Render the five haze rooms natively until enhanced haze is supported.")
     parser.add_argument(
         "--window-size",
         default="1280,960",
@@ -324,6 +326,8 @@ def main() -> None:
         print("  SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1")
     if args.sprite_filter is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER={args.sprite_filter}")
+    if args.haze_native_fallback:
+        print("  SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1")
     print("  " + shell_join(cmd))
 
     if args.print_only:
@@ -347,6 +351,8 @@ def main() -> None:
         env["SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES"] = "1"
     if args.sprite_filter is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER"] = args.sprite_filter
+    if args.haze_native_fallback:
+        env["SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK"] = "1"
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)

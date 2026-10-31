@@ -35,7 +35,7 @@ def available_scenes(data_dir: Path) -> list[int]:
     return sorted(scenes)
 
 
-def child_environment(scene: int, pack: Path, home: Path) -> dict[str, str]:
+def child_environment(scene: int, pack: Path, home: Path, haze_native_fallback: bool = False) -> dict[str, str]:
     # Do not let an interactive/debug session's renderer or SDL settings leak in.
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("SCUMMVM_", "SDL_", "XDG_"))}
@@ -56,6 +56,8 @@ def child_environment(scene: int, pack: Path, home: Path) -> dict[str, str]:
         "SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES": "1",
         "SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER": "edge",
     })
+    if haze_native_fallback:
+        env["SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK"] = "1"
     return env
 
 
@@ -146,6 +148,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=30, help="Per-attempt deadline in seconds")
     parser.add_argument("--sdl-retries", type=int, default=0,
                         help="Retry this host's specific SDL blit error, recording every attempt (0-10)")
+    parser.add_argument("--haze-native-fallback", action="store_true",
+                        help="Use the engine's opt-in native fallback for the five haze rooms.")
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be a finite positive number")
@@ -194,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         "random_seed": 1,
         "renderer": {"backend": "surfacesdl", "sdl_video": "dummy", "sdl_audio": "dummy", "sdl_renderer": "software",
                      "hires_scale": 2, "hires_format": "rgba32", "sprite_filter": "edge",
-                     "palette_safe_sprites": True},
+                     "palette_safe_sprites": True, "haze_native_fallback": args.haze_native_fallback},
         "scenes": [],
     }
     args.output_dir.mkdir()  # Never reuse, truncate, or clear a previous run.
@@ -225,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
             if themes.is_dir():
                 command.extend([f"--themepath={themes}", f"--extrapath={themes}"])
             command.append("rosetattoo")
-            result, code, output, elapsed = run_child(command, child_environment(scene, args.pack, run_dir),
+            result, code, output, elapsed = run_child(command, child_environment(scene, args.pack, run_dir,
+                                                                                 args.haze_native_fallback),
                                                       run_dir, scene, args.timeout)
             if result == "crash_or_error" and b"SDL_BlitSurface failed: Parameter 'src' is invalid!" in output:
                 result = "sdl_blit_error"

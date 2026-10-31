@@ -1,3 +1,3 @@
-ancestorEntries = ["tools/run_rosetattoo_validation.py"]
-ourEntries = ["tools/run_rosetattoo_validation.py"]
-theirEntries = ["tools/run_rosetattoo_validation.py"]
+ancestorEntries = []
+ourEntries = ["docs/sprite-remaster.md"]
+theirEntries = ["docs/sprite-remaster.md"]
