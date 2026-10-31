@@ -175,3 +175,8 @@ An isolated scene-26 pilot exercised the three lamp frames and 31 bartender
 frames in a running engine; a matched capture showed the character, lamp,
 bartender, bar and foreground patron in the expected order. This does not
 cover all animation frames, palette transitions or game interactions.
+Another isolated fixture invoked the real `26HEXIT` cAnim stream: all 18
+frames loaded in order and matched the original `BEHIND` layering. A Watson
+frame comparison confirmed that soft-alpha edges render differently from the
+same RGB image with a thresholded mask. Neither fixture replaces a full
+playthrough or verifies every character and animation.
