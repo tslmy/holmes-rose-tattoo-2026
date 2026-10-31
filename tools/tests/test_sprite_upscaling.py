@@ -27,6 +27,12 @@ class SpriteUpscalingTests(unittest.TestCase):
         self.assertEqual(padded.getpixel((0, 2)), (220, 30, 20))
         self.assertEqual(self.frame.getpixel((0, 2)), (0, 0, 0, 0))
 
+    def test_auto_mode_only_selects_fonts_for_font_resources(self):
+        self.assertEqual(upscaler.resource_mode("auto", Path("font1_vgs")), "font")
+        self.assertEqual(upscaler.resource_mode("auto", Path("FONT8_VGS")), "font")
+        self.assertEqual(upscaler.resource_mode("auto", Path("scene_026/room_004")), "photo")
+        self.assertEqual(upscaler.resource_mode("photo", Path("font1_vgs")), "photo")
+
     def test_nested_scene_summary_is_not_a_sprite(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

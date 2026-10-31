@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -46,6 +47,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = ROOT / "models" / "esrgan" / "RealESRGAN_x4plus.pth"
 FLATTEN_FILL = (128, 128, 128)
 ALPHA_THRESHOLD = 128
+
+
+def resource_mode(mode: str, resource_dir: Path) -> str:
+    if mode != "auto":
+        return mode
+    return "font" if re.fullmatch(r"font[1-8]_vgs", resource_dir.name, re.IGNORECASE) else "photo"
 
 
 def load_esrgan_model(model_path: Path, device: str):
@@ -343,7 +350,7 @@ def main() -> None:
                         help="Overlapping source pixels around each inference tile (default: 16).")
     parser.add_argument(
         "--mode",
-        choices=["photo", "font"],
+        choices=["photo", "font", "auto"],
         default="photo",
         help=(
             "'photo' (default) upscales via the local ESRGAN model, suitable "
@@ -351,7 +358,8 @@ def main() -> None:
             "Lanczos-smoothed alpha-only upscale with no model call, "
             "appropriate for tiny monochrome bitmap font glyphs "
             "(FONT1.VGS-FONT8.VGS) where photographic detail would blur "
-            "thin strokes rather than help legibility."
+            "thin strokes rather than help legibility. 'auto' selects font "
+            "mode for FONT1.VGS-FONT8.VGS and photo mode for other resources."
         ),
     )
     args = parser.parse_args()
@@ -395,7 +403,7 @@ def main() -> None:
             model,
             args.device,
             args.model_path.stem,
-            mode=args.mode,
+            mode=resource_mode(args.mode, resource_dir),
             alpha_mode=args.alpha_mode,
             skip_existing=args.skip_existing,
             model_sha256=model_sha256,
