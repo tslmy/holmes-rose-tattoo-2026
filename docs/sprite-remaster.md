@@ -29,6 +29,16 @@ Room and cAnim RGB values use the room's **initial** palette. Runtime palette
 changes, fades, and other effects are not baked into the PNGs and require
 separate runtime handling or validation.
 
+After both extraction runs finish, verify every decoded frame against its RRM
+stream (this can take time):
+
+```sh
+python tools/audit_rosetattoo_extraction.py \
+  --room-source extracted/room-sprites-new \
+  --canim-source extracted/canimations-new \
+  --report validation/extraction-audit.json
+```
+
 ## Upscale
 
 Run the local model on each extracted tree. `--skip-existing` safely resumes
