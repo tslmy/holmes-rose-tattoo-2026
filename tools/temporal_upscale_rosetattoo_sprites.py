@@ -17,9 +17,8 @@ For each target frame it:
    search (the VGS offsets provide the common sprite coordinate system);
 3. aggregates residuals only where the neighbour agrees in source colour and
    opacity, so moving limbs and changing silhouettes are never smeared; and
-4. preserves the input detail frame's binary alpha mask. Identity-redrawn
-   sequences therefore retain their generated visible silhouette, while
-   ordinary ESRGAN sequences retain the extracted game mask.
+4. preserves the input detail frame's alpha mask, including soft edges when
+   present. The pass does not invent a different silhouette.
 
 The result is intentionally conservative: a slightly less "creative" detail
 pass is preferable to a flickering hand, face, or coat edge in a game sprite.
@@ -33,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+from sprite_metadata import resource_metadata_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -160,7 +161,7 @@ def stabilize_sequence(
             "method": "aligned-neighbour-residual-median",
             "neighbour_radius": radius,
             "blend": blend,
-            "alpha_policy": "target-binary-mask",
+            "alpha_policy": "preserve-target-alpha",
         },
         "frames": output_records,
     }
@@ -180,7 +181,7 @@ def main() -> None:
     args = parser.parse_args()
 
     resource_names = args.resources or sorted(
-        d.name for d in args.source_dir.iterdir() if d.is_dir() and (d / "metadata.json").exists()
+        str(path.parent.relative_to(args.source_dir)) for path in resource_metadata_paths(args.source_dir)
     )
     for name in resource_names:
         source_dir = args.source_dir / name
