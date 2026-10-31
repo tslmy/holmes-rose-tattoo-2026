@@ -322,7 +322,10 @@ at runtime (see `Screen::getRoseTattooHiresFont()` in the ScummVM fork's
 
 Unlike room backgrounds, `MAP.VGS` stores no palette of its own — the engine
 loads a separate `MAP.PAL` resource for it — so extraction needs
-`--palette-resource` instead of `--palette-scene`:
+`--palette-resource` instead of `--palette-scene`. It is drawn as an opaque
+image, so the extractor keeps palette index 255 opaque for `MAP.VGS` rather
+than using the transparent-index convention used by ordinary sprites. The
+journal, dartboard and foolscap backgrounds are also opaque native blits:
 
 ```sh
 python3 tools/extract_rosetattoo_sprites.py --resources MAP.VGS --palette-resource MAP.PAL
