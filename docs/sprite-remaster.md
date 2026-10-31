@@ -221,6 +221,11 @@ does not guarantee unchanged visible opacity, silhouettes or occlusion.
 The geometric contour is the selected direction for the current remaster;
 its broader sprite and animation validation is still in progress.
 
+For source-backed contour and topology checks, install the optional audit
+dependencies with `uv sync --extra esrgan --extra contour-audit`; see
+[`sprite-contour-audit.md`](sprite-contour-audit.md). Include both extras when
+you need the model and the audit in the same project environment.
+
 In the local staged run, a source-backed geometry audit compared all 18,380
 palette-qualified walk frames. RGB bytes and nonzero-alpha support were
 unchanged, and no frame changed its 8-connected foreground component count
