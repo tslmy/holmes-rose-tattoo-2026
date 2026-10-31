@@ -56,27 +56,26 @@ python tools/upscale_rosetattoo_sprites.py \
   --scale 2 --alpha-mode soft --device mps --skip-existing
 ```
 
-For shared extracted sprites, first prepare `extracted/shared-sprites-new`
-using the resource extraction commands in the
-[`tools reference`](../tools/README.md#cursors-items-character-and-font-sprites).
-Re-extract `MAP.VGS` with `--palette-resource MAP.PAL`: it is opaque, and
-older extractions incorrectly made palette index 255 transparent. Then:
-
-Some existing shared extractions were generated without a palette and are
-solid black. Use `--palette-resource DARTBD.PAL` for the six darts/hand
-resources and `--palette-resource JOURNAL.PAL` for `JOURNAL.VGS`. `OPIUM.VGS`
-can use `--palette-scene 53`; `COAT3.VGS`, paper, interface and loading assets
-can use a representative room palette, e.g. `--palette-scene 1`. A room
-palette is a snapshot, not a guarantee of matching every runtime palette.
-The extractor records the supplied fallback palette in new metadata.
+First extract the shared resources described in the
+[`tools reference`](../tools/README.md#cursors-items-character-and-font-sprites)
+to `extracted/sprites`. Prepare a new source tree that repairs known missing
+palettes and the map's opaque pixels, then upscale it:
 
 ```sh
+python tools/prepare_rosetattoo_shared_sprites.py \
+  --source-dir extracted/sprites --output-dir extracted/shared-sprites-new
 python tools/upscale_rosetattoo_sprites.py \
   --input-dir extracted/shared-sprites-new \
   --output-dir enhanced/shared-sprites-new \
   --scale 2 --mode auto --alpha-mode soft --device mps \
   --tile-size 256 --tile-pad 16 --skip-existing
 ```
+
+The preparation step uses `DARTBD.PAL` for darts/hand resources and
+`JOURNAL.PAL` for the journal. `OPIUM.VGS` uses room 53's palette; `COAT3.VGS`,
+paper, interface and loading assets use room 1's palette. These room palettes
+are snapshots, not a guarantee of matching every runtime palette. New
+extraction metadata records the supplied fallback palette.
 
 Auto mode selects alpha-only bitmap-font resizing; tiling limits GPU memory
 for large frames such as the map. This does not imply that every shared
