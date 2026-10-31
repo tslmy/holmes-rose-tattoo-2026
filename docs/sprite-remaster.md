@@ -29,6 +29,14 @@ Room and cAnim RGB values use the room's **initial** palette. Runtime palette
 changes, fades, and other effects are not baked into the PNGs and require
 separate runtime handling or validation.
 
+Shared walk sprites can be palette-dependent even without an animated palette:
+their runtime colors come from the current room, whereas a single extracted
+PNG set uses one reference palette. Hires RGB overrides cannot in general be
+recolored exactly after the original indices have been discarded. In addition,
+scenes 7, 8, 18, 53 and 68 apply native haze/mask effects after drawing scene
+sprites; those effects require dedicated validation or a safe native fallback.
+File coverage is not evidence that these cases are visually correct.
+
 After both extraction runs finish, verify every decoded frame against its RRM
 stream (this can take time):
 
