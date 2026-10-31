@@ -115,3 +115,18 @@ It accepts nested resources and `--skip-existing`; completed sequences are
 reused only when their input files and temporal settings still match. Soft
 alpha is preserved. Its output manifests can be used as sprite inputs to the
 assembler once the entire selected run is complete.
+
+## Local experiment notes
+
+On the local M2 Max, a test of 95 Watson frames took 11.38 seconds on MPS;
+20 character frames took 4.24 seconds on MPS versus 25.08 seconds on CPU.
+Times vary with frame dimensions, other GPU work and model warm-up. An
+untiled 1280x960 map exceeded the available MPS allocation; overlapping tiles
+completed a map test in 11.56 seconds. A separate three-frame scene-26 lamp
+test compared 128-pixel tiles with untiled inference: mean RGB difference on
+visible pixels was approximately 0.13/255, with identical alpha masks. These
+are spot checks, not guarantees against seams or animation flicker.
+
+An initial full extraction audit decoded the source streams again and
+matched all extracted frames for all 80 local PC room files. The audit checks
+asset fidelity to the decoder; it does not replace engine-side playtesting.
