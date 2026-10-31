@@ -157,6 +157,11 @@ It does **not** prove that the extraction covers all
 game resources or that the engine consumes each asset correctly. Validate in
 game: include moving characters, foreground occlusion, scripted animations,
 scrolling rooms, palette transitions, UI, inventory, map and save/load.
+The optional [scene-start smoke test](scene-start-smoke-test.md) launches each
+scene with an isolated save copy and waits for an actual rendered-frame marker.
+All 80 local rooms emitted the marker in a preliminary pilot-pack run, but this
+does not validate their natural entrances, story flags or later gameplay; repeat
+it against the finished pack.
 
 For a manual test with a patched `scummvm-src/scummvm` binary and a **copy**
 of a save in slot 0, for example:
