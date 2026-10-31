@@ -58,6 +58,9 @@ class SceneSmokeTests(unittest.TestCase):
         self.assertEqual(env["SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE"], "7")
         self.assertEqual(env["SDL_VIDEODRIVER"], "dummy")
         self.assertEqual(env["SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER"], "edge")
+        self.assertNotIn("SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK", env)
+        enabled = smoke.child_environment(7, Path("/pack"), Path("/home"), True)
+        self.assertEqual(enabled["SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK"], "1")
 
     def test_discovers_only_numbered_scene_resources(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,6 +111,7 @@ class SceneSmokeTests(unittest.TestCase):
                 "assert pathlib.Path(args['config']).parent == pathlib.Path.cwd()\n"
                 "assert os.environ['HOME'] == str(pathlib.Path.cwd())\n"
                 "assert os.environ['SDL_VIDEODRIVER'] == 'dummy'\n"
+                "assert os.environ['SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK'] == '1'\n"
                 "p = pathlib.Path(args['savepath']) / 'rosetattoo.000'\n"
                 "assert p.read_bytes() == b'original save'\n"
                 "p.write_bytes(b'changed copy')\n"
@@ -121,11 +125,12 @@ class SceneSmokeTests(unittest.TestCase):
             command = [sys.executable, smoke.__file__, "--scummvm", str(fake),
                        "--data-dir", str(data), "--pack", str(pack), "--save", str(save),
                        "--output-dir", str(output), "--scenes", "1", "7", "--timeout", "2",
-                       "--sdl-retries", "1"]
+                        "--sdl-retries", "1", "--haze-native-fallback"]
             result = subprocess.run(command, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             report = json.loads((output / "report.json").read_text())
             self.assertTrue(report["completed"])
+            self.assertTrue(report["renderer"]["haze_native_fallback"])
             self.assertEqual(report["selected_scenes"], [1, 7])
             self.assertEqual([x["result"] for x in report["scenes"]], ["rendered", "rendered"])
             self.assertEqual([x["result"] for x in report["scenes"][0]["attempts"]],

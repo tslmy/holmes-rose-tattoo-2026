@@ -258,6 +258,17 @@ policy. A further 3,390 shared/variant frames likewise had no RGB, support,
 or component/hole-count changes. These counts do not prove unchanged geometry,
 acceptable motion, or gameplay safety.
 
+The 32,697 staged room-foreground frames likewise had no RGB, nonzero-support,
+or measured alpha-128 component/hole-count changes. The largest relative
+per-frame alpha-area change was 4.04% in a sparse, nearly transparent frame;
+this metric alone does not establish whether small details look right.
+The local candidate assembled from all five audited trees is
+`mods/rosetattoo-contour-candidate-20261031`: 80 backgrounds, 3,640 sprite
+resources and 87,656 frames. Its post-copy SHA-256 check matched every frame,
+resource manifest and palette sidecar to the selected audit inputs, and every
+background to its assembly input. The original source trees and earlier packs
+remain untouched. This candidate still needs broader visual and gameplay tests.
+
 For the 33,189 local scripted-animation frames, the same audit found no RGB
 or support changes, but one frame in `scene_044/canim_004` changed its
 thresholded hole count. The planned local pack keeps the entire 10-frame

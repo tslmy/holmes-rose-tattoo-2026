@@ -77,6 +77,11 @@ ScummVM/SDL/XDG settings. It stops the child at the exact marker, or at a
 bounded per-attempt timeout, using event-driven stdout, not elapsed-time
 screenshots or process survival as evidence.
 
+Pass `--haze-native-fallback` to exercise the patched engine's optional
+native-rendering safety fallback in scenes 7, 8, 18, 53 and 68. This flag
+sacrifices enhanced scene art in those rooms; it does not implement hires haze.
+The selected setting is recorded in the report.
+
 `report.json` records the executable and source-save hashes, pack manifest
 hash if present, settings, selected scene IDs, completion flag, per-scene
 status, and each completed attempt's log and exit code. Check `completed` and compare

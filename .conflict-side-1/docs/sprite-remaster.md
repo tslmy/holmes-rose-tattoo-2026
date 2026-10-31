@@ -37,9 +37,8 @@ The newer renderer uses the installed palette for native indexed fallback
 pixels (including darts' separate palette). When the installed palette is
 entirely black, the presented true-color frame is blackened without discarding
 retained layers; a true-color cursor may remain visible. Intermediate fades
-and arbitrary palette effects still do not recolor cached true-color art. A
-native-only fallback is not yet safe because some text exists only in the
-hires layer; palette effects and their restoration need further engine work.
+and arbitrary palette effects still do not recolor cached true-color art.
+Those effects and their restoration need further engine work.
 
 Shared walk sprites can be palette-dependent even without an animated palette:
 their runtime colors come from the current room, whereas a single extracted
@@ -48,10 +47,13 @@ the actual installed palette against a generated projection and falls back to
 native art when none matches. It does not reconstruct arbitrary palette
 effects after the original indices have been discarded. In addition,
 scenes 7, 8, 18, 53 and 68 apply native haze/mask effects after drawing scene
-sprites; those effects require dedicated validation or a safe native fallback.
-File coverage is not evidence that these cases are visually correct. The
-`native-reference` debug view renders the original indexed scene and UI for
-side-by-side effect testing; it is a diagnostic, not enhanced haze rendering.
+sprites; the hires compositor does not faithfully reproduce them. The opt-in
+`SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1` instead renders these five
+rooms with their native scene and bitmap text while leaving other rooms and
+the map enhanced. It preserves the haze rather than modernizing those rooms;
+its targeted transition and UI tests are not a full playthrough. The separate
+`native-reference` debug view renders the original indexed scene and UI across
+the whole game for comparison. File coverage is not proof of visual correctness.
 
 Some shared resource names occur in both `VGS.LIB` and `WALK.LIB`, with
 different frame data in this game copy. For five affected names, the updated
@@ -182,6 +184,7 @@ SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
 SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
 SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
 SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER=edge \
+SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1 \
 ./scummvm-src/scummvm --path="$PWD/scummvm" \
   --savepath="$PWD/validation/test-saves" --save-slot=0 \
   --themepath="$PWD/scummvm-src/gui/themes" \
@@ -201,6 +204,9 @@ gameplay or hotspot geometry. At 2x, some visible stair-stepping remains.
 The edge filter blends gradually between interpolated and nearest RGB near
 full opacity, avoiding a hard color switch observed in a Holmes shoe frame;
 other source-color and opacity changes can still produce visible variation.
+The optional haze fallback in this example is a correctness-first compromise:
+five rooms revert to native scene art and bitmap text until their indexed
+effects can be reproduced safely over enhanced images.
 
 The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
