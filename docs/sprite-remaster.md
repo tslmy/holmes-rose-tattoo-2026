@@ -16,6 +16,8 @@ python tools/extract_rosetattoo_room_sprites.py --data-dir scummvm \
   --output-dir extracted/room-sprites-new
 python tools/extract_rosetattoo_canimations.py --data-dir scummvm \
   --output-dir extracted/canimations-new
+python tools/extract_rosetattoo_vgs_variants.py --data-dir scummvm \
+  --palette-scene 1 --output-dir extracted/vgs-variants-new
 ```
 
 The first tool exports room image chunks, keyed by scene and one-based room
@@ -44,10 +46,10 @@ sprites; those effects require dedicated validation or a safe native fallback.
 File coverage is not evidence that these cases are visually correct.
 
 Some shared resource names occur in both `VGS.LIB` and `WALK.LIB`, with
-different frame data in this game copy. The extractor's library search order
-must be checked against the engine's actual resource lookup; matching a
-filename and dimensions alone does not establish that the correct artwork was
-selected. This is a separate issue from room-chunk and cAnim indexing.
+different frame data in this game copy. For five affected names, the updated
+engine looks for a variant keyed by the actual decompressed stream and decode
+mode; a missing matching variant falls back to native artwork rather than a
+possibly wrong name-only override. See [VGS variants](vgs-variants.md).
 
 After both extraction runs finish, verify every decoded frame against its RRM
 stream (this can take time):
@@ -73,6 +75,10 @@ python tools/upscale_rosetattoo_sprites.py \
 python tools/upscale_rosetattoo_sprites.py \
   --input-dir extracted/canimations-new \
   --output-dir enhanced/canimations-new \
+  --scale 2 --alpha-mode soft --device mps --skip-existing
+python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/vgs-variants-new \
+  --output-dir enhanced/vgs-variants-new \
   --scale 2 --alpha-mode soft --device mps --skip-existing
 ```
 
@@ -112,11 +118,13 @@ python tools/assemble_rosetattoo_modernized.py \
   --sprite-dir enhanced/shared-sprites-new \
   --sprite-dir enhanced/room-sprites-new \
   --sprite-dir enhanced/canimations-new \
+  --sprite-dir enhanced/vgs-variants-new \
   --output-dir mods/modernized-new --scale 2
 python tools/audit_rosetattoo_pack.py --pack mods/modernized-new \
   --sprite-source extracted/shared-sprites-new \
   --sprite-source extracted/room-sprites-new \
   --sprite-source extracted/canimations-new \
+  --sprite-source extracted/vgs-variants-new \
   --verify-source \
   --report validation/modernized-new-audit.json
 ```
