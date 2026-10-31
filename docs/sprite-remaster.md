@@ -203,6 +203,11 @@ small representative set before running it on a whole pack: a larger radius
 can soften or erase small details, and rendering at 2x still limits the
 precision of a silhouette.
 
+A guarded 0.55-pixel feather was compared with the bilinear renderer on one
+Watson frame: the visual change was subtle, but it expanded native provenance
+coverage and affected compositing at some pixels. It has **not** been adopted
+for the full pack; small features, overlaps and animation need further tests.
+
 ## Local experiment notes
 
 On the local M2 Max, a test of 95 Watson frames took 11.38 seconds on MPS;
