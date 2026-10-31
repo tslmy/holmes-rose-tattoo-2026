@@ -68,6 +68,13 @@ upscaled once per run and copied to their other locations. Resource directories
 can be nested (for example, by room) and retain their relative paths in the
 output tree.
 
+Large frames such as the London map may exceed GPU memory at the model's
+native 4x scale. `--tile-size 256 --tile-pad 16` bounds inference memory by
+processing overlapping source tiles, then joins their center regions before
+the final resize. Tiling may introduce slight differences at joins; inspect
+the actual image rather than treating it as numerically identical to untiled
+inference.
+
 ## 3. Run
 
 ```sh

@@ -37,6 +37,18 @@ class SpriteUpscalingTests(unittest.TestCase):
             (resource / "metadata.json").write_text(json.dumps({"frames": []}))
             self.assertEqual(resource_metadata_paths(root), [resource / "metadata.json"])
 
+    @patch.object(upscaler, "run_esrgan_whole", side_effect=lambda model, device, image: image.resize(
+        (image.width * 4, image.height * 4), Image.Resampling.NEAREST))
+    def test_tiled_inference_preserves_dimensions_and_tile_placement(self, inference):
+        source = Image.new("RGB", (13, 9))
+        for y in range(source.height):
+            for x in range(source.width):
+                source.putpixel((x, y), (x * 10, y * 10, 0))
+        tiled = upscaler.run_esrgan(None, "cpu", source, tile_size=4, tile_pad=2)
+        expected = source.resize((52, 36), Image.Resampling.NEAREST)
+        self.assertEqual(tiled.tobytes(), expected.tobytes())
+        self.assertGreater(inference.call_count, 1)
+
     @patch.object(upscaler, "run_esrgan", side_effect=lambda model, device, image: image.resize((20, 20)))
     def test_soft_and_binary_alpha_preserve_size_and_foreground(self, inference):
         soft = upscaler.upscale_frame(self.frame, 2, None, "cpu", "soft")

@@ -55,7 +55,7 @@ def load_esrgan_model(model_path: Path, device: str):
     return model.to(device).eval()
 
 
-def run_esrgan(model, device: str, image: Image.Image) -> Image.Image:
+def run_esrgan_whole(model, device: str, image: Image.Image) -> Image.Image:
     """Runs one RGB PIL image through a spandrel-loaded ESRGAN model.
 
     Returns an image upscaled by the model's own native scale factor (e.g.
@@ -70,6 +70,37 @@ def run_esrgan(model, device: str, image: Image.Image) -> Image.Image:
         output = model(tensor)
     output = output.clamp(0, 1).squeeze(0).permute(1, 2, 0).cpu().numpy()
     return Image.fromarray((output * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+
+
+def run_esrgan(model, device: str, image: Image.Image, tile_size: int = 0, tile_pad: int = 16) -> Image.Image:
+    """Optionally infer overlapping source tiles to bound accelerator memory."""
+    if tile_size <= 0 or (image.width <= tile_size and image.height <= tile_size):
+        return run_esrgan_whole(model, device, image)
+    if tile_pad < 0:
+        raise ValueError("tile padding must be nonnegative")
+    output = None
+    native_scale = None
+    for y in range(0, image.height, tile_size):
+        for x in range(0, image.width, tile_size):
+            end_x, end_y = min(x + tile_size, image.width), min(y + tile_size, image.height)
+            left, top = max(x - tile_pad, 0), max(y - tile_pad, 0)
+            right, bottom = min(end_x + tile_pad, image.width), min(end_y + tile_pad, image.height)
+            tile = image.crop((left, top, right, bottom))
+            enhanced = run_esrgan_whole(model, device, tile)
+            if enhanced.width % tile.width or enhanced.height % tile.height:
+                raise ValueError("Model produced a non-integer tile scale")
+            scale_x, scale_y = enhanced.width // tile.width, enhanced.height // tile.height
+            if scale_x != scale_y or (native_scale is not None and native_scale != scale_x):
+                raise ValueError("Model produced inconsistent tile scales")
+            if output is None:
+                native_scale = scale_x
+                output = Image.new("RGB", (image.width * scale_x, image.height * scale_y))
+            core = enhanced.crop(((x - left) * scale_x, (y - top) * scale_y,
+                                  (end_x - left) * scale_x, (end_y - top) * scale_y))
+            output.paste(core, (x * scale_x, y * scale_y))
+    if output is None:
+        raise ValueError("Cannot upscale an empty image")
+    return output
 
 
 def extend_transparent_rgb(rgba: Image.Image, radius: int = 3) -> Image.Image:
@@ -101,13 +132,15 @@ def extend_transparent_rgb(rgba: Image.Image, radius: int = 3) -> Image.Image:
     return Image.fromarray(rgb, mode="RGB")
 
 
-def upscale_frame(frame: Image.Image, scale: int, model, device: str, alpha_mode: str = "binary") -> Image.Image:
+def upscale_frame(frame: Image.Image, scale: int, model, device: str, alpha_mode: str = "binary",
+                  tile_size: int = 0, tile_pad: int = 16) -> Image.Image:
     rgba = frame.convert("RGBA")
     alpha = rgba.getchannel("A")
 
     flattened = extend_transparent_rgb(rgba)
 
-    upscaled_rgb = run_esrgan(model, device, flattened)
+    upscaled_rgb = (run_esrgan(model, device, flattened, tile_size=tile_size, tile_pad=tile_pad)
+                    if tile_size else run_esrgan(model, device, flattened))
     target_size = (rgba.width * scale, rgba.height * scale)
     if upscaled_rgb.size != target_size:
         upscaled_rgb = upscaled_rgb.resize(target_size, Image.Resampling.LANCZOS)
@@ -160,6 +193,8 @@ def upscale_resource_dir(
     skip_existing: bool = False,
     model_sha256: str | None = None,
     frame_cache: dict[tuple, Path] | None = None,
+    tile_size: int = 0,
+    tile_pad: int = 16,
 ) -> dict:
     metadata_path = input_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -168,6 +203,8 @@ def upscale_resource_dir(
     signature = {"scale": scale, "upscaler": model_name if mode != "font" else "lanczos-alpha",
                  "alpha_mode": alpha_mode if mode != "font" else "soft",
                  "model_sha256": model_sha256 if mode != "font" else None}
+    if tile_size and mode != "font":
+        signature.update({"tile_size": tile_size, "tile_pad": tile_pad})
     output_metadata_path = output_dir / "metadata.json"
     if skip_existing and not output_metadata_path.exists() and any(output_dir.glob("frame_*@*x.png")):
         raise ValueError(f"Cannot resume {output_dir}: existing frames have no generation metadata")
@@ -200,7 +237,7 @@ def upscale_resource_dir(
         digest.update(f"{frame.width}x{frame.height}:".encode("ascii"))
         digest.update(frame.tobytes())
         source_hash = digest.hexdigest()
-        key = (source_hash, scale, model_name, model_sha256, mode, alpha_mode)
+        key = (source_hash, scale, model_name, model_sha256, mode, alpha_mode, tile_size, tile_pad)
         valid_existing = False
         if skip_existing and out_path.exists():
             try:
@@ -224,7 +261,7 @@ def upscale_resource_dir(
                 elif mode == "font":
                     upscaled = upscale_font_glyph(frame, scale)
                 else:
-                    upscaled = upscale_frame(frame, scale, model, device, alpha_mode)
+                    upscaled = upscale_frame(frame, scale, model, device, alpha_mode, tile_size, tile_pad)
                 if upscaled.size != expected_size:
                     raise ValueError(f"{frame_path}: expected {expected_size}, got {upscaled.size}")
                 pnginfo = PngImagePlugin.PngInfo()
@@ -300,6 +337,10 @@ def main() -> None:
         help="Cutout policy: legacy binary mask or antialiased soft alpha (requires compatible renderer).",
     )
     parser.add_argument("--skip-existing", action="store_true", help="Resume a matching interrupted run.")
+    parser.add_argument("--tile-size", type=int, default=0,
+                        help="Maximum source pixels per tile, or 0 for untiled inference (default).")
+    parser.add_argument("--tile-pad", type=int, default=16,
+                        help="Overlapping source pixels around each inference tile (default: 16).")
     parser.add_argument(
         "--mode",
         choices=["photo", "font"],
@@ -316,6 +357,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.scale < 1:
         parser.error("--scale must be >= 1")
+    if args.tile_size < 0 or args.tile_pad < 0:
+        parser.error("--tile-size and --tile-pad must be nonnegative")
 
     if args.resources:
         resource_dirs = [args.input_dir / name for name in args.resources]
@@ -357,6 +400,8 @@ def main() -> None:
             skip_existing=args.skip_existing,
             model_sha256=model_sha256,
             frame_cache=frame_cache,
+            tile_size=args.tile_size,
+            tile_pad=args.tile_pad,
         )
         print(
             f"{resource_dir.relative_to(args.input_dir)}: {len(metadata['frames'])} frames "
