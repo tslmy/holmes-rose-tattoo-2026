@@ -211,6 +211,27 @@ The optional haze fallback in this example is a correctness-first compromise:
 five rooms revert to native scene art and bitmap text until their indexed
 effects can be reproduced safely over enhanced images.
 
+## Input and rendering responsiveness
+
+The PC Rose Tattoo input path now queues mouse-button transitions and their
+positions until the game consumes them. Previously, a quick press and release
+could both be polled while an animation was drawing and disappear before the
+next input check. An isolated engine fixture reproduced that loss on the old
+build and confirmed ordered press/release delivery for both buttons on the new
+build; a separate map fixture selected an unlocked location with a quick click.
+The queue is cleared wherever the engine explicitly clears input. Other Sherlock
+games and 3DO retain their existing button handling.
+
+An opaque hires-background copy now uses the matching-format bitmap copy rather
+than a general per-pixel alpha blit. A local 1280×960 copy microbenchmark measured
+2.741 ms before versus 0.283 ms after, with identical output; that is **not** an
+in-game FPS measurement. A matched map composite was pixel-identical before
+and after. The combined build passed 457 CxxTest tests, and all 80 local scene
+starts reached their marker with the candidate pack and native haze fallback.
+These tests do not establish that every dialog, drag, cutscene or desktop input
+path is responsive; the reported GUI freeze and actual perceived FPS still need
+in-game confirmation.
+
 For this machine's assembled candidate, an isolated launch was prepared under
 `validation/contour-candidate-playtest-20261031/`. Its slot 0 was copied from
 the validation save; subsequent saves there are separate from the user's

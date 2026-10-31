@@ -226,11 +226,24 @@ An opaque hires-background copy now uses the matching-format bitmap copy rather
 than a general per-pixel alpha blit. A local 1280×960 copy microbenchmark measured
 2.741 ms before versus 0.283 ms after, with identical output; that is **not** an
 in-game FPS measurement. A matched map composite was pixel-identical before
-and after. The combined build passed 457 CxxTest tests, and all 80 local scene
-starts reached their marker with the candidate pack and native haze fallback.
+and after. The combined build passed 461 CxxTest tests, and all 80 local scene
+starts reached their marker with the candidate pack and native haze fallback;
+33 dummy-SDL startup attempts failed before successful retries.
 These tests do not establish that every dialog, drag, cutscene or desktop input
 path is responsive; the reported GUI freeze and actual perceived FPS still need
 in-game confirmation.
+
+For the hires overhead map only, the event loop splits its existing 10 ms
+sleep around a pending frame deadline rather than always presenting at the next
+poll. The requested sleep still totals 10 ms and room animation loops retain
+their existing pacing. In a dummy-SDL map fixture, presentation rose from
+about 26.4 to 28.6 frames/second; eight controlled scrolling traversals took
+2.79–2.96 seconds before and 2.91–2.97 seconds after. These short measurements
+are noisy, do not establish exact timing equivalence, and are not desktop FPS.
+Frame-counter cadence while on the map changes toward its intended rate; GUI
+and map behavior still need real playtesting.
+The local measurements and debugger traces are retained under the ignored
+`validation/responsiveness-evidence-20261031/` directory.
 
 For this machine's assembled candidate, an isolated launch was prepared under
 `validation/contour-candidate-playtest-20261031/`. Its slot 0 was copied from
