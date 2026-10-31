@@ -14,6 +14,33 @@ import upscale_rosetattoo_sprites as upscaler
 
 
 class SpriteAlphaRefinementTests(unittest.TestCase):
+    def test_scale2x_reconstructs_corner_without_changing_flat_regions(self):
+        native = np.array([[0, 0, 0], [0, 255, 255], [0, 255, 255]], dtype=np.uint8)
+        result = refinement.scale2x_mask(native)
+        self.assertEqual(result.shape, (6, 6))
+        self.assertEqual(result[2, 2], 0)
+        self.assertEqual(result[2, 3], 255)
+        self.assertEqual(result[3, 2], 255)
+        self.assertEqual(result[3, 3], 255)
+        self.assertTrue((result[:2, :] == 0).all())
+
+    def test_scale4_requires_binary_source_and_exact_2x_output(self):
+        source = Image.new("L", (3, 3), 0)
+        source.putpixel((1, 1), 128)
+        with self.assertRaisesRegex(ValueError, "binary native alpha"):
+            refinement.refine_alpha(source, (6, 6), 0.35, thin_guard=True, method="scale4-box")
+        source.putpixel((1, 1), 255)
+        with self.assertRaisesRegex(ValueError, "requires 2x output"):
+            refinement.refine_alpha(source, (12, 12), 0.35, thin_guard=True, method="scale4-box")
+
+    def test_constant_alpha_skips_geometric_work(self):
+        for value in (0, 255):
+            source = Image.new("L", (100, 100), value)
+            with patch.object(refinement, "scale2x_mask", side_effect=AssertionError("no contour")):
+                result = refinement.refine_alpha(source, (200, 200), 0.35,
+                                                 thin_guard=True, method="scale4-box", preserve_support=True)
+            self.assertEqual(result.getextrema(), (value, value))
+
     def test_thin_guard_reduces_stroke_opacity_loss(self):
         source = Image.new("L", (11, 11), 0)
         for y in range(2, 9):
@@ -90,6 +117,48 @@ class SpriteAlphaRefinementTests(unittest.TestCase):
             self.assertEqual(result["alpha_refinement"]["method"], "preserve-font-alpha")
             with Image.open(enhanced / "frame_000@2x.png") as before, Image.open(output / "frame_000@2x.png") as after:
                 self.assertEqual(before.tobytes(), after.tobytes())
+
+    def test_scale4_metadata_and_rgb_are_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, enhanced = self.prepare(root)
+            output = root / "contour"
+            result = refinement.refine_resource(source, enhanced, output, 2, 0.35,
+                                               thin_guard=True, method="scale4-box")
+            self.assertEqual(result["alpha_refinement"]["method"], "native-alpha-scale4-box")
+            self.assertTrue(result["alpha_refinement"]["thin_guard"])
+            with Image.open(enhanced / "frame_000@2x.png") as before, Image.open(output / "frame_000@2x.png") as after:
+                self.assertTrue(np.array_equal(np.asarray(before)[..., :3], np.asarray(after)[..., :3]))
+                self.assertEqual(before.info["source_sha256"], after.info["source_sha256"])
+
+    def test_preserve_support_keeps_original_coverage(self):
+        source = Image.new("L", (9, 9), 0)
+        for y in range(2, 7):
+            for x in range(2, 7):
+                if x + y >= 7:
+                    source.putpixel((x, y), 255)
+        baseline = np.asarray(refinement.refine_alpha(source, (18, 18), 0), dtype=np.uint8)
+        candidate = np.asarray(refinement.refine_alpha(source, (18, 18), 0.35, thin_guard=True,
+                                                        method="scale4-box", preserve_support=True), dtype=np.uint8)
+        self.assertTrue(np.array_equal(baseline != 0, candidate != 0))
+        self.assertFalse(np.array_equal(baseline, candidate))
+
+    def test_contour_rejects_previously_modified_input_alpha(self):
+        from PIL import PngImagePlugin
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, enhanced = self.prepare(root)
+            path = enhanced / "frame_000@2x.png"
+            with Image.open(path) as image:
+                frame = image.copy()
+                source_hash = image.info["source_sha256"]
+            frame.putpixel((0, 0), (*frame.getpixel((0, 0))[:3], 255))
+            info = PngImagePlugin.PngInfo()
+            info.add_text("source_sha256", source_hash)
+            frame.save(path, pnginfo=info)
+            with self.assertRaisesRegex(ValueError, "unmodified Lanczos alpha"):
+                refinement.refine_resource(source, enhanced, root / "contour", 2, 0.35,
+                                           thin_guard=True, method="scale4-box", preserve_support=True)
 
 
 if __name__ == "__main__":

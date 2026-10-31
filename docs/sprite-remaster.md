@@ -207,6 +207,16 @@ A guarded 0.55-pixel feather was compared with the bilinear renderer on one
 Watson frame: the visual change was subtle, but it expanded native provenance
 coverage and affected compositing at some pixels. It has **not** been adopted
 for the full pack; small features, overlaps and animation need further tests.
+The experimental `--method scale4-box --radius 0.35 --thin-guard` instead
+infers smoother corners from the binary mask using geometry-only Scale2x
+operations. It changed some tested outline pixels even when total silhouette
+area barely changed; it is not the original higher-resolution contour and is
+not a topology guarantee. Use it only in an isolated visual/motion pilot until
+the effect on thin props, occlusion and frame-to-frame consistency is accepted.
+Adding `--preserve-support` restricts the result to the original Lanczos
+mask's nonzero-alpha support and requires the input alpha to match that mask.
+This keeps the renderer's nearest-sampled ownership coverage unchanged, but
+does not guarantee unchanged visible opacity, silhouettes or occlusion.
 
 ## Local experiment notes
 

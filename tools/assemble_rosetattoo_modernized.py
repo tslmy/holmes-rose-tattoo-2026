@@ -60,7 +60,7 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
             provenance[(metadata.get("upscaler"), metadata.get("model_sha256"),
                         metadata.get("alpha_mode"), metadata.get("tile_size"), metadata.get("tile_pad"),
                         alpha_refinement.get("method"), alpha_refinement.get("radius"),
-                        alpha_refinement.get("thin_guard"))] += 1
+                        alpha_refinement.get("thin_guard"), alpha_refinement.get("preserve_support"))] += 1
             sidecars = metadata.get("sidecars", [])
             if not isinstance(sidecars, list):
                 raise ValueError(f"Invalid sidecar list: {manifest_path}")
@@ -107,7 +107,8 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
         "sprite_provenance": [
             {"upscaler": key[0], "model_sha256": key[1], "alpha_mode": key[2],
              "tile_size": key[3], "tile_pad": key[4], "alpha_refinement": key[5],
-             "alpha_radius": key[6], "alpha_thin_guard": key[7], "resource_count": count}
+             "alpha_radius": key[6], "alpha_thin_guard": key[7], "alpha_preserve_support": key[8],
+             "resource_count": count}
             for key, count in sorted(provenance.items(), key=lambda item: str(item[0]))
         ],
         "note": "Assembly alone does not establish extraction coverage, runtime support, or visual quality.",
