@@ -49,7 +49,9 @@ native art when none matches. It does not reconstruct arbitrary palette
 effects after the original indices have been discarded. In addition,
 scenes 7, 8, 18, 53 and 68 apply native haze/mask effects after drawing scene
 sprites; those effects require dedicated validation or a safe native fallback.
-File coverage is not evidence that these cases are visually correct.
+File coverage is not evidence that these cases are visually correct. The
+`native-reference` debug view renders the original indexed scene and UI for
+side-by-side effect testing; it is a diagnostic, not enhanced haze rendering.
 
 Some shared resource names occur in both `VGS.LIB` and `WALK.LIB`, with
 different frame data in this game copy. For five affected names, the updated
