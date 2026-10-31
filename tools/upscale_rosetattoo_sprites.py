@@ -11,10 +11,10 @@ this intentionally does NOT run a generative redraw pass: these are small,
 silhouette-critical interactive elements (cursors, inventory items,
 walk-cycle frames) where hallucinated new detail or a shifted
 hotspot/hand-position would break gameplay recognizability. Instead this
-runs a real (non-generative) ESRGAN-family super-resolution model locally
+runs a non-diffusion ESRGAN-family super-resolution model locally
 via the `spandrel` model-loading library and PyTorch (CPU/CUDA/Apple `mps`),
-which reconstructs plausible high-frequency detail without redrawing
-content - appropriate for cleanly scaling up existing brush strokes.
+which estimates plausible high-frequency detail without a text prompt. It can
+still alter or invent small details, which require visual validation.
 
 This is entirely local/offline: no server process, no Automatic1111/Forge
 WebUI install required - just `uv sync --extra esrgan` and a one-time model

@@ -1,8 +1,8 @@
 # Local ESRGAN (spandrel) setup
 
 `tools/upscale_rosetattoo_sprites.py` upscales cursors, inventory/item
-icons, character walk cycles, and the overhead map with a real (non-
-generative) ESRGAN-family super-resolution model, run entirely locally and
+icons, character walk cycles, and the overhead map with a non-diffusion
+ESRGAN-family super-resolution model, run entirely locally and
 in-process via the [`spandrel`](https://github.com/chaiNNer-org/spandrel)
 model-loading library and PyTorch (Apple `mps`, CUDA, or CPU) — no server,
 no Automatic1111/Forge WebUI install required.
@@ -14,8 +14,9 @@ no Automatic1111/Forge WebUI install required.
   where a diffusion model's tendency to invent new detail or drift geometry
   would shift a click hotspot or a character's hand position — see
   `tools/upscale_rosetattoo_sprites.py`'s module docstring. A real
-  super-resolution model instead reconstructs plausible high-frequency
-  detail from the *existing* pixels without redrawing content.
+  super-resolution model instead estimates high-frequency detail from the
+  *existing* pixels without prompts or diffusion. It can still alter or
+  invent fine details, so important text, edges and clues need review.
 - **Not Automatic1111/Forge**: this project used to proxy ESRGAN through an
   Automatic1111/Forge WebUI's `/sdapi/v1/extra-single-image` REST endpoint,
   which meant running and keeping a whole separate WebUI server process
