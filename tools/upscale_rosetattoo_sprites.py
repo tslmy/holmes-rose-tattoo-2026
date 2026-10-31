@@ -207,6 +207,14 @@ def upscale_resource_dir(
         raise ValueError("input and output resource directories must differ")
     metadata_path = input_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    sidecars = metadata.get("sidecars", [])
+    if not isinstance(sidecars, list) or any(not isinstance(name, str) for name in sidecars) or len(set(sidecars)) != len(sidecars):
+        raise ValueError(f"{metadata_path}: invalid sidecars")
+    for name in sidecars:
+        if not isinstance(name, str) or Path(name).name != name or name == "metadata.json" or name.startswith("frame_"):
+            raise ValueError(f"{metadata_path}: unsafe sidecar name {name!r}")
+        if not (input_dir / name).is_file():
+            raise FileNotFoundError(f"Missing source sidecar: {input_dir / name}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     signature = {"scale": scale, "upscaler": model_name if mode != "font" else "lanczos-alpha",
@@ -228,6 +236,11 @@ def upscale_resource_dir(
         json.dumps({**metadata, **signature, "complete": False}, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    for name in sidecars:
+        target = output_dir / name
+        temporary_path = target.with_name(target.name + ".tmp")
+        shutil.copyfile(input_dir / name, temporary_path)
+        temporary_path.replace(target)
     out_frames = []
     for frame_record in metadata["frames"]:
         frame_path = input_dir / frame_record["file"]

@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -99,10 +100,20 @@ def stabilize_sequence(
     detail_metadata = json.loads((input_dir / "metadata.json").read_text(encoding="utf-8"))
     if detail_metadata.get("complete") is False or detail_metadata.get("scale", scale) != scale:
         raise ValueError(f"{input_dir}: incomplete or wrong-scale upscale")
+    sidecars = metadata.get("sidecars", [])
+    if not isinstance(sidecars, list) or detail_metadata.get("sidecars", []) != sidecars:
+        raise ValueError(f"{input_dir}: sidecar metadata mismatch")
     records = metadata["frames"]
     digest = hashlib.sha256()
     for path in (source_dir / "metadata.json", input_dir / "metadata.json"):
         digest.update(path.read_bytes())
+    for name in sidecars:
+        if not isinstance(name, str) or Path(name).name != name or name == "metadata.json" or name.startswith("frame_"):
+            raise ValueError(f"{source_dir}: unsafe sidecar name {name!r}")
+        original = (source_dir / name).read_bytes()
+        if original != (input_dir / name).read_bytes():
+            raise ValueError(f"{input_dir}: sidecar {name} differs from source")
+        digest.update(original)
     for record in records:
         for path in (source_dir / record["file"], input_dir / f"{Path(record['file']).stem}@{scale}x.png"):
             digest.update(path.read_bytes())
@@ -127,6 +138,11 @@ def stabilize_sequence(
                         valid &= image.mode == "RGBA" and image.size == (record["width"], record["height"])
                 except (OSError, KeyError, ValueError):
                     valid = False
+            for name in sidecars:
+                try:
+                    valid &= (output_dir / name).read_bytes() == (source_dir / name).read_bytes()
+                except OSError:
+                    valid = False
             if valid:
                 return previous
     source = [rgba_array(source_dir / record["file"]) for record in records]
@@ -135,6 +151,11 @@ def stabilize_sequence(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_metadata_path.write_text(json.dumps({**detail_metadata, "complete": False,
                                                 "temporal_consistency": temporal_settings}, indent=2) + "\n", encoding="utf-8")
+    for name in sidecars:
+        target = output_dir / name
+        temporary_path = target.with_name(target.name + ".tmp")
+        shutil.copyfile(input_dir / name, temporary_path)
+        temporary_path.replace(target)
     output_records = []
     for index, (record, lowres, detail_frame) in enumerate(zip(records, source, enhanced)):
         height, width = lowres.shape[:2]

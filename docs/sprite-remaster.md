@@ -131,7 +131,9 @@ python tools/audit_rosetattoo_pack.py --pack mods/modernized-new \
 
 The audit compares file presence, format and dimensions with the supplied
 extraction manifests; `--verify-source` also checks the pixel hash embedded in
-newly generated PNGs. Older outputs without hashes cannot pass that option.
+newly generated PNGs. Declared resource sidecars are copied through upscaling
+and assembly, then checked against the source bytes. Older outputs without
+pixel hashes cannot pass `--verify-source`.
 It does **not** prove that the extraction covers all
 game resources or that the engine consumes each asset correctly. Validate in
 game: include moving characters, foreground occlusion, scripted animations,

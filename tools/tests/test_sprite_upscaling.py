@@ -52,6 +52,28 @@ class SpriteUpscalingTests(unittest.TestCase):
                 upscaler.upscale_resource_dir(source, source, 2, None, "cpu", "model")
             self.assertEqual(json.loads(metadata.read_text()), {"frames": []})
 
+    @patch.object(upscaler, "run_esrgan", side_effect=lambda model, device, image: image.resize((20, 20)))
+    def test_sidecar_is_preserved_and_refreshed_on_resume(self, inference):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / "source", root / "output"
+            source.mkdir()
+            self.frame.save(source / "frame_000.png")
+            (source / "palette.bin").write_bytes(b"palette-one")
+            (source / "metadata.json").write_text(json.dumps({
+                "sidecars": ["palette.bin"],
+                "frames": [{"file": "frame_000.png", "width": 5, "height": 5,
+                            "offset_x": 0, "offset_y": 0}]
+            }))
+            upscaler.upscale_resource_dir(source, output, 2, None, "cpu", "model", alpha_mode="soft")
+            self.assertEqual((output / "palette.bin").read_bytes(), b"palette-one")
+            self.assertEqual(json.loads((output / "metadata.json").read_text())["sidecars"], ["palette.bin"])
+            (source / "palette.bin").write_bytes(b"palette-two")
+            inference.reset_mock()
+            upscaler.upscale_resource_dir(source, output, 2, None, "cpu", "model", alpha_mode="soft", skip_existing=True)
+            inference.assert_not_called()
+            self.assertEqual((output / "palette.bin").read_bytes(), b"palette-two")
+
     @patch.object(upscaler, "run_esrgan_whole", side_effect=lambda model, device, image: image.resize(
         (image.width * 4, image.height * 4), Image.Resampling.NEAREST))
     def test_tiled_inference_preserves_dimensions_and_tile_placement(self, inference):

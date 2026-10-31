@@ -24,6 +24,7 @@ class PackAuditTests(unittest.TestCase):
             room.mkdir(parents=True)
             Image.new("RGB", (6, 4)).save(backgrounds / "background.png")
             (room / "metadata.json").write_text(json.dumps({
+                "sidecars": ["palette.bin"],
                 "frames": [{"file": "frame_000.png", "width": 3, "height": 2},
                            {"file": "frame_001.png", "width": 3, "height": 2}]
             }))
@@ -31,6 +32,8 @@ class PackAuditTests(unittest.TestCase):
             Image.new("RGB", (12, 8)).save(pack / "scene_026" / "background@2x.png")
             frames = pack / "sprites" / "scene_026" / "room_004"
             frames.mkdir(parents=True)
+            (room / "palette.bin").write_bytes(b"palette")
+            (frames / "palette.bin").write_bytes(b"palette")
             Image.new("RGBA", (6, 4)).save(frames / "frame_000@2x.png")
             self.assertEqual(audit_backgrounds(backgrounds.parent, pack, 2)["valid"], 1)
             partial = audit_sprites(room.parent.parent, pack, 2)
@@ -42,6 +45,9 @@ class PackAuditTests(unittest.TestCase):
                              "selected source scene is missing")
             Image.new("RGBA", (6, 4)).save(frames / "frame_001@2x.png")
             self.assertFalse(audit_sprites(room.parent.parent, pack, 2)["problems"])
+            (frames / "palette.bin").write_bytes(b"different")
+            self.assertEqual(audit_sprites(room.parent.parent, pack, 2)["problems"][0]["problem"],
+                             "sidecar differs from source")
 
     def test_source_hash_detects_stale_output(self):
         with tempfile.TemporaryDirectory() as temporary:

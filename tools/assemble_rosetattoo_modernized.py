@@ -56,6 +56,20 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
             resources += 1
             provenance[(metadata.get("upscaler"), metadata.get("model_sha256"),
                         metadata.get("alpha_mode"), metadata.get("tile_size"), metadata.get("tile_pad"))] += 1
+            sidecars = metadata.get("sidecars", [])
+            if not isinstance(sidecars, list):
+                raise ValueError(f"Invalid sidecar list: {manifest_path}")
+            for name in sidecars:
+                if not isinstance(name, str) or Path(name).name != name or name == "metadata.json" or name.startswith("frame_"):
+                    raise ValueError(f"Invalid sidecar filename in {manifest_path}: {name!r}")
+                sidecar = manifest_path.parent / name
+                sidecar_dest = dest_dir / name
+                if not sidecar.is_file():
+                    raise FileNotFoundError(f"Missing generated sidecar: {sidecar}")
+                if sidecar_dest in seen:
+                    raise ValueError(f"Duplicate destination: {sidecar_dest}")
+                seen.add(sidecar_dest)
+                copies.append((sidecar, sidecar_dest))
             for record in metadata["frames"]:
                 filename = record["file"]
                 if Path(filename).name != filename or not filename.endswith(f"@{scale}x.png"):

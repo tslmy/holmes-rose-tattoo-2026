@@ -76,6 +76,8 @@ def audit_sprites(source_root: Path, pack: Path, scale: int, scenes: set[int] | 
     per_scene: dict[str, Counter] = {}
     resources = 0
     frames = 0
+    sidecars_expected = 0
+    sidecars_valid = 0
     for metadata_path in resource_metadata_paths(source_root):
         relative = metadata_path.parent.relative_to(source_root)
         scene_match = re.fullmatch(r"scene_0*(\d+)", relative.parts[0]) if relative.parts else None
@@ -88,6 +90,24 @@ def audit_sprites(source_root: Path, pack: Path, scale: int, scenes: set[int] | 
             problems.append({"path": str(metadata_path), "problem": f"invalid source manifest: {error}"})
             continue
         resources += 1
+        sidecars = metadata.get("sidecars", [])
+        if not isinstance(sidecars, list):
+            problems.append({"path": str(metadata_path), "problem": "invalid sidecar list"})
+            sidecars = []
+        for name in sidecars:
+            sidecars_expected += 1
+            if not isinstance(name, str) or Path(name).name != name or name == "metadata.json" or name.startswith("frame_"):
+                problems.append({"path": str(metadata_path), "problem": f"unsafe sidecar name: {name!r}"})
+                continue
+            source_sidecar = metadata_path.parent / name
+            output_sidecar = pack / "sprites" / relative / name
+            try:
+                if source_sidecar.read_bytes() != output_sidecar.read_bytes():
+                    problems.append({"path": str(output_sidecar), "problem": "sidecar differs from source"})
+                else:
+                    sidecars_valid += 1
+            except OSError as error:
+                problems.append({"path": str(output_sidecar), "problem": f"cannot read sidecar: {error}"})
         scene = relative.parts[0] if relative.parts and relative.parts[0].startswith("scene_") else "shared"
         counts = per_scene.setdefault(scene, Counter())
         counts["resources"] += 1
@@ -122,6 +142,7 @@ def audit_sprites(source_root: Path, pack: Path, scale: int, scenes: set[int] | 
             else:
                 counts["valid"] += 1
     return {"resources": resources, "expected": frames, "valid": frames - sum(c["invalid"] for c in per_scene.values()),
+            "sidecars_expected": sidecars_expected, "sidecars_valid": sidecars_valid,
             "scenes": {key: dict(value) for key, value in sorted(per_scene.items())}, "problems": problems}
 
 

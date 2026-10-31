@@ -19,6 +19,8 @@ class TemporalRemasterTests(unittest.TestCase):
             source, detail, output = root / "source", root / "detail", root / "output"
             source.mkdir()
             detail.mkdir()
+            (source / "palette.bin").write_bytes(b"palette")
+            (detail / "palette.bin").write_bytes(b"palette")
             records = []
             for index in range(2):
                 name = f"frame_{index:03d}"
@@ -29,11 +31,12 @@ class TemporalRemasterTests(unittest.TestCase):
                 info.add_text("source_sha256", f"source-{index}")
                 image.save(detail / f"{name}@2x.png", pnginfo=info)
                 records.append({"file": f"{name}.png", "width": 3, "height": 3, "offset_x": 0, "offset_y": 0})
-            (source / "metadata.json").write_text(json.dumps({"frames": records}))
-            (detail / "metadata.json").write_text(json.dumps({"complete": True, "scale": 2, "alpha_mode": "soft"}))
+            (source / "metadata.json").write_text(json.dumps({"frames": records, "sidecars": ["palette.bin"]}))
+            (detail / "metadata.json").write_text(json.dumps({"complete": True, "scale": 2, "alpha_mode": "soft", "sidecars": ["palette.bin"]}))
             result = temporal.stabilize_sequence(source, detail, output, 2)
             self.assertTrue(result["complete"])
             self.assertEqual(result["alpha_mode"], "soft")
+            self.assertEqual((output / "palette.bin").read_bytes(), b"palette")
             for index in range(2):
                 name = f"frame_{index:03d}@2x.png"
                 with Image.open(detail / name) as original, Image.open(output / name) as stabilized:
