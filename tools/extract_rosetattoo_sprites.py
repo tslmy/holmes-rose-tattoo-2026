@@ -468,6 +468,10 @@ def extract_resource(
         "resource_name": resource_name,
         "source": source,
         "alpha_policy": "opaque" if opaque else "index-255-transparent",
+        "fallback_palette": (
+            f"resource:{palette_resource}" if palette_resource else
+            f"scene:{palette_scene}" if palette_scene is not None else None
+        ),
         "frame_count": len(frames),
         "frames": frame_records,
     }

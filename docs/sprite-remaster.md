@@ -62,6 +62,14 @@ using the resource extraction commands in the
 Re-extract `MAP.VGS` with `--palette-resource MAP.PAL`: it is opaque, and
 older extractions incorrectly made palette index 255 transparent. Then:
 
+Some existing shared extractions were generated without a palette and are
+solid black. Use `--palette-resource DARTBD.PAL` for the six darts/hand
+resources and `--palette-resource JOURNAL.PAL` for `JOURNAL.VGS`. `OPIUM.VGS`
+can use `--palette-scene 53`; `COAT3.VGS`, paper, interface and loading assets
+can use a representative room palette, e.g. `--palette-scene 1`. A room
+palette is a snapshot, not a guarantee of matching every runtime palette.
+The extractor records the supplied fallback palette in new metadata.
+
 ```sh
 python tools/upscale_rosetattoo_sprites.py \
   --input-dir extracted/shared-sprites-new \
