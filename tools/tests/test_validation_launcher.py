@@ -45,10 +45,10 @@ class ValidationLauncherTests(unittest.TestCase):
             command = [sys.executable, str(LAUNCHER), "--scummvm", str(executable),
                        "--save-dir", str(root / "saves"), "--screenshot-dir", str(root / "screenshots"),
                        "--postload-scene", "26", "--save-slot", "0", "--palette-safe-sprites",
-                       "--sprite-filter", "bilinear", "--hires-debug", "native-reference"]
+                       "--sprite-filter", "edge", "--hires-debug", "native-reference"]
             result = subprocess.run(command, capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(capture.read_text(), "26|1||bilinear|native-reference")
+            self.assertEqual(capture.read_text(), "26|1||edge|native-reference")
 
 
 if __name__ == "__main__":

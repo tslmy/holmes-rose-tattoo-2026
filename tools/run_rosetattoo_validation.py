@@ -236,7 +236,7 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--sprite-filter", choices=["nearest", "bilinear"],
+        "--sprite-filter", choices=["nearest", "bilinear", "edge"],
         help="Select the patched engine's experimental hires sprite sampling filter.",
     )
     parser.add_argument(
