@@ -221,6 +221,16 @@ does not guarantee unchanged visible opacity, silhouettes or occlusion.
 The geometric contour is the selected direction for the current remaster;
 its broader sprite and animation validation is still in progress.
 
+In the local staged run, a source-backed geometry audit compared all 18,380
+palette-qualified walk frames. RGB bytes and nonzero-alpha support were
+unchanged, and no frame changed its 8-connected foreground component count
+or 4-connected hole count at alpha 128. The largest absolute per-frame
+alpha-weighted area change was 0.403%. All frames nevertheless had threshold
+crossings and were flagged for review by the audit's deliberately strict
+policy. A further 3,390 shared/variant frames likewise had no RGB, support,
+or component/hole-count changes. These counts do not prove unchanged geometry,
+acceptable motion, or gameplay safety.
+
 ## Local experiment notes
 
 On the local M2 Max, a test of 95 Watson frames took 11.38 seconds on MPS;
