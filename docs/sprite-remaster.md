@@ -164,6 +164,7 @@ SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES="$PWD/mods/modernized-new" \
 SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
 SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
 SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
+SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER=bilinear \
 ./scummvm-src/scummvm --path="$PWD/scummvm" \
   --savepath="$PWD/validation/test-saves" --save-slot=0 \
   --themepath="$PWD/scummvm-src/gui/themes" \
@@ -175,6 +176,10 @@ SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
 Create `validation/test-saves` and copy in a valid `rosetattoo.000` first;
 ScummVM may write saves to the specified directory during play. The installed
 game remains untouched. `rosetattoo` must be a configured ScummVM target.
+The optional `bilinear` filter smooths perspective-resized hires sprite
+edges using premultiplied-alpha interpolation; omit that environment
+variable to retain the legacy nearest-neighbor sampling. It does not change
+the native gameplay or hotspot geometry.
 
 The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
