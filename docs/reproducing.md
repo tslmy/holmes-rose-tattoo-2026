@@ -171,13 +171,12 @@ palette-mapped rendering.
   scenes now go through the same `polish_with_ollama()` path with uniform
   sanitization, and the resulting briefs are backend-agnostic (used by the
   FLUX pipeline the same way they were used by the earlier SD pipeline).
-- **Character/animated sprites are extracted and temporally upscaled, but
-  remain on the native runtime draw path.** The cursor set, overhead map,
-  inventory icons, and room backgrounds have supported runtime overrides.
-  Live walk-cycle replacement through a late external-PNG compositor was
-  tested and intentionally disabled: it cannot preserve the engine's full
-  animation and z-order contract. The resulting sprite sequences remain
-  available for research and for a future frame-native renderer.
+- **Scene sprites and streamed animations now have an ordered override
+  path.** An earlier late external-PNG overlay was unsafe for animation and
+  z-order. The newer renderer replays overrides alongside native scene draws,
+  with native fallback for missing frames. This is still under validation,
+  particularly for palette changes, haze masks and interactions; see the
+  [sprite remaster workflow](sprite-remaster.md).
 
 ### Temporal consistency for animated sprites
 

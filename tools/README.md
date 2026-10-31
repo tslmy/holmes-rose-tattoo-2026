@@ -186,10 +186,10 @@ python3 tools/extract_rosetattoo_sprites.py --resources WATSON.VGS --palette-sce
 python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
 ```
 
-Each frame's alpha channel is separated before upscaling (flattened onto a
-neutral fill so ESRGAN doesn't invent detail in fully-transparent regions),
-then resized and re-thresholded independently, keeping the crisp binary
-cutout edges the engine itself always uses (no partial-alpha blending).
+Each frame's alpha channel is separated before upscaling, with nearby opaque
+colors extended into transparent RGB to avoid neutral-color fringes. The
+default `--alpha-mode binary` resizes and re-thresholds the alpha; use
+`--alpha-mode soft` with the updated hires compositor for antialiased edges.
 Output filenames are scale-qualified (`frame_NNN@Sx.png`), matching the
 background pipeline's `background@Nx.png` convention.
 
@@ -201,7 +201,7 @@ python3 tools/temporal_upscale_rosetattoo_sprites.py --scale 2
 ```
 
 This writes `enhanced/sprites-temporal/`. It keeps the original frame count,
-frame timing, dimensions, offsets, and binary alpha masks. The pass aligns
+frame timing, dimensions, offsets, and the input alpha masks. The pass aligns
 nearby source frames and aggregates only ESRGAN high-frequency residuals where
 the source pixels agree; it stabilizes persistent detail without blending
 moving limbs or changing animation logic. Single-frame assets are copied
@@ -233,12 +233,12 @@ The redraw pass is intentionally identity/profile driven: `TOBY` is a dog,
 Watson, Mycroft, and Tux profiles are kept distinct. Do not substitute a
 generic “Victorian detective” prompt for these profiles.
 
-To assemble a safe playable override tree, copy the validated background set
-and temporally stabilized sprites. The engine keeps live scene characters on
-its native draw path, which preserves the original walk-cycle timing and
-z-order. The generated character-sheet output must not be overlaid in a normal
-playthrough: a ten-pose sheet is not a substitute for each original motion
-frame.
+To assemble a playable override tree, copy a background set and compatible
+sprite sequences. The newer renderer can replay scene-sprite overrides in
+native draw order, but palette changes, masks and interactions still require
+game-level validation. Generated character-sheet output must not be treated as
+a playable animation: a ten-pose sheet is not a substitute for each original
+motion frame.
 
 ```sh
 python3 tools/assemble_rosetattoo_playable_pack.py \
@@ -247,9 +247,9 @@ python3 tools/assemble_rosetattoo_playable_pack.py \
   --output-dir generated/playable-overrides-2x
 ```
 
-Use `--include-experimental-lifelike-sprites` only for offline examination
-alongside `SCUMMVM_SHERLOCK_TATTOO_EXPERIMENTAL_SCENE_SPRITES=1`; it is not a
-supported playable configuration.
+The assembler includes pose-matched animation redraws only when explicitly
+requested with `--include-animation-redraws`. For the non-diffusion room and
+cAnim pipeline, see [`docs/sprite-remaster.md`](../docs/sprite-remaster.md).
 
 The assembler writes a manifest and checks cleanly against the runtime
 contract: `scene_NNN/background@2x.png` and
@@ -286,11 +286,11 @@ there is nothing to extract there.
 An engine-side runtime override is wired up for the room cursor set
 (`Screen::loadRoseTattooHiresCursorOverride()` in the ScummVM fork), the
 overhead map background (see below), and item/inventory icons
-(`widget_inventory.cpp`). Live scene characters and bg-shapes deliberately
-stay on the native renderer in a normal playthrough: the external-PNG overlay
-is only an experimental diagnostic path because a late overlay cannot
-preserve the engine's complete z-order and animation contract. Note that
-several of the now-extracted
+(`widget_inventory.cpp`). The newer scene renderer also looks up shared
+characters, embedded room images and streamed cAnim frames in native draw
+order; missing frames fall back to native art. This path remains subject to
+the palette and masking limitations documented in the sprite-remaster guide.
+Note that several of the now-extracted
 resources (`RES##.VGS`, `JOURNAL.VGS`, `LOADING*.VGS`, `DART*.VGS`,
 `HAND*.VGS`, `INTRFACE.VGS`, `PAPER.VGS`, `OPIUM.VGS`) currently have **no
 engine-side consumer at all** for a hires override (unlike scene
