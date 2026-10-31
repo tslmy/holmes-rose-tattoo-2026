@@ -43,6 +43,11 @@ class TemporalRemasterTests(unittest.TestCase):
             with patch.object(temporal, "rgba_array", side_effect=RuntimeError("reprocessing")):
                 with self.assertRaisesRegex(RuntimeError, "reprocessing"):
                     temporal.stabilize_sequence(source, detail, output, 2, skip_existing=True)
+            with self.assertRaisesRegex(ValueError, "must differ"):
+                temporal.stabilize_sequence(source, detail, detail, 2)
+            (detail / "metadata.json").write_text(json.dumps({"complete": False, "scale": 2}))
+            with self.assertRaisesRegex(ValueError, "incomplete"):
+                temporal.stabilize_sequence(source, detail, output, 2)
 
 
 if __name__ == "__main__":

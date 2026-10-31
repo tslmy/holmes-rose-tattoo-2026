@@ -203,6 +203,8 @@ def upscale_resource_dir(
     tile_size: int = 0,
     tile_pad: int = 16,
 ) -> dict:
+    if input_dir.resolve() == output_dir.resolve():
+        raise ValueError("input and output resource directories must differ")
     metadata_path = input_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 
@@ -367,6 +369,9 @@ def main() -> None:
         parser.error("--scale must be >= 1")
     if args.tile_size < 0 or args.tile_pad < 0:
         parser.error("--tile-size and --tile-pad must be nonnegative")
+    input_root, output_root = args.input_dir.resolve(), args.output_dir.resolve()
+    if input_root == output_root or output_root.is_relative_to(input_root) or input_root.is_relative_to(output_root):
+        parser.error("--input-dir and --output-dir must not overlap")
 
     if args.resources:
         resource_dirs = [args.input_dir / name for name in args.resources]

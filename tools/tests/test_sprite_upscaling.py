@@ -43,6 +43,15 @@ class SpriteUpscalingTests(unittest.TestCase):
             (resource / "metadata.json").write_text(json.dumps({"frames": []}))
             self.assertEqual(resource_metadata_paths(root), [resource / "metadata.json"])
 
+    def test_refuses_to_replace_input_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            metadata = source / "metadata.json"
+            metadata.write_text(json.dumps({"frames": []}))
+            with self.assertRaisesRegex(ValueError, "must differ"):
+                upscaler.upscale_resource_dir(source, source, 2, None, "cpu", "model")
+            self.assertEqual(json.loads(metadata.read_text()), {"frames": []})
+
     @patch.object(upscaler, "run_esrgan_whole", side_effect=lambda model, device, image: image.resize(
         (image.width * 4, image.height * 4), Image.Resampling.NEAREST))
     def test_tiled_inference_preserves_dimensions_and_tile_placement(self, inference):

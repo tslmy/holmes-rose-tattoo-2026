@@ -93,8 +93,12 @@ def stabilize_sequence(
     blend: float = 0.35,
     skip_existing: bool = False,
 ) -> dict:
+    if output_dir.resolve() in (source_dir.resolve(), input_dir.resolve()):
+        raise ValueError("temporal output must differ from both input directories")
     metadata = json.loads((source_dir / "metadata.json").read_text(encoding="utf-8"))
     detail_metadata = json.loads((input_dir / "metadata.json").read_text(encoding="utf-8"))
+    if detail_metadata.get("complete") is False or detail_metadata.get("scale", scale) != scale:
+        raise ValueError(f"{input_dir}: incomplete or wrong-scale upscale")
     records = metadata["frames"]
     digest = hashlib.sha256()
     for path in (source_dir / "metadata.json", input_dir / "metadata.json"):
@@ -214,6 +218,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.scale < 1 or args.radius < 0 or not 0 <= args.blend <= 1:
         parser.error("--scale must be >= 1, --radius >= 0, and --blend between 0 and 1")
+    output_root = args.output_dir.resolve()
+    for input_root in (args.source_dir.resolve(), args.input_dir.resolve()):
+        if input_root == output_root or output_root.is_relative_to(input_root) or input_root.is_relative_to(output_root):
+            parser.error("--output-dir must not overlap either input directory")
 
     resource_names = args.resources or sorted(
         str(path.parent.relative_to(args.source_dir)) for path in resource_metadata_paths(args.source_dir)
