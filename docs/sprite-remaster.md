@@ -218,6 +218,8 @@ Adding `--preserve-support` restricts the result to the original Lanczos
 mask's nonzero-alpha support and requires the input alpha to match that mask.
 This keeps the renderer's nearest-sampled ownership coverage unchanged, but
 does not guarantee unchanged visible opacity, silhouettes or occlusion.
+The geometric contour is the selected direction for the current remaster;
+its broader sprite and animation validation is still in progress.
 
 ## Local experiment notes
 
