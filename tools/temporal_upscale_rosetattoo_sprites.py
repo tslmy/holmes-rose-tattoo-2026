@@ -32,7 +32,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 from sprite_metadata import resource_metadata_paths
 
@@ -182,7 +182,12 @@ def stabilize_sequence(
         output = np.dstack([np.clip(output_rgb, 0, 255), detail_frame[..., 3]])
         output_path = output_dir / f"{Path(record['file']).stem}@{scale}x.png"
         temporary_path = output_path.with_suffix(".png.tmp")
-        Image.fromarray(np.rint(output).astype(np.uint8), "RGBA").save(temporary_path, format="PNG")
+        pnginfo = PngImagePlugin.PngInfo()
+        with Image.open(input_dir / output_path.name) as input_image:
+            source_hash = input_image.info.get("source_sha256")
+        if source_hash:
+            pnginfo.add_text("source_sha256", source_hash)
+        Image.fromarray(np.rint(output).astype(np.uint8), "RGBA").save(temporary_path, format="PNG", pnginfo=pnginfo)
         temporary_path.replace(output_path)
         output_records.append({
             **record,

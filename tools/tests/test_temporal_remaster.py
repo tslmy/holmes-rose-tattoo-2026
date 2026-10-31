@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import temporal_upscale_rosetattoo_sprites as temporal
@@ -25,7 +25,9 @@ class TemporalRemasterTests(unittest.TestCase):
                 Image.new("RGBA", (3, 3), (40 + index, 80, 120, 255)).save(source / f"{name}.png")
                 image = Image.new("RGBA", (6, 6), (50 + index, 90, 130, 255))
                 image.putpixel((0, 0), (50, 90, 130, 80))
-                image.save(detail / f"{name}@2x.png")
+                info = PngImagePlugin.PngInfo()
+                info.add_text("source_sha256", f"source-{index}")
+                image.save(detail / f"{name}@2x.png", pnginfo=info)
                 records.append({"file": f"{name}.png", "width": 3, "height": 3, "offset_x": 0, "offset_y": 0})
             (source / "metadata.json").write_text(json.dumps({"frames": records}))
             (detail / "metadata.json").write_text(json.dumps({"complete": True, "scale": 2, "alpha_mode": "soft"}))
@@ -34,8 +36,10 @@ class TemporalRemasterTests(unittest.TestCase):
             self.assertEqual(result["alpha_mode"], "soft")
             for index in range(2):
                 name = f"frame_{index:03d}@2x.png"
-                self.assertTrue(np.array_equal(np.asarray(Image.open(detail / name).getchannel("A")),
-                                               np.asarray(Image.open(output / name).getchannel("A"))))
+                with Image.open(detail / name) as original, Image.open(output / name) as stabilized:
+                    self.assertTrue(np.array_equal(np.asarray(original.getchannel("A")),
+                                                   np.asarray(stabilized.getchannel("A"))))
+                    self.assertEqual(stabilized.info["source_sha256"], f"source-{index}")
             with patch.object(temporal, "rgba_array", side_effect=AssertionError("should reuse")):
                 temporal.stabilize_sequence(source, detail, output, 2, skip_existing=True)
             # A changed input invalidates the completed-sequence fingerprint.

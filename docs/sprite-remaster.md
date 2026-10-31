@@ -105,11 +105,14 @@ python tools/audit_rosetattoo_pack.py --pack mods/modernized-new \
   --sprite-source extracted/shared-sprites-new \
   --sprite-source extracted/room-sprites-new \
   --sprite-source extracted/canimations-new \
+  --verify-source \
   --report validation/modernized-new-audit.json
 ```
 
 The audit compares file presence, format and dimensions with the supplied
-extraction manifests. It does **not** prove that the extraction covers all
+extraction manifests; `--verify-source` also checks the pixel hash embedded in
+newly generated PNGs. Older outputs without hashes cannot pass that option.
+It does **not** prove that the extraction covers all
 game resources or that the engine consumes each asset correctly. Validate in
 game: include moving characters, foreground occlusion, scripted animations,
 scrolling rooms, palette transitions, UI, inventory, map and save/load.

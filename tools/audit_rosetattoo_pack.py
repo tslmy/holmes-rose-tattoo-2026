@@ -9,6 +9,7 @@ asset pack can pass these checks and still require in-game playtesting.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -20,7 +21,8 @@ from PIL import Image
 from sprite_metadata import resource_metadata_paths
 
 
-def png_problem(path: Path, size: tuple[int, int], require_rgba: bool = False) -> str | None:
+def png_problem(path: Path, size: tuple[int, int], require_rgba: bool = False,
+                source_hash: str | None = None) -> str | None:
     if not path.is_file():
         return "missing"
     try:
@@ -31,6 +33,8 @@ def png_problem(path: Path, size: tuple[int, int], require_rgba: bool = False) -
                 return f"size {image.size}, expected {size}"
             if require_rgba and image.mode != "RGBA":
                 return f"mode {image.mode}, expected RGBA"
+            if source_hash is not None and image.info.get("source_sha256") != source_hash:
+                return "source pixel hash missing or mismatched"
             image.verify()
     except (OSError, ValueError, SyntaxError) as error:
         return f"invalid PNG: {error}"
@@ -66,7 +70,8 @@ def audit_backgrounds(source_root: Path, pack: Path, scale: int, scenes: set[int
     return {"expected": checked, "valid": valid, "problems": problems}
 
 
-def audit_sprites(source_root: Path, pack: Path, scale: int, scenes: set[int] | None = None) -> dict:
+def audit_sprites(source_root: Path, pack: Path, scale: int, scenes: set[int] | None = None,
+                  verify_source: bool = False) -> dict:
     problems = []
     per_scene: dict[str, Counter] = {}
     resources = 0
@@ -94,7 +99,21 @@ def audit_sprites(source_root: Path, pack: Path, scale: int, scenes: set[int] | 
                 problems.append({"path": str(metadata_path), "problem": f"invalid frame record: {error}"})
                 continue
             output = pack / "sprites" / relative / f"{name}@{scale}x.png"
-            problem = png_problem(output, expected_size, require_rgba=True)
+            source_hash = None
+            problem = None
+            if verify_source:
+                source_path = metadata_path.parent / record["file"]
+                try:
+                    with Image.open(source_path) as source:
+                        rgba = source.convert("RGBA")
+                        digest = hashlib.sha256()
+                        digest.update(f"{rgba.width}x{rgba.height}:".encode("ascii"))
+                        digest.update(rgba.tobytes())
+                        source_hash = digest.hexdigest()
+                except (OSError, ValueError) as error:
+                    problem = f"cannot read source frame {source_path}: {error}"
+            if problem is None:
+                problem = png_problem(output, expected_size, require_rgba=True, source_hash=source_hash)
             frames += 1
             counts["expected"] += 1
             if problem:
@@ -114,6 +133,7 @@ def main() -> None:
                         help="Extracted sprite tree; repeat for room, cutscene and shared assets.")
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument("--scenes", type=int, nargs="+", help="Limit room assets and backgrounds to selected scenes; shared sprites remain included.")
+    parser.add_argument("--verify-source", action="store_true", help="Verify each output PNG's embedded source pixel hash.")
     parser.add_argument("--report", type=Path, help="Write the full JSON report to this path.")
     args = parser.parse_args()
     if args.scale < 1:
@@ -123,12 +143,12 @@ def main() -> None:
             parser.error(f"directory does not exist: {path}")
     scenes = set(args.scenes) if args.scenes else None
     backgrounds = audit_backgrounds(args.background_source, args.pack, args.scale, scenes)
-    sprites = {str(source): audit_sprites(source, args.pack, args.scale, scenes) for source in args.sprite_source}
+    sprites = {str(source): audit_sprites(source, args.pack, args.scale, scenes, args.verify_source) for source in args.sprite_source}
     complete = bool(sprites) and backgrounds["expected"] > 0 and not backgrounds["problems"]
     complete = complete and all(result["resources"] > 0 and not result["problems"] for result in sprites.values())
     report = {"pack": str(args.pack), "scale": args.scale, "complete": complete,
               "backgrounds": backgrounds, "sprite_sources": sprites,
-              "scenes": sorted(scenes) if scenes is not None else None,
+              "scenes": sorted(scenes) if scenes is not None else None, "verify_source": args.verify_source,
               "note": "Coverage relative to supplied manifests and scene selection only; extraction completeness, runtime rendering and visual quality require separate validation."}
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

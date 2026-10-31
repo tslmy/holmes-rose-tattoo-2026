@@ -1,12 +1,13 @@
 """Coverage checks must distinguish a complete pack from missing assets."""
 
 import json
+import hashlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from audit_rosetattoo_pack import audit_backgrounds, audit_sprites
@@ -41,6 +42,27 @@ class PackAuditTests(unittest.TestCase):
                              "selected source scene is missing")
             Image.new("RGBA", (6, 4)).save(frames / "frame_001@2x.png")
             self.assertFalse(audit_sprites(room.parent.parent, pack, 2)["problems"])
+
+    def test_source_hash_detects_stale_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source" / "character"
+            destination = root / "pack" / "sprites" / "character"
+            source.mkdir(parents=True)
+            destination.mkdir(parents=True)
+            image = Image.new("RGBA", (2, 1), (12, 34, 56, 255))
+            image.save(source / "frame_000.png")
+            (source / "metadata.json").write_text(json.dumps({"frames": [
+                {"file": "frame_000.png", "width": 2, "height": 1}
+            ]}))
+            digest = hashlib.sha256(b"2x1:" + image.tobytes()).hexdigest()
+            info = PngImagePlugin.PngInfo()
+            info.add_text("source_sha256", digest)
+            Image.new("RGBA", (4, 2)).save(destination / "frame_000@2x.png", pnginfo=info)
+            self.assertFalse(audit_sprites(source.parent, root / "pack", 2, verify_source=True)["problems"])
+            Image.new("RGBA", (2, 1), (0, 0, 0, 255)).save(source / "frame_000.png")
+            problem = audit_sprites(source.parent, root / "pack", 2, verify_source=True)["problems"][0]
+            self.assertEqual(problem["problem"], "source pixel hash missing or mismatched")
 
 
 if __name__ == "__main__":
