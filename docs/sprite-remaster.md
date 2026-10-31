@@ -185,6 +185,17 @@ reused only when their input files and temporal settings still match. Soft
 alpha is preserved. Its output manifests can be used as sprite inputs to the
 assembler once the entire selected run is complete.
 
+For edge-smoothing experiments without rerunning ESRGAN, the optional
+`tools/refine_rosetattoo_sprite_alpha.py` rebuilds alpha from the native frame
+and feathers it by `--radius` output pixels, while keeping RGB, offsets,
+source hashes and palette sidecars intact. Bitmap-font alpha is left unchanged.
+It writes a separate tree and
+supports `--skip-existing`. The experimental `--thin-guard` protects some
+one- and two-pixel strokes and gaps, but is not a topology guarantee. Test a
+small representative set before running it on a whole pack: a larger radius
+can soften or erase small details, and rendering at 2x still limits the
+precision of a silhouette.
+
 ## Local experiment notes
 
 On the local M2 Max, a test of 95 Watson frames took 11.38 seconds on MPS;

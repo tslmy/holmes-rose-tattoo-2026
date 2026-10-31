@@ -24,12 +24,15 @@ class ModernizedAssemblyTests(unittest.TestCase):
             (room / "metadata.json").write_text(json.dumps({
                 "complete": True, "scale": 2,
                 "sidecars": ["palette.bin"],
+                "alpha_refinement": {"method": "native-alpha-lanczos-gaussian", "radius": 0.55, "thin_guard": True},
                 "frames": [{"file": "frame_000@2x.png", "width": 6, "height": 4}]
             }))
             destination = root / "pack"
             manifest = assemble(backgrounds.parent, [root / "room"], destination, 2)
             self.assertEqual((manifest["background_count"], manifest["sprite_frame_count"]), (1, 1))
             self.assertEqual(manifest["sprite_provenance"][0]["resource_count"], 1)
+            self.assertEqual(manifest["sprite_provenance"][0]["alpha_radius"], 0.55)
+            self.assertTrue(manifest["sprite_provenance"][0]["alpha_thin_guard"])
             self.assertTrue((destination / "sprites/scene_026/room_004/frame_000@2x.png").exists())
             self.assertEqual((destination / "sprites/scene_026/room_004/palette.bin").read_bytes(), b"palette")
             with self.assertRaises(FileExistsError):
