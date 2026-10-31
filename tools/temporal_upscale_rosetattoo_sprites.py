@@ -27,6 +27,7 @@ pass is preferable to a flickering hand, face, or coat edge in a game sprite.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -90,13 +91,46 @@ def stabilize_sequence(
     scale: int,
     radius: int = 2,
     blend: float = 0.35,
+    skip_existing: bool = False,
 ) -> dict:
     metadata = json.loads((source_dir / "metadata.json").read_text(encoding="utf-8"))
+    detail_metadata = json.loads((input_dir / "metadata.json").read_text(encoding="utf-8"))
     records = metadata["frames"]
+    digest = hashlib.sha256()
+    for path in (source_dir / "metadata.json", input_dir / "metadata.json"):
+        digest.update(path.read_bytes())
+    for record in records:
+        for path in (source_dir / record["file"], input_dir / f"{Path(record['file']).stem}@{scale}x.png"):
+            digest.update(path.read_bytes())
+    fingerprint = digest.hexdigest()
+    temporal_settings = {
+        "method": "aligned-neighbour-residual-median",
+        "neighbour_radius": radius,
+        "blend": blend,
+        "alpha_policy": "preserve-target-alpha",
+        "input_sha256": fingerprint,
+    }
+    output_metadata_path = output_dir / "metadata.json"
+    if skip_existing and output_metadata_path.exists():
+        previous = json.loads(output_metadata_path.read_text(encoding="utf-8"))
+        if (previous.get("complete") is True and previous.get("scale") == scale
+                and previous.get("temporal_consistency") == temporal_settings):
+            valid = len(previous.get("frames", [])) == len(records)
+            for record in previous.get("frames", []):
+                try:
+                    with Image.open(output_dir / record["file"]) as image:
+                        image.load()
+                        valid &= image.mode == "RGBA" and image.size == (record["width"], record["height"])
+                except (OSError, KeyError, ValueError):
+                    valid = False
+            if valid:
+                return previous
     source = [rgba_array(source_dir / record["file"]) for record in records]
     enhanced = [rgba_array(input_dir / f"{Path(record['file']).stem}@{scale}x.png") for record in records]
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    output_metadata_path.write_text(json.dumps({**detail_metadata, "complete": False,
+                                                "temporal_consistency": temporal_settings}, indent=2) + "\n", encoding="utf-8")
     output_records = []
     for index, (record, lowres, detail_frame) in enumerate(zip(records, source, enhanced)):
         height, width = lowres.shape[:2]
@@ -143,7 +177,9 @@ def stabilize_sequence(
             output_rgb = target_rgb
         output = np.dstack([np.clip(output_rgb, 0, 255), detail_frame[..., 3]])
         output_path = output_dir / f"{Path(record['file']).stem}@{scale}x.png"
-        Image.fromarray(np.rint(output).astype(np.uint8), "RGBA").save(output_path)
+        temporary_path = output_path.with_suffix(".png.tmp")
+        Image.fromarray(np.rint(output).astype(np.uint8), "RGBA").save(temporary_path, format="PNG")
+        temporary_path.replace(output_path)
         output_records.append({
             **record,
             "file": output_path.name,
@@ -154,15 +190,11 @@ def stabilize_sequence(
         })
 
     out_metadata = {
-        **metadata,
+        **detail_metadata,
         "scale": scale,
         "upscaler": "temporal-esrgan",
-        "temporal_consistency": {
-            "method": "aligned-neighbour-residual-median",
-            "neighbour_radius": radius,
-            "blend": blend,
-            "alpha_policy": "preserve-target-alpha",
-        },
+        "complete": True,
+        "temporal_consistency": temporal_settings,
         "frames": output_records,
     }
     (output_dir / "metadata.json").write_text(json.dumps(out_metadata, indent=2) + "\n", encoding="utf-8")
@@ -178,7 +210,10 @@ def main() -> None:
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument("--radius", type=int, default=2, help="Neighbour frames on each side.")
     parser.add_argument("--blend", type=float, default=0.35, help="How much stable detail to restore.")
+    parser.add_argument("--skip-existing", action="store_true", help="Resume unchanged completed sequences.")
     args = parser.parse_args()
+    if args.scale < 1 or args.radius < 0 or not 0 <= args.blend <= 1:
+        parser.error("--scale must be >= 1, --radius >= 0, and --blend between 0 and 1")
 
     resource_names = args.resources or sorted(
         str(path.parent.relative_to(args.source_dir)) for path in resource_metadata_paths(args.source_dir)
@@ -198,17 +233,7 @@ def main() -> None:
         if missing:
             print(f"{name}: no complete @{args.scale}x input sequence, skipping ({len(missing)} missing)")
             continue
-        if len(metadata["frames"]) == 1:
-            # Single-frame assets have no temporal problem; preserve the
-            # existing ESRGAN result and metadata in the new tree.
-            out = args.output_dir / name
-            out.mkdir(parents=True, exist_ok=True)
-            for path in input_dir.glob("*@" + str(args.scale) + "x.png"):
-                Image.open(path).save(out / path.name)
-            (out / "metadata.json").write_text((input_dir / "metadata.json").read_text(), encoding="utf-8")
-            print(f"{name}: copied single frame")
-            continue
-        result = stabilize_sequence(source_dir, input_dir, args.output_dir / name, args.scale, args.radius, args.blend)
+        result = stabilize_sequence(source_dir, input_dir, args.output_dir / name, args.scale, args.radius, args.blend, args.skip_existing)
         print(f"{name}: temporally stabilised {len(result['frames'])} frames")
 
 

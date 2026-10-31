@@ -93,3 +93,7 @@ The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
 playback order. Treat its output as experimental until tested against actual
 animations; it does not change frame timing or game logic.
+It accepts nested resources and `--skip-existing`; completed sequences are
+reused only when their input files and temporal settings still match. Soft
+alpha is preserved. Its output manifests can be used as sprite inputs to the
+assembler once the entire selected run is complete.
