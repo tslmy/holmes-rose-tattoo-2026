@@ -211,6 +211,28 @@ The optional haze fallback in this example is a correctness-first compromise:
 five rooms revert to native scene art and bitmap text until their indexed
 effects can be reproduced safely over enhanced images.
 
+For this machine's assembled candidate, an isolated launch was prepared under
+`validation/contour-candidate-playtest-20261031/`. Its slot 0 was copied from
+the validation save; subsequent saves there are separate from the user's
+original saves. To launch that candidate again from the repository root:
+
+```sh
+SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES="$PWD/mods/rosetattoo-contour-candidate-20261031" \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
+SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
+SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER=edge \
+SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1 \
+./scummvm-src/scummvm \
+  --config="$PWD/validation/contour-candidate-playtest-20261031/scummvm.ini" \
+  --path="$PWD/scummvm" \
+  --savepath="$PWD/validation/contour-candidate-playtest-20261031/saves" \
+  --themepath="$PWD/scummvm-src/gui/themes" \
+  --extrapath="$PWD/scummvm-src/gui/themes" \
+  --gui-theme=builtin --aspect-ratio --stretch-mode=pixel-perfect \
+  --no-fullscreen --window-size=1280,960 --save-slot=0 rosetattoo
+```
+
 The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
 playback order. Treat its output as experimental until tested against actual
