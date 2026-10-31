@@ -114,6 +114,25 @@ game resources or that the engine consumes each asset correctly. Validate in
 game: include moving characters, foreground occlusion, scripted animations,
 scrolling rooms, palette transitions, UI, inventory, map and save/load.
 
+For a manual test with a patched `scummvm-src/scummvm` binary and a **copy**
+of a save in slot 0, for example:
+
+```sh
+SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES="$PWD/mods/modernized-new" \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
+./scummvm-src/scummvm --path="$PWD/scummvm" \
+  --savepath="$PWD/validation/test-saves" --save-slot=0 \
+  --themepath="$PWD/scummvm-src/gui/themes" \
+  --extrapath="$PWD/scummvm-src/gui/themes" \
+  --aspect-ratio --stretch-mode=pixel-perfect \
+  --no-fullscreen --window-size=1280,960 rosetattoo
+```
+
+Create `validation/test-saves` and copy in a valid `rosetattoo.000` first;
+ScummVM may write saves to the specified directory during play. The installed
+game remains untouched. `rosetattoo` must be a configured ScummVM target.
+
 The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
 playback order. Treat its output as experimental until tested against actual
