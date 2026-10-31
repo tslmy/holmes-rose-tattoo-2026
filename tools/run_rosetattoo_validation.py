@@ -187,6 +187,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--postload-scene",
+        type=int,
+        help=(
+            "After loading --save-slot, jump to a scene using the patched "
+            "engine's debug hook. Use a copy of the save; this does not "
+            "simulate the scene's natural entrance."
+        ),
+    )
+    parser.add_argument(
         "--asset-overrides",
         type=Path,
         help=(
@@ -251,6 +260,13 @@ def main() -> None:
         help="macOS window owner process name for --capture-mode window.",
     )
     args = parser.parse_args()
+    if args.postload_scene is not None:
+        if args.save_slot is None:
+            parser.error("--postload-scene requires --save-slot")
+        if args.start_scene is not None:
+            parser.error("choose either --postload-scene or --start-scene")
+        if args.postload_scene < 1:
+            parser.error("--postload-scene must be >= 1")
 
     data_dir = args.data_dir.resolve()
     save_dir = args.save_dir.resolve()
@@ -282,6 +298,8 @@ def main() -> None:
     print("\nLaunch command:")
     if args.start_scene is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_START_SCENE={args.start_scene}")
+    if args.postload_scene is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE={args.postload_scene}")
     if args.asset_overrides is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES={args.asset_overrides.resolve()}")
     if args.hires_scale is not None:
@@ -296,7 +314,11 @@ def main() -> None:
         return
     env = os.environ.copy()
     if args.start_scene is not None:
+        env.pop("SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE", None)
         env["SCUMMVM_SHERLOCK_TATTOO_START_SCENE"] = str(args.start_scene)
+    if args.postload_scene is not None:
+        env.pop("SCUMMVM_SHERLOCK_TATTOO_START_SCENE", None)
+        env["SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE"] = str(args.postload_scene)
     if args.asset_overrides is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES"] = str(args.asset_overrides.resolve())
     if args.hires_scale is not None:
@@ -316,7 +338,8 @@ def main() -> None:
 
     capture_output = args.capture_output
     if capture_output is None:
-        scene_suffix = f"scene-{args.start_scene:03d}" if args.start_scene is not None else "launch"
+        scene = args.postload_scene if args.postload_scene is not None else args.start_scene
+        scene_suffix = f"scene-{scene:03d}" if scene is not None else "launch"
         capture_output = screenshot_dir / f"desktop-{scene_suffix}.png"
     capture_output = capture_output.resolve()
     capture_output.parent.mkdir(parents=True, exist_ok=True)

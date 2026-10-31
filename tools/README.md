@@ -370,6 +370,12 @@ python3 tools/run_rosetattoo_validation.py \
   --capture-output validation/screenshots/desktop-scene-036.png
 ```
 
+The fresh direct-start hook does not initialize every normal game state: a
+scene-7 direct jump can fail while loading an empty player walk resource even
+at native resolution. For a smoke test, use a **copied** save and
+`--save-slot 0 --postload-scene 7` instead. A post-load jump retains that
+save's position and flags, so it is not a test of a natural scene transition.
+
 `--capture-after` captures the ScummVM window directly on macOS by default.
 Use `--capture-mode screen` only when a full-desktop capture is useful.
 
