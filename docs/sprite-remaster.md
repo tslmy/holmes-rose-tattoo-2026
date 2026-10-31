@@ -244,6 +244,13 @@ policy. A further 3,390 shared/variant frames likewise had no RGB, support,
 or component/hole-count changes. These counts do not prove unchanged geometry,
 acceptable motion, or gameplay safety.
 
+For the 33,189 local scripted-animation frames, the same audit found no RGB
+or support changes, but one frame in `scene_044/canim_004` changed its
+thresholded hole count. The planned local pack keeps the entire 10-frame
+resource on its original Lanczos alpha, avoiding a mask change midway through
+that animation. This is a conservative fallback, not proof that the remaining
+animations are visually correct.
+
 ## Local experiment notes
 
 On the local M2 Max, a test of 95 Watson frames took 11.38 seconds on MPS;
