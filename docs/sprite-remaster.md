@@ -37,6 +37,12 @@ scenes 7, 8, 18, 53 and 68 apply native haze/mask effects after drawing scene
 sprites; those effects require dedicated validation or a safe native fallback.
 File coverage is not evidence that these cases are visually correct.
 
+Some shared resource names occur in both `VGS.LIB` and `WALK.LIB`, with
+different frame data in this game copy. The extractor's library search order
+must be checked against the engine's actual resource lookup; matching a
+filename and dimensions alone does not establish that the correct artwork was
+selected. This is a separate issue from room-chunk and cAnim indexing.
+
 After both extraction runs finish, verify every decoded frame against its RRM
 stream (this can take time):
 
