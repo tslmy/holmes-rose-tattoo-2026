@@ -29,6 +29,12 @@ Room and cAnim RGB values use the room's **initial** palette. Runtime palette
 changes, fades, and other effects are not baked into the PNGs and require
 separate runtime handling or validation.
 
+The newer renderer uses the installed palette for native indexed fallback
+pixels (including darts' separate palette). This does **not** make cached
+true-color backgrounds, sprites or text respond to palette fades. A native-only
+fallback is not yet safe because some text exists only in the hires layer;
+palette effects and their restoration need further engine work.
+
 Shared walk sprites can be palette-dependent even without an animated palette:
 their runtime colors come from the current room, whereas a single extracted
 PNG set uses one reference palette. Hires RGB overrides cannot in general be
