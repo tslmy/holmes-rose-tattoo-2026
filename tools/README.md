@@ -438,6 +438,11 @@ comparison for haze/mask testing; it is not an enhanced-art mode.
 background; this is the fastest way to find overlay or palette-animation
 mistakes.
 
+For smoother perspective-scaled hires sprites, pass `--sprite-filter edge`.
+It filters transparent boundaries while retaining nearest-sampled opaque
+interiors. `--sprite-filter bilinear` also smooths interiors; `nearest` keeps
+the original sampling. These filters do not alter native gameplay geometry.
+
 For your own playtesting (not just scripted scene captures), the standard
 launch command for a full high-resolution mod pack is:
 
