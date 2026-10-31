@@ -32,9 +32,10 @@ class ValidationLauncherTests(unittest.TestCase):
             executable = root / "fake-scummvm"
             executable.write_text(
                 '#!/bin/sh\n'
-                'printf "%s|%s|%s" "$SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE" '
+                'printf "%s|%s|%s|%s" "$SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE" '
                 '"$SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES" '
-                '"$SCUMMVM_SHERLOCK_TATTOO_START_SCENE" > "$CAPTURE_PATH"\n'
+                '"$SCUMMVM_SHERLOCK_TATTOO_START_SCENE" '
+                '"$SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER" > "$CAPTURE_PATH"\n'
             )
             executable.chmod(0o755)
             env = os.environ.copy()
@@ -42,10 +43,11 @@ class ValidationLauncherTests(unittest.TestCase):
             env["SCUMMVM_SHERLOCK_TATTOO_START_SCENE"] = "99"
             command = [sys.executable, str(LAUNCHER), "--scummvm", str(executable),
                        "--save-dir", str(root / "saves"), "--screenshot-dir", str(root / "screenshots"),
-                       "--postload-scene", "26", "--save-slot", "0", "--palette-safe-sprites"]
+                       "--postload-scene", "26", "--save-slot", "0", "--palette-safe-sprites",
+                       "--sprite-filter", "bilinear"]
             result = subprocess.run(command, capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(capture.read_text(), "26|1|")
+            self.assertEqual(capture.read_text(), "26|1||bilinear")
 
 
 if __name__ == "__main__":

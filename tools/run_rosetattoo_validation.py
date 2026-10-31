@@ -236,6 +236,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--sprite-filter", choices=["nearest", "bilinear"],
+        help="Select the patched engine's experimental hires sprite sampling filter.",
+    )
+    parser.add_argument(
         "--window-size",
         default="1280,960",
         help="Window size passed to ScummVM when not using --fullscreen.",
@@ -318,6 +322,8 @@ def main() -> None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT={args.hires_format}")
     if args.palette_safe_sprites:
         print("  SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1")
+    if args.sprite_filter is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER={args.sprite_filter}")
     print("  " + shell_join(cmd))
 
     if args.print_only:
@@ -339,6 +345,8 @@ def main() -> None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT"] = args.hires_format
     if args.palette_safe_sprites:
         env["SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES"] = "1"
+    if args.sprite_filter is not None:
+        env["SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER"] = args.sprite_filter
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)
