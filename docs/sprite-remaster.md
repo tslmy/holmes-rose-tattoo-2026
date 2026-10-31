@@ -188,6 +188,9 @@ using premultiplied-alpha interpolation while keeping opaque interiors
 nearest-sampled. `bilinear` also smooths interiors; omit the environment
 variable to retain legacy nearest-neighbor sampling. None changes native
 gameplay or hotspot geometry. At 2x, some visible stair-stepping remains.
+The edge filter blends gradually between interpolated and nearest RGB near
+full opacity, avoiding a hard color switch observed in a Holmes shoe frame;
+other source-color and opacity changes can still produce visible variation.
 
 The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
