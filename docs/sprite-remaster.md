@@ -200,6 +200,10 @@ It accepts nested resources and `--skip-existing`; completed sequences are
 reused only when their input files and temporal settings still match. Soft
 alpha is preserved. Its output manifests can be used as sprite inputs to the
 assembler once the entire selected run is complete.
+An offline comparison of ten scripted streams found small or inconsistent
+changes in a matched-detail stability metric and some RGB edits at moving
+edges. The current pack therefore does not apply the temporal pass globally;
+this comparison does not prove that the original ESRGAN frames never shimmer.
 
 For edge-smoothing experiments without rerunning ESRGAN, the optional
 `tools/refine_rosetattoo_sprite_alpha.py` rebuilds alpha from the native frame
