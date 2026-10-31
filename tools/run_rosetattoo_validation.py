@@ -228,6 +228,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--palette-safe-sprites",
+        action="store_true",
+        help=(
+            "Use only person-sprite overrides verified against the installed "
+            "palette; missing projections fall back to native artwork."
+        ),
+    )
+    parser.add_argument(
         "--window-size",
         default="1280,960",
         help="Window size passed to ScummVM when not using --fullscreen.",
@@ -308,6 +316,8 @@ def main() -> None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG={args.hires_debug}")
     if args.hires_format is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT={args.hires_format}")
+    if args.palette_safe_sprites:
+        print("  SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1")
     print("  " + shell_join(cmd))
 
     if args.print_only:
@@ -327,6 +337,8 @@ def main() -> None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG"] = args.hires_debug
     if args.hires_format is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT"] = args.hires_format
+    if args.palette_safe_sprites:
+        env["SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES"] = "1"
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)

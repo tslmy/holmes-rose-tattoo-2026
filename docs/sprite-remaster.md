@@ -18,6 +18,8 @@ python tools/extract_rosetattoo_canimations.py --data-dir scummvm \
   --output-dir extracted/canimations-new
 python tools/extract_rosetattoo_vgs_variants.py --data-dir scummvm \
   --palette-scene 1 --output-dir extracted/vgs-variants-new
+python tools/extract_rosetattoo_palette_walks.py --data-dir scummvm \
+  --output-dir extracted/palette-walks-new
 ```
 
 The first tool exports room image chunks, keyed by scene and one-based room
@@ -41,8 +43,10 @@ hires layer; palette effects and their restoration need further engine work.
 
 Shared walk sprites can be palette-dependent even without an animated palette:
 their runtime colors come from the current room, whereas a single extracted
-PNG set uses one reference palette. Hires RGB overrides cannot in general be
-recolored exactly after the original indices have been discarded. In addition,
+PNG set uses one reference palette. The opt-in palette-safe renderer checks
+the actual installed palette against a generated projection and falls back to
+native art when none matches. It does not reconstruct arbitrary palette
+effects after the original indices have been discarded. In addition,
 scenes 7, 8, 18, 53 and 68 apply native haze/mask effects after drawing scene
 sprites; those effects require dedicated validation or a safe native fallback.
 File coverage is not evidence that these cases are visually correct.
@@ -52,6 +56,9 @@ different frame data in this game copy. For five affected names, the updated
 engine looks for a variant keyed by the actual decompressed stream and decode
 mode; a missing matching variant falls back to native artwork rather than a
 possibly wrong name-only override. See [VGS variants](vgs-variants.md).
+The palette-qualified extraction and its sidecar format are described in
+[palette-qualified walk sources](palette-walk-extraction.md). It covers
+initial room palettes, not every possible dynamic palette state.
 
 After both extraction runs finish, verify every decoded frame against its RRM
 stream (this can take time):
@@ -61,6 +68,8 @@ python tools/audit_rosetattoo_extraction.py \
   --room-source extracted/room-sprites-new \
   --canim-source extracted/canimations-new \
   --report validation/extraction-audit.json
+python tools/audit_rosetattoo_palette_walks.py --data-dir scummvm \
+  --source-dir extracted/palette-walks-new
 ```
 
 ## Upscale
@@ -81,6 +90,10 @@ python tools/upscale_rosetattoo_sprites.py \
 python tools/upscale_rosetattoo_sprites.py \
   --input-dir extracted/vgs-variants-new \
   --output-dir enhanced/vgs-variants-new \
+  --scale 2 --alpha-mode soft --device mps --skip-existing
+python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/palette-walks-new \
+  --output-dir enhanced/palette-walks-new \
   --scale 2 --alpha-mode soft --device mps --skip-existing
 ```
 
@@ -121,12 +134,14 @@ python tools/assemble_rosetattoo_modernized.py \
   --sprite-dir enhanced/room-sprites-new \
   --sprite-dir enhanced/canimations-new \
   --sprite-dir enhanced/vgs-variants-new \
+  --sprite-dir enhanced/palette-walks-new \
   --output-dir mods/modernized-new --scale 2
 python tools/audit_rosetattoo_pack.py --pack mods/modernized-new \
   --sprite-source extracted/shared-sprites-new \
   --sprite-source extracted/room-sprites-new \
   --sprite-source extracted/canimations-new \
   --sprite-source extracted/vgs-variants-new \
+  --sprite-source extracted/palette-walks-new \
   --verify-source \
   --report validation/modernized-new-audit.json
 ```
@@ -148,6 +163,7 @@ of a save in slot 0, for example:
 SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES="$PWD/mods/modernized-new" \
 SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
 SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
+SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
 ./scummvm-src/scummvm --path="$PWD/scummvm" \
   --savepath="$PWD/validation/test-saves" --save-slot=0 \
   --themepath="$PWD/scummvm-src/gui/themes" \
