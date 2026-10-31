@@ -148,6 +148,16 @@ python tools/audit_rosetattoo_pack.py --pack mods/modernized-new \
   --report validation/modernized-new-audit.json
 ```
 
+When assembling the chosen contour trees, first run the source-backed contour
+audit for each tree. Pass each report to the assembler as
+`--contour-audit REPORT BASELINE CANDIDATE SOURCE`, with `CANDIDATE` also
+listed as a `--sprite-dir`. The assembler revalidates the report's file hashes
+and automatically chooses the baseline for an entire resource when a frame
+changed the measured component/hole count. It rejects other audit errors.
+Keep the input trees unchanged through assembly: the audit and recheck are not
+an atomic filesystem snapshot. Threshold-crossing-only audit results are
+expected for this contour method and still require visual review.
+
 The audit compares file presence, format and dimensions with the supplied
 extraction manifests; `--verify-source` also checks the pixel hash embedded in
 newly generated PNGs. Declared resource sidecars are copied through upscaling

@@ -19,7 +19,7 @@ from sprite_metadata import resource_metadata_paths
 
 
 def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, scale: int,
-             fallbacks: dict[str, Path] | None = None) -> dict:
+             fallbacks: dict[str, Path] | None = None, contour_audits: list[dict] | None = None) -> dict:
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite existing pack: {destination}")
     if not backgrounds.is_dir() or not sprite_roots or any(not root.is_dir() for root in sprite_roots):
@@ -131,6 +131,7 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
         "sprite_resource_count": resources,
         "sprite_frame_count": frame_count,
         "sprite_fallbacks": used_fallbacks,
+        "contour_audits": contour_audits or [],
         "sprite_provenance": [
             {"upscaler": key[0], "model_sha256": key[1], "alpha_mode": key[2],
              "tile_size": key[3], "tile_pad": key[4], "alpha_refinement": key[5],
@@ -144,6 +145,39 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
     return manifest
 
 
+def resolve_contour_audits(entries: list[list[str]], sprite_roots: list[Path],
+                           fallbacks: dict[str, Path]) -> tuple[dict[str, Path], list[dict]]:
+    """Revalidate source-bound audits immediately before pack assembly.
+
+    The validator lives in a separate optional tool and uses only the standard
+    library. Its report is not a filesystem snapshot; inputs must remain
+    unchanged until the pack has finished copying.
+    """
+    if not entries:
+        return fallbacks, []
+    from validate_rosetattoo_contour_plan import validate_audit
+
+    roots = {root.resolve() for root in sprite_roots}
+    selected = dict(fallbacks)
+    records = []
+    seen_candidates: set[Path] = set()
+    for audit, baseline, candidate, source in entries:
+        plan = validate_audit(Path(audit), Path(baseline), Path(candidate), Path(source))
+        if plan.candidate_root not in roots:
+            raise ValueError(f"Audited candidate is not a sprite input: {plan.candidate_root}")
+        if plan.candidate_root in seen_candidates:
+            raise ValueError(f"Duplicate contour audit for {plan.candidate_root}")
+        seen_candidates.add(plan.candidate_root)
+        for resource in plan.fallback_resources:
+            if resource in selected and selected[resource].resolve() != plan.baseline_root:
+                raise ValueError(f"Conflicting fallback sources for {resource}")
+            selected[resource] = plan.baseline_root
+        records.append({"report": str(Path(audit).resolve()), "audit_sha256": plan.audit_sha256,
+                        "baseline": str(plan.baseline_root), "candidate": str(plan.candidate_root),
+                        "source": str(plan.source_root), "fallback_count": len(plan.fallback_resources)})
+    return selected, records
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--background-dir", type=Path, required=True)
@@ -152,6 +186,9 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--fallback-sprite", action="append", nargs=2, metavar=("RESOURCE", "BASELINE_ROOT"),
                         help="Use an audited baseline for a whole resource; may be repeated.")
+    parser.add_argument("--contour-audit", action="append", nargs=4,
+                        metavar=("REPORT", "BASELINE", "CANDIDATE", "SOURCE"),
+                        help="Revalidate a source-bound contour audit and select whole-resource fallbacks; repeat per tree.")
     parser.add_argument("--scale", type=int, default=2)
     args = parser.parse_args()
     if args.scale < 1:
@@ -159,8 +196,10 @@ def main() -> None:
     pairs = args.fallback_sprite or []
     if len({name for name, _ in pairs}) != len(pairs):
         parser.error("--fallback-sprite resource paths must be unique")
+    fallbacks, audits = resolve_contour_audits(args.contour_audit or [], args.sprite_dir,
+                                               {name: Path(root) for name, root in pairs})
     manifest = assemble(args.background_dir, args.sprite_dir, args.output_dir, args.scale,
-                        {name: Path(root) for name, root in pairs})
+                        fallbacks, audits)
     print(json.dumps(manifest, indent=2))
 
 

@@ -3,14 +3,36 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from assemble_rosetattoo_modernized import assemble
+from assemble_rosetattoo_modernized import assemble, resolve_contour_audits
+from validate_rosetattoo_contour_plan import SelectionPlan
 
 
 class ModernizedAssemblyTests(unittest.TestCase):
+    def test_validated_contour_plan_selects_and_records_whole_resource(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            candidate, baseline, source = root / "candidate", root / "baseline", root / "source"
+            for path in (candidate, baseline, source):
+                path.mkdir()
+            plan = SelectionPlan(baseline, candidate, source, ("scene_044/canim_004",), "a" * 64)
+            entry = [str(root / "audit.json"), str(baseline), str(candidate), str(source)]
+            with patch("validate_rosetattoo_contour_plan.validate_audit", return_value=plan):
+                fallbacks, records = resolve_contour_audits([entry], [candidate], {})
+                self.assertEqual(fallbacks, {"scene_044/canim_004": baseline})
+                self.assertEqual(records[0]["audit_sha256"], "a" * 64)
+                self.assertEqual(records[0]["fallback_count"], 1)
+                with self.assertRaisesRegex(ValueError, "not a sprite input"):
+                    resolve_contour_audits([entry], [baseline], {})
+                with self.assertRaisesRegex(ValueError, "Duplicate contour audit"):
+                    resolve_contour_audits([entry, entry], [candidate], {})
+                with self.assertRaisesRegex(ValueError, "Conflicting fallback"):
+                    resolve_contour_audits([entry], [candidate], {"scene_044/canim_004": source})
+
     def test_build_and_refuse_overwrite(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
