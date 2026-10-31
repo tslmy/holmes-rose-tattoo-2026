@@ -142,3 +142,23 @@ pack manifest SHA-256 was
 The ignored local report is
 `validation/contour-candidate-scene-smoke-haze-safe-20261031/report.json`.
 This remains a post-load initial-frame check, not a gameplay or visual pass.
+
+## Reported unresponsive window
+
+The user later force-quit the live candidate because its window was stuck; the
+available launch log did not identify when or why it became unresponsive. A
+separate debugger run of the same copied save loaded its natural scene (no
+post-load jump), reached the scene loop and entered `Screen::update` at least
+61 times. After the same load and update count in another run, a debugger-
+injected SDL quit event was accepted and the process exited with status 0.
+Both runs used dummy video/audio and a null music driver. They do **not** test
+the macOS window, actual mouse/keyboard interaction, a long session or the
+conditions that produced the user's freeze, and no freeze fix is established.
+
+The dummy backend also failed before reaching the game with the known SDL blit
+error in separate enhanced and native-mode tests, so that startup failure is
+not unique to the sprite pack. Its cause and its relationship, if any, to the
+reported window freeze are unknown. Local debugger logs are in the ignored
+`validation/freeze-investigation-20261031/` directory. If the freeze recurs,
+capture a short stack sample of the actual stuck process before terminating it;
+do not treat a successful first frame or a dummy-backend run as a GUI pass.
