@@ -208,3 +208,11 @@ frames loaded in order and matched the original `BEHIND` layering. A Watson
 frame comparison confirmed that soft-alpha edges render differently from the
 same RGB image with a thresholded mask. Neither fixture replaces a full
 playthrough or verifies every character and animation.
+
+A later scene-26 fixture loaded a real palette-qualified Watson frame. Its
+resource identity and 56-index installed-palette projection matched the
+sidecar, and an independent compositing check matched all 62,480 pixels in the
+drawn rectangle. Missing, corrupt and mismatched-palette sidecars fell back to
+native art, including after a prior cache hit. The pilot contained only one
+qualified Watson frame; continuity, normal scene entry and palette effects
+still need in-game testing.
