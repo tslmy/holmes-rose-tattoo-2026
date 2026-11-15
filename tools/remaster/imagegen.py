@@ -117,6 +117,9 @@ def availability(cfg: Config, name: str) -> str | None:
             return f"server lists {health}, not {bk['model']}"
         return None
     if bk.get("tool", "").startswith("mflux"):
+        if not cfg.section("image").get("local_generation", True):
+            return ("local generation is off ([image].local_generation = false): diffusion runs on the "
+                    "remote image server, not this Mac's GPU")
         if not mflux_tool(bk["tool"]):
             return f"{bk['tool']} not installed (uv tool install --python 3.13 mflux)"
         if not hf_cached(bk["model"]):

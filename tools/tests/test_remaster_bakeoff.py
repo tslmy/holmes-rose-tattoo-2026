@@ -123,6 +123,30 @@ class ImagegenTest(unittest.TestCase):
                 imagegen.generate(cfg, "web", prompt="p", images=[], size=(64, 64), seed=1, out=Path(tmp) / "o.png")
 
 
+class LocalSwitchTest(unittest.TestCase):
+    def test_local_generation_off_makes_mflux_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "remaster.toml"
+            path.write_text('[image]\nlocal_generation = false\n[image.backends.local]\n'
+                            'tool = "mflux-generate-flux2-edit"\nmodel = "a/b"\nbase_model = "x"\n')
+            self.assertIn("local generation is off", imagegen.availability(load_config(path), "local"))
+
+    def test_cancel_drops_unfinished_matching_jobs(self):
+        from remaster.jobs import JobQueue, JobSpec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            queue = JobQueue(Path(tmp) / "jobs.sqlite")
+            for key in ("scene/001/local/L0", "scene/001/remote/L0", "scene/002/local/L1"):
+                queue.enqueue(JobSpec("redraw-bg", key))
+            done = queue.claim_next()
+            queue.complete(done.id)
+            self.assertEqual(queue.cancel("/local/", "remote only"), ["redraw-bg:scene/002/local/L1"])
+            self.assertEqual(queue.get("redraw-bg:scene/002/local/L1").status, "failed")
+            self.assertEqual(queue.get("redraw-bg:scene/001/local/L0").status, "done")
+            self.assertEqual(queue.claim_next().id, "redraw-bg:scene/001/remote/L0")
+            queue.close()
+
+
 def sidecar_with(anchors, warp=None):
     warp = warp or GridWarp.identity(640, 480, (1.6, 1.6))
     return {"warp": warp.to_json(), "anchors": anchors}

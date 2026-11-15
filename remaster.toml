@@ -31,6 +31,9 @@ disable_thinking = true
 backgrounds = "remote-flux2-klein-4b"   # decision #14 (2026-11-15)
 sprites = "esrgan"
 casting = "remote-flux2-klein-4b"
+# Diffusion runs on the second laptop's image server. Local mflux backends stay defined but report
+# themselves unavailable while this is false, so nothing heavy runs on this Mac's GPU (2026-11-15).
+local_generation = false
 
 [image.backends.remote-flux2-klein-4b]
 # mflux on the second laptop; see docs/local-models.md "Remote image server".
@@ -139,8 +142,10 @@ canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "
 [bakeoff]
 # Phase 1 (docs/remaster-plan.md): every golden scene x backend x freedom level.
 # Backends that cannot run here are recorded with the reason (weights deleted, no API key).
-backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b", "remote-flux3-image-klein",
-            "flux2-klein-edit", "flux2-klein-img2img", "flux3-klein-edit", "qwen21-edit", "zimage-controlnet"]
+# Remote only: the server's flux2-klein-9b and flux3-image-klein are the same models as the local
+# flux2-klein-edit / flux3-klein-edit. Local-only candidates (img2img strengths, Qwen, Z-Image) are
+# queued for review instead of run (review item bakeoff-local-backends).
+backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b", "remote-flux3-image-klein"]
 levels = ["L0", "L1", "L2"]
 seed = 7
 megapixels = 1.0
@@ -149,6 +154,6 @@ reference_dir = "~/Pictures/260805 ChatGPT reimagined Holmes Rose Tattoo"
 references = { 4 = "ChatGPT Image Aug 5, 2026, 10_02_50 PM.png", 2 = "ChatGPT Image Aug 4, 2026, 10_03_08 PM.png" }
 
 [bakeoff.sprite_test]
-backends = ["remote-flux2-klein-4b", "flux2-klein-edit", "flux3-klein-edit"]
+backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b", "remote-flux3-image-klein"]
 characters.holmes = { resource = "SVGAWALK.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Sherlock Holmes: a tall, lean man with a sharp profile, grey deerstalker cap, grey Inverness cape coat over a black frock coat and waistcoat, white shirt, black trousers and shoes." }
 characters.watson = { resource = "WATSON.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Dr John Watson: a sturdy man with a moustache, black bowler hat, dark brown three-piece suit, striped orange and blue wool scarf, white shirt, dark shoes." }

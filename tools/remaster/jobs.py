@@ -246,6 +246,14 @@ class JobQueue:
             args.append(stage)
         return self.db.execute(query, args).rowcount
 
+    def cancel(self, needle: str, reason: str) -> list[str]:
+        """Mark unfinished jobs whose id contains `needle` failed with `reason` (no retry)."""
+        ids = [job.id for job in self.iter_jobs() if needle in job.id and job.status in ("pending", "running")]
+        for job_id in ids:
+            self.db.execute("UPDATE jobs SET status='failed', attempts=max_attempts, pid=NULL, error=?, updated=?"
+                            " WHERE id=?", (f"cancelled: {reason}", time.time(), job_id))
+        return ids
+
     def requeue_tag(self, tag: str) -> list[str]:
         """Reset every job depending on a review item (e.g. an overturned default)."""
         ids = [job.id for job in self.iter_jobs() if tag in job.tags and job.status != "running"]

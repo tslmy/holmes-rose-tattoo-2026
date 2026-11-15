@@ -6,6 +6,7 @@
   remaster status                                    queue counts and failures
   remaster review [decide ID CHOICE]                 render / answer the review queue
   remaster launchd                                   print a LaunchAgent plist for auto-resume
+  remaster cancel TEXT                               drop unfinished jobs whose id contains TEXT
   remaster bakeoff-report                            Phase 1 summary, contact sheet, provisional picks
 """
 
@@ -22,7 +23,7 @@ from .config import load_config
 from .review import ReviewQueue
 from .stages import PIPELINE, STAGES, get
 
-COMMANDS = {"run", "status", "review", "launchd", "_job", "retry", "bakeoff-report"}
+COMMANDS = {"run", "status", "review", "launchd", "_job", "retry", "cancel", "bakeoff-report"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,6 +59,14 @@ def main(argv: list[str] | None = None) -> int:
         return _status(cfg)
     if command == "review":
         return _review(cfg, args.targets[1:])
+    if command == "cancel":
+        if len(args.targets) != 2:
+            raise SystemExit("usage: remaster cancel <text in job id>")
+        queue = runner.queue_for(cfg)
+        ids = queue.cancel(args.targets[1], "cancelled by `remaster cancel`")
+        queue.close()
+        print(f"cancelled {len(ids)} job(s)")
+        return 0
     if command == "bakeoff-report":
         from . import bakeoff
 
