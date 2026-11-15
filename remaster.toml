@@ -43,23 +43,26 @@ url = "http://10.0.0.26:8000/v1/images/generations"
 model = "flux2-klein-4b"
 api_key_env = "REMASTER_IMAGE_API_KEY"
 fallback = "flux3-klein-edit"           # local, when the remote laptop is off
-# Once the server accepts `strength` (imagegen.SERVER_FIELDS; asked for 2026-11-15), uncomment so
-# the freedom levels differ in how much of the plate is kept, not just in the prompt:
-# levels = { L0 = { strength = 0.7 }, L1 = { strength = 0.55 }, L2 = { strength = 0.4 } }
-# Likewise once it accepts an `images` list (reference images; the cast sheet for sprites):
-# multi_image = true
+# Freedom levels (server fields since 2026-11-15; imagegen.SERVER_FIELDS): strength = share of the
+# plate kept (img2img); L2 sends no strength, i.e. the free reference edit. `images` carries references.
+levels = { L0 = { strength = 0.6, steps = 8 }, L1 = { strength = 0.45, steps = 8 }, L2 = { steps = 8 } }
+multi_image = true
 
 [image.backends.remote-flux2-klein-9b]
 tool = "http"
 url = "http://10.0.0.26:8000/v1/images/generations"
 model = "flux2-klein-9b"
 api_key_env = "REMASTER_IMAGE_API_KEY"
+levels = { L0 = { strength = 0.6, steps = 8 }, L1 = { strength = 0.45, steps = 8 }, L2 = { steps = 8 } }
+multi_image = true
 
 [image.backends.remote-flux3-image-klein]
 tool = "http"
 url = "http://10.0.0.26:8000/v1/images/generations"
 model = "flux3-image-klein"
 api_key_env = "REMASTER_IMAGE_API_KEY"
+levels = { L0 = { strength = 0.6, steps = 8 }, L1 = { strength = 0.45, steps = 8 }, L2 = { steps = 8 } }
+multi_image = true
 
 [image.backends.flux2-klein-img2img]
 # Same FLUX.2 klein 9B weights as flux2-klein-edit, used as img2img. mflux's image strength is
