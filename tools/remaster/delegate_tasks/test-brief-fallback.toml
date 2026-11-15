@@ -1,0 +1,26 @@
+# Delegated 2026-11-15 (Phase 1). Spec by Opus; implementation by OpenCode on the local model.
+files = ["tools/tests/test_remaster_brief.py"]
+test = "python -m unittest tests.test_remaster_brief"
+prompt = """
+Write a new unittest module tools/tests/test_remaster_brief.py for tools/remaster/stages/brief.py
+(read it first, and tools/tests/test_remaster_bakeoff.py for the style and the sys.path setup).
+
+Build a throwaway repo in a tempfile.TemporaryDirectory with a remaster.toml:
+[paths] work = "work", review = "review"; [llm] base_url = "http://127.0.0.1:9/v1",
+vision_model = "nothing", text_model = "nothing", timeout_s = 2 (no fallback keys, so the client is unreachable).
+Create the inputs run_job reads: remaster.stages.extract.scene_dir(cfg, "rooms", 4)/"metadata.json" with
+scene_name "Outside Scotland Yard" and two objects (a no_shape "Street Sign" with bounds 222,195,35,16 and
+an active_bg_shape person "Police Constable" with 1x1 bounds at 349,209), and
+remaster.stages.prepare.out_root(cfg)/"scene_004"/"plate.json" ({"size": [640, 480], "layers": [one layer
+with object_index of the constable, x 374, y 216, width 45, height 156]}) plus a 640x480 plate_dedither.png.
+Test that brief.run_job(cfg, {"scene": 4}, "fp1"):
+1. succeeds with the LLM unreachable, writes work/brief/scene_004/visual_brief.txt starting with brief.STYLE
+   and naming the room's objects, objects.json with two objects (the sign flagged writing, query
+   "street sign"; the constable with query "person" and the layer box), and brief.json whose "fallback" list
+   is non-empty and mentions "llm";
+2. returns {"skipped": True} when called again with the same fingerprint;
+3. with ChatClient.chat patched (unittest.mock) to return a ChatResult whose text is prose around a JSON
+   object {"brief": "A grey stone police station.", "objects": [{"id": "o01", "query": "enamel sign",
+   "writing": true, "clue": false}]}, and ChatClient.from_config patched to return a client, a new
+   fingerprint uses the LLM's brief and query for o01 and keeps the fallback for o02.
+"""

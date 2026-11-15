@@ -147,6 +147,23 @@ class LocalSwitchTest(unittest.TestCase):
             queue.close()
 
 
+class DelegateTest(unittest.TestCase):
+    def test_tasks_are_planned_with_scope_and_test(self):
+        import argparse
+
+        from remaster.stages import delegate
+
+        found = delegate.tasks()
+        self.assertTrue(found)
+        for name, task in found.items():
+            self.assertTrue(task["files"] and task["test"] and task["prompt"].strip(), name)
+        cfg = load_config()
+        specs = delegate.plan(cfg, argparse.Namespace(resources=None))
+        self.assertEqual({s.key for s in specs}, set(found))
+        rules = delegate.RULES.format(files="a.py", test="python -m unittest x")
+        self.assertIn("change only these files: a.py", rules)
+
+
 def sidecar_with(anchors, warp=None):
     warp = warp or GridWarp.identity(640, 480, (1.6, 1.6))
     return {"warp": warp.to_json(), "anchors": anchors}

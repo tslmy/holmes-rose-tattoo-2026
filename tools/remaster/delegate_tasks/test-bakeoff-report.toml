@@ -1,0 +1,27 @@
+# Delegated 2026-11-15 (Phase 1). Spec by Opus; implementation by OpenCode on the local model.
+files = ["tools/tests/test_remaster_bakeoff_report.py"]
+test = "python -m unittest tests.test_remaster_bakeoff_report"
+prompt = """
+Write a new unittest module tools/tests/test_remaster_bakeoff_report.py for tools/remaster/bakeoff.py
+(read that file first, and tools/tests/test_remaster_bakeoff.py for the style and the sys.path setup).
+
+Build a throwaway repo in a tempfile.TemporaryDirectory with a remaster.toml containing:
+[paths] work = "work", review = "review"; [golden] scenes = [4]; [bakeoff] backends = ["a", "b"],
+levels = ["L0", "L2"]; [image.backends.a] tool = "http", url = "http://127.0.0.1:9/v1/images/generations",
+model = "a"; same for b. Load it with remaster.config.load_config.
+Under work/, write the files bakeoff.collect() reads (use the stage helpers for the paths:
+remaster.stages.redraw_bg.job_dir, geometry.job_dir, qa.job_dir, prepare.out_root, baseline.out_root):
+- backend "a": for L0 and L2 a record.json {"status": "ok", "seconds": 10, "peak_memory_gb": null}, a
+  geometry.json {"summary": {"status": "ok", "disp_p95": 1.0, "max_stretch": 1.1}}, a final.png and overlay.png
+  (small PIL images), and a qa.json {"summary": {"pass": true, "score": 0.8, "gates": {"warp": true}}} for L0,
+  and pass false / score 0.6 / gates {"warp": false} for L2.
+- backend "b": record.json {"status": "unavailable", "reason": "no API key"} for both levels.
+- prepare.out_root(cfg)/"scene_004"/"plate.png" and baseline.out_root(cfg)/"scene_004"/"plate_esrgan.png".
+Test that bakeoff.report(cfg, queue=True):
+1. returns picks with backend "a" and levels {4: level "L0"};
+2. writes work/bakeoff/contact.html containing "Scene 4", "unavailable: no API key" and an <img> whose src
+   file exists relative to work/bakeoff/;
+3. writes work/bakeoff/results.md containing "| `a` |" and "no API key";
+4. adds review items with ids bakeoff-backend, bakeoff-room-levels and bakeoff-sprite-route to
+   review/queue.json, the room-levels default containing "4: L0".
+"""
