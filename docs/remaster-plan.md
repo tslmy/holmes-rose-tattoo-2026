@@ -1,5 +1,29 @@
 # Rose Tattoo remaster: iteration 2 plan
 
+> **Status, 2026-11-14: Phase 0 delivered.** `uv run remaster extract prepare`
+> runs clean on the golden set (scenes 1, 26, 18, 4, 2, 9, 36 plus scene 44 for a
+> cAnim; Holmes, Watson, cursors, two items; cAnims `026/000`, `044/004`),
+> including the extraction audit. Delivered: the `remaster` CLI and
+> `remaster.toml` (`tools/README.md`); `prepare` with deterministic de-dither,
+> default-state plates, layer index and edge images; a persistent SQLite job
+> queue and `remaster run` (caffeinate, child process per job, crash/sleep/
+> reboot recovery, free-disk check; tested by killing a runner mid-job); the
+> review queue (`review/queue.md`, local `review/sheet.html`); an
+> OpenAI-compatible LLM client now used by `polish_rosetattoo_prompts.py`;
+> `qwen/qwen3.8-27b` on the second laptop's LM Studio for text and vision,
+> with local `qwen3.5:9b-mlx` (Ollama) as automatic fallback; OpenCode
+> headless via OpenChamber's bundled binary; mflux 0.24 weights for FLUX.2
+> klein 9B, FLUX 3 Image Klein (added), Qwen-Image 2.1
+> (in place of Qwen-Image-Edit) and Z-Image + ControlNet Union, each
+> smoke-tested with time and peak memory, plus a profile of the second
+> laptop's image server; its FLUX.2 klein 4B is now the provisional backend
+> (decision #14; `docs/local-models.md`); and
+> `docs/pilot-lessons.md`. **Queued for you** in `review/queue.md`: the
+> provisional defaults in use (models, golden set, plate state, de-dither
+> strength, backend picks, downloads made), pushing the fork branch (not done
+> here), and installing the launchd auto-restart. Remaining stages are stubs
+> that print what they will do.
+
 Written 2026-11-14. This supersedes the "what's next" notes scattered across
 the other docs. It is a plan, not a record of work done.
 
