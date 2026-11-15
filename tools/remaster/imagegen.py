@@ -158,6 +158,15 @@ def generate(cfg: Config, name: str, *, prompt: str, images: list[Path], size: t
                                    "seed": seed}
         if images:
             payload["image"] = base64.b64encode(images[0].read_bytes()).decode("ascii")
+        if len(images) > 1:
+            # References beyond the first need the server's `images` list (asked for 2026-11-15).
+            # Until the backend sets multi_image = true they are dropped, and the record says so.
+            if bk.get("multi_image"):
+                payload["images"] = [base64.b64encode(p.read_bytes()).decode("ascii") for p in images]
+                record["references_sent"] = len(images)
+            else:
+                record["references_sent"] = 1
+                record["references_dropped"] = len(images) - 1
         # Per-level settings the server understands (see SERVER_FIELDS); only sent when configured.
         for name in SERVER_FIELDS:
             if name in settings and (name != "strength" or images):

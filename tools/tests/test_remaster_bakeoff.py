@@ -146,6 +146,10 @@ class RemoteFieldsTest(unittest.TestCase):
                                   out=Path(tmp) / "o.png", level="L0")
                 imagegen.generate(cfg, "web", prompt="p", images=[], size=(8, 8), seed=1,
                                   out=Path(tmp) / "t.png", level="L0")
+                rec = imagegen.generate(cfg, "web", prompt="p", images=[Path(tmp) / "in.png"] * 2, size=(8, 8),
+                                        seed=1, out=Path(tmp) / "r.png", level="L0")
+            self.assertEqual(rec["references_dropped"], 1)  # single-image server: reference not sent
+            self.assertNotIn("images", post.call_args_list[2].args[1])
             first, second = post.call_args_list[0].args[1], post.call_args_list[1].args[1]
             self.assertEqual((first["strength"], first["steps"]), (0.7, 6))
             self.assertNotIn("strength", second)  # text-to-image: no input image to keep

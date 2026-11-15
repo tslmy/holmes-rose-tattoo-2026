@@ -46,6 +46,8 @@ fallback = "flux3-klein-edit"           # local, when the remote laptop is off
 # Once the server accepts `strength` (imagegen.SERVER_FIELDS; asked for 2026-11-15), uncomment so
 # the freedom levels differ in how much of the plate is kept, not just in the prompt:
 # levels = { L0 = { strength = 0.7 }, L1 = { strength = 0.55 }, L2 = { strength = 0.4 } }
+# Likewise once it accepts an `images` list (reference images; the cast sheet for sprites):
+# multi_image = true
 
 [image.backends.remote-flux2-klein-9b]
 tool = "http"

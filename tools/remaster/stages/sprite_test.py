@@ -202,7 +202,9 @@ def run_test(cfg: Config, spec: dict, backend: str, seed: int, out: Path) -> dic
                if red_seq["mean_delta"] and base_seq["mean_delta"] else None)
     seconds = [i["seconds"] for i in images]
     peaks = [i.get("peak_memory_gb") for i in images if i.get("peak_memory_gb")]
+    dropped = sum(i.get("references_dropped", 0) for i in images)
     summary = {"status": "ok", "frames": len(spec["walk"]),
+               "identity_conditioned": dropped == 0,
                "flicker_ratio": round(flicker, 3) if flicker else None,
                "drift": red_id["drift"], "baseline_drift": base_id["drift"],
                "drift_excess": round(red_id["drift"] - base_id["drift"], 4),
@@ -211,7 +213,10 @@ def run_test(cfg: Config, spec: dict, backend: str, seed: int, out: Path) -> dic
                "seconds_per_image": round(float(np.mean(seconds)), 1),
                "peak_memory_gb": max(peaks) if peaks else None}
     limits = cfg.section("thresholds")
-    summary["pass"] = bool(summary["flicker_ratio"] is not None
+    if dropped:
+        summary["note"] = (f"the backend dropped the cast sheet on {dropped} frame(s) (one input image only): "
+                           "these are single-image edits, not identity-conditioned")
+    summary["pass"] = bool(summary["identity_conditioned"] and summary["flicker_ratio"] is not None
                            and summary["flicker_ratio"] <= float(limits.get("sprite_max_flicker_ratio", 1.5))
                            and summary["drift_excess"] <= float(limits.get("sprite_max_drift_excess", 0.1))
                            and summary["pose_iou_min"] >= float(limits.get("sprite_min_pose_iou", 0.7)))
