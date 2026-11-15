@@ -123,6 +123,34 @@ class ImagegenTest(unittest.TestCase):
                 imagegen.generate(cfg, "web", prompt="p", images=[], size=(64, 64), seed=1, out=Path(tmp) / "o.png")
 
 
+class RemoteFieldsTest(unittest.TestCase):
+    def test_level_strength_is_sent_to_the_server(self):
+        from unittest import mock
+
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "remaster.toml"
+            path.write_text('[image.backends.web]\ntool = "http"\nurl = "http://x/v1/images/generations"\n'
+                            f'model = "m"\napi_key_file = "{tmp}/key"\n'
+                            'levels = { L0 = { strength = 0.7, steps = 6 } }\n')
+            (Path(tmp) / "key").write_text("k")
+            Image.new("RGB", (8, 8)).save(Path(tmp) / "in.png")
+            buffer = __import__("io").BytesIO()
+            Image.new("RGB", (8, 8)).save(buffer, "PNG")
+            reply = {"data": [{"b64_json": __import__("base64").b64encode(buffer.getvalue()).decode()}]}
+            cfg = load_config(path)
+            with mock.patch.object(imagegen, "availability", return_value=None), \
+                    mock.patch.object(imagegen, "post_json", return_value=reply) as post:
+                imagegen.generate(cfg, "web", prompt="p", images=[Path(tmp) / "in.png"], size=(8, 8), seed=1,
+                                  out=Path(tmp) / "o.png", level="L0")
+                imagegen.generate(cfg, "web", prompt="p", images=[], size=(8, 8), seed=1,
+                                  out=Path(tmp) / "t.png", level="L0")
+            first, second = post.call_args_list[0].args[1], post.call_args_list[1].args[1]
+            self.assertEqual((first["strength"], first["steps"]), (0.7, 6))
+            self.assertNotIn("strength", second)  # text-to-image: no input image to keep
+
+
 class LocalSwitchTest(unittest.TestCase):
     def test_local_generation_off_makes_mflux_unavailable(self):
         with tempfile.TemporaryDirectory() as tmp:

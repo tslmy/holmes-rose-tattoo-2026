@@ -39,6 +39,14 @@ LEVEL_PROMPTS = {
            "left-to-right and front-to-back order. Add nothing, remove nothing, keep all writing."),
 }
 
+# Optional request fields of the remote image server, sent from a backend's `levels` table:
+#   strength  float 0..1, edit requests only: how much of the input image is KEPT (mflux semantics,
+#             as in `mflux-generate-flux2 --image PATH STRENGTH`): 0 = ignore the input, 1 = return it.
+#             When given, the server runs img2img from the input instead of reference editing.
+#   steps     int, inference steps (default: the model's own)
+#   guidance  float, guidance scale (default: the model's own)
+SERVER_FIELDS = ("strength", "steps", "guidance")
+
 KEY_FILE = Path.home() / ".config" / "shcrt" / "image_api_key"
 
 
@@ -150,6 +158,10 @@ def generate(cfg: Config, name: str, *, prompt: str, images: list[Path], size: t
                                    "seed": seed}
         if images:
             payload["image"] = base64.b64encode(images[0].read_bytes()).decode("ascii")
+        # Per-level settings the server understands (see SERVER_FIELDS); only sent when configured.
+        for name in SERVER_FIELDS:
+            if name in settings and (name != "strength" or images):
+                payload[name] = settings[name]
         started = time.monotonic()
         response = post_json(bk["url"], payload, float(bk.get("timeout_s", 1800)), api_key(bk))
         record["seconds"] = round(time.monotonic() - started, 2)
