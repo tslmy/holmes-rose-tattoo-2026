@@ -1,0 +1,271 @@
+{
+  "items": [
+    {
+      "id": "download-flux2-klein-9b-q4",
+      "kind": "download",
+      "title": "FLUX.2 klein 9B (4-bit) for edit / casting candidates",
+      "default": "Download mflux-community/flux2-klein-9b-mflux-q4 now (proceeding)",
+      "detail": "Downloaded into the Hugging Face cache (~/.cache/huggingface/hub) through mflux 0.24.0, installed as an isolated `uv tool` so the project lock and the existing z_image_controlnet.py are untouched. Pre-quantized mflux-community weights were chosen over the original checkpoints to fit 84 GB free disk (originals: FLUX.2-klein-9B 52.9 GB, Qwen-Image-2.1 33.1 GB, Z-Image-Turbo 32.9 GB + ControlNet 6.7 GB). The 9B klein weights are under the FLUX non-commercial licence; 4B is Apache-2.0.\n\nDownloaded and smoke-tested 2026-11-14 (docs/local-models.md).\n\nDone: downloaded and smoke-tested 2026-11-14. The alternatives above stay open; ask to swap any time.",
+      "options": [
+        "keep",
+        "swap for flux2-klein-4b-mflux-q8 (8.6 GB, Apache-2.0)",
+        "also fetch flux2-klein-9b-mflux-q8 (17.9 GB)"
+      ],
+      "status": "done",
+      "decision": "",
+      "size_gb": 9.5,
+      "images": [],
+      "created": "2026-11-14T21:09:44-08:00",
+      "updated": "2026-11-14T22:40:28-08:00"
+    },
+    {
+      "id": "download-qwen21-q8",
+      "kind": "download",
+      "title": "Qwen-Image 2.1 (8-bit) as the Qwen edit candidate",
+      "default": "Download mflux-community/qwen-image-2-1-mflux-q8 now (proceeding); it replaces the plan's Qwen-Image-Edit",
+      "detail": "Downloaded into the Hugging Face cache (~/.cache/huggingface/hub) through mflux 0.24.0, installed as an isolated `uv tool` so the project lock and the existing z_image_controlnet.py are untouched. Pre-quantized mflux-community weights were chosen over the original checkpoints to fit 84 GB free disk (originals: FLUX.2-klein-9B 52.9 GB, Qwen-Image-2.1 33.1 GB, Z-Image-Turbo 32.9 GB + ControlNet 6.7 GB). Current mflux documents Qwen-Image 2.1 (Sep 2026, 7.1B + Qwen3-VL encoder) with reference editing, masks and strength; it is far smaller than the 20B Qwen-Image-Edit-2511.\n\nDownloaded and smoke-tested 2026-11-14 (docs/local-models.md).\n\nDone: downloaded and smoke-tested 2026-11-14. The alternatives above stay open; ask to swap any time.",
+      "options": [
+        "keep Qwen-Image 2.1",
+        "also fetch qwen-image-edit-2511-mflux-q4 (29.0 GB, 20B, the plan's original candidate)"
+      ],
+      "status": "done",
+      "decision": "",
+      "size_gb": 18.5,
+      "images": [],
+      "created": "2026-11-14T21:09:44-08:00",
+      "updated": "2026-11-14T22:40:28-08:00"
+    },
+    {
+      "id": "download-zimage-controlnet-q8",
+      "kind": "download",
+      "title": "Z-Image Turbo + Fun ControlNet Union 2.1 (8-bit)",
+      "default": "Download mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8 now (proceeding)",
+      "detail": "Downloaded into the Hugging Face cache (~/.cache/huggingface/hub) through mflux 0.24.0, installed as an isolated `uv tool` so the project lock and the existing z_image_controlnet.py are untouched. Pre-quantized mflux-community weights were chosen over the original checkpoints to fit 84 GB free disk (originals: FLUX.2-klein-9B 52.9 GB, Qwen-Image-2.1 33.1 GB, Z-Image-Turbo 32.9 GB + ControlNet 6.7 GB).\n\nDownloaded and smoke-tested 2026-11-14 (docs/local-models.md).\n\nDone: downloaded and smoke-tested 2026-11-14. The alternatives above stay open; ask to swap any time.",
+      "options": [
+        "keep",
+        "swap for the q4 variant (smaller)"
+      ],
+      "status": "done",
+      "decision": "",
+      "size_gb": 15.3,
+      "images": [],
+      "created": "2026-11-14T21:09:44-08:00",
+      "updated": "2026-11-14T22:40:29-08:00"
+    },
+    {
+      "id": "llm-models",
+      "kind": "decision",
+      "title": "Text + vision LLM for briefs and QA",
+      "default": "qwen3.5:9b-mlx in Ollama (alias qwen3.5-9b-32k, 32k context) for both text and vision",
+      "detail": "Evaluation in docs/local-models.md. No download made. Free OCR at 640x480 is unreliable; sign checks will crop+enlarge and compare with extracted text.\n\nDone: [llm] now points at qwen/qwen3.8-27b on http://10.0.0.26:1234/v1 for text and vision, with local qwen3.5-9b-32k (Ollama) as automatic fallback. Evaluation in docs/local-models.md.",
+      "options": [
+        "keep",
+        "LM Studio mimo-v2.6-distill-qwen-9b-heretic for text (text-only)",
+        "download a ~30B MoE vision model at 4-bit (~20 GB) as QA judge once disk allows"
+      ],
+      "status": "done",
+      "decision": "use remote; see my notes for decision #11",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T23:47:14-08:00"
+    },
+    {
+      "id": "golden-set",
+      "kind": "decision",
+      "title": "Golden set for Phase 0/1",
+      "default": "scenes 1 street, 26 interior, 18 haze, 4 writing, 2 scrolling, 9 dark; sprites SVGAWALK (Holmes), WATSON, RMOUSE, OMOUSE, ITEM01, ITEM10; cAnims 026/000 (26HEXIT) and 044/004",
+      "detail": "Recorded under [golden] in remaster.toml; `uv run remaster extract prepare` runs on it by default.\n\nDone: scene 36 Spitalfields (scrolling street, 1280 wide) added to [golden]; extracted, audited and prepared (19 plate layers).",
+      "options": [
+        "keep",
+        "swap the dark room for 53 (dark and haze)",
+        "add 36 Spitalfields (scrolling street)"
+      ],
+      "status": "done",
+      "decision": "add 36 Spitalfields",
+      "size_gb": null,
+      "images": [
+        "work/prepare/scene_001/plate.png",
+        "work/prepare/scene_026/plate.png",
+        "work/prepare/scene_018/plate.png",
+        "work/prepare/scene_004/plate.png",
+        "work/prepare/scene_002/plate.png",
+        "work/prepare/scene_009/plate.png"
+      ],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T23:47:15-08:00"
+    },
+    {
+      "id": "plate-flag-state",
+      "kind": "decision",
+      "title": "Which story state plates are built in",
+      "default": "all story flags off, frame 0 of each active_bg_shape before sequences run",
+      "detail": "Objects needing a set flag are skipped (e.g. 5 in scene 4). Listed per scene in work/prepare/scene_NNN/plate.json.",
+      "options": [
+        "keep",
+        "build one plate per flag state from state_masks.json (more redraws)"
+      ],
+      "status": "confirmed",
+      "decision": "keep",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T23:40:42-08:00"
+    },
+    {
+      "id": "dedither-settings",
+      "kind": "decision",
+      "title": "De-dither strength",
+      "default": "radius 1, threshold 48 RGB, 2 iterations (dither gauge roughly halves; edges and signs unchanged)",
+      "detail": "",
+      "options": [
+        "keep",
+        "stronger: threshold 64 / 3 iterations",
+        "weaker: threshold 32"
+      ],
+      "status": "confirmed",
+      "decision": "keep",
+      "size_gb": null,
+      "images": [
+        "work/prepare/scene_001/plate_dedither.png",
+        "work/prepare/scene_026/plate_dedither.png"
+      ],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T22:54:31-08:00"
+    },
+    {
+      "id": "mflux-project-pin",
+      "kind": "decision",
+      "title": "mflux version for the project environment",
+      "default": "mflux 0.24.0 as an isolated `uv tool`; project `zimage` extra left on git mflux 0.18.1",
+      "detail": "Isolation avoided touching other agents' in-flight img2img changes.",
+      "options": [
+        "keep",
+        "bump the zimage extra to mflux>=0.24 (re-test tools/img2img/z_image*.py)"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T21:39:18-08:00"
+    },
+    {
+      "id": "launchd-autoresume",
+      "kind": "approval",
+      "title": "Auto-restart the runner after reboot",
+      "default": "not installed; after a reboot run `uv run remaster run` by hand (jobs resume)",
+      "detail": "",
+      "options": [
+        "install: uv run remaster launchd > ~/Library/LaunchAgents/local.shcrt.remaster-runner.plist && launchctl load that file"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T21:39:18-08:00"
+    },
+    {
+      "id": "push-fork-branch",
+      "kind": "approval",
+      "title": "Push the ScummVM fork branch so the submodule pointer is real",
+      "default": "not pushed: the branches diverged, so a push would be a force-push (see detail)",
+      "detail": "Phase 0 lists this; the pushed branch is ~20 commits behind the local submodule checkout.\n\nNot pushed, needs your answer: the local rosetattoo-hires-mod (5c6aa645) and the fork's (90f9671e) have diverged. Local is the same 22 Sherlock commits rebased onto ~180 newer upstream commits (engines/sherlock identical), so pushing would be a force-push that removes 90f9671e, the commit this repository's submodule pointer records. The newer engine work is on ~20 codex/* and terra/* branches stacked above it in the submodule's GitButler workspace, not on rosetattoo-hires-mod.\n\nDone 2026-11-14: pushed local rosetattoo-hires-mod (5c6aa645) to the fork as rosetattoo-hires-mod-rebased (one `git push` of that commit to a new ref; `but push` cannot rename). The fork's rosetattoo-hires-mod (90f9671e, pinned by this repo) is unchanged. The engine work on the codex/* and terra/* branches is still unpublished.",
+      "options": [
+        "push scummvm-src rosetattoo-hires-mod to tslmy/scummvm"
+      ],
+      "status": "done",
+      "decision": "push under a new name",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T23:47:15-08:00"
+    },
+    {
+      "id": "lmstudio-unloaded",
+      "kind": "info",
+      "title": "LM Studio model unloaded for diffusion smoke tests",
+      "default": "mimo-v2.6-distill-qwen-9b-heretic left unloaded; reload in LM Studio or `lms load` if you use it",
+      "detail": "The plan unloads LLMs during diffusion batches; 32 GB cannot hold both.\n\nDone: the remote LM Studio (qwen/qwen3.8-27b) is the primary model; OpenCode defaults to it too. The local LM Studio model stays unloaded.",
+      "options": [],
+      "status": "done",
+      "decision": "Try the LM Studio at http://10.0.0.26:1234 instead. It runs on a stronger laptop. It has qwen/qwern3.8-27b loaded.",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T23:47:15-08:00"
+    },
+    {
+      "id": "venv-recreated",
+      "kind": "info",
+      "title": "Project .venv was rebuilt",
+      "default": "base dependencies only (pillow, numpy); add extras with `uv sync --extra esrgan --extra contour-audit` as needed",
+      "detail": "On first use in this session uv removed and recreated .venv (its interpreter was no longer usable; cause not confirmed). requires-python is now >=3.11 (tomllib). Other virtualenvs such as .venv-upscale were not touched.",
+      "options": [],
+      "status": "confirmed",
+      "decision": "keep",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T21:39:18-08:00",
+      "updated": "2026-11-14T23:30:04-08:00"
+    },
+    {
+      "id": "download-flux3-klein-q8",
+      "kind": "download",
+      "title": "FLUX 3 Image Klein (8-bit) as a fourth edit candidate",
+      "default": "Download mflux-community/flux-3-image-klein-mflux-q8 now (requested 2026-11-14; proceeding)",
+      "detail": "Multi-reference editing (up to 10 refs), strong text rendering; 16-step distilled; no LoRA training in mflux. Licence: FLUX Kommunity License v1.0 (non-commercial, plus commercial output for Qualifying Users under US$5M revenue); the text encoder is Apache-2.0. Downloaded from the mflux-community re-host, which did not ask for licence acceptance.\n\nDownloaded and smoke-tested 2026-11-14 (docs/local-models.md).\n\nDone: downloaded and smoke-tested 2026-11-14. The alternatives above stay open; ask to swap any time.",
+      "options": [
+        "keep",
+        "drop FLUX.2 klein 9B q4 (9.5 GB) if FLUX 3 wins on edits"
+      ],
+      "status": "done",
+      "decision": "",
+      "size_gb": 9.9,
+      "images": [],
+      "created": "2026-11-14T22:07:32-08:00",
+      "updated": "2026-11-14T22:40:29-08:00"
+    },
+    {
+      "id": "image-backend-provisional",
+      "kind": "decision",
+      "title": "Provisional image backend for plates and casting until the Phase 1 bake-off",
+      "default": "flux3-klein-edit for backgrounds and casting; esrgan for sprites",
+      "detail": "One smoke image each from the scene-26 plate (docs/local-models.md): FLUX 3 Klein kept the layout best at the lowest memory (12.9 GB, 225 s). Phase 1 decides by gate scores.",
+      "options": [
+        "flux2-klein-edit",
+        "qwen21-edit (at higher strength)",
+        "zimage-controlnet"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [
+        "work/smoke/flux3-klein-edit/output.png",
+        "work/smoke/flux2-klein-edit/output.png",
+        "work/smoke/qwen21-edit/output.png",
+        "work/smoke/zimage-controlnet/output.png"
+      ],
+      "created": "2026-11-14T22:16:39-08:00",
+      "updated": "2026-11-14T22:16:39-08:00"
+    },
+    {
+      "id": "disk-after-weights",
+      "kind": "info",
+      "title": "Free disk after Phase 0 downloads: 23 GB",
+      "default": "Proceed; the runner pauses below 15 GB and queues a request; no pilot tree is deleted",
+      "detail": "mflux weights in ~/.cache/huggingface/hub: FLUX.2 klein 9B q4 8.9 GB, Z-Image ControlNet q8 14 GB, Qwen-Image 2.1 q8 ~18 GB, FLUX 3 Klein q8 ~9.9 GB. A 4x pack will need more space than this.\n\nNot done yet: waiting for you to say which items to delete (asked 2026-11-14).\n\nDone 2026-11-14: `hf cache rm` removed mflux-community/qwen-image-2-1-mflux-q8, mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8 and alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 (fetched by the Z-Image smoke run): 40.5 GB freed in the cache (60.9 -> 20.4 GB). Free disk stayed ~25 GB, so something else used about as much at the same time; not identified. FLUX 3 Klein and FLUX.2 9B weights remain. The qwen21-edit and zimage-controlnet backends would re-download on next use.",
+      "options": [
+        "drop FLUX.2 klein 9B q4 (9.5 GB) or Z-Image ControlNet (15.3 GB) after Phase 1",
+        "approve deleting named pilot trees (docs/pilot-lessons.md)"
+      ],
+      "status": "done",
+      "decision": "delete Qwen-Image 2.1 + Z-Image weights",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-14T22:16:39-08:00",
+      "updated": "2026-11-14T23:30:47-08:00"
+    }
+  ]
+}
