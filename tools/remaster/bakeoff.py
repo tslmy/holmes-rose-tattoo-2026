@@ -23,12 +23,14 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import time
 from pathlib import Path
 
 from PIL import Image
 
 from .config import Config
+from .jobs import Job, JobQueue
 from .review import ReviewItem, ReviewQueue
 from .stages import baseline, brief, geometry, prepare, qa, redraw_bg, sprite_test
 
@@ -42,8 +44,48 @@ def _read(path: Path) -> dict:
         return {}
 
 
+def _jobs(cfg: Config) -> dict[str, Job]:
+    path = cfg.state_dir / "jobs.sqlite"
+    if not path.exists():
+        return {}
+    queue = JobQueue(path)
+    try:
+        return {job.id: job for job in queue.iter_jobs()}
+    finally:
+        queue.close()
+
+
+def _failure_reason(job: Job) -> str:
+    """The last error line of a failed job's log, with an HTTP error's message pulled out."""
+    match = re.search(r"log (\S+)$", job.error or "")
+    lines = []
+    if match and Path(match.group(1)).is_file():
+        lines = [ln for ln in Path(match.group(1)).read_text(errors="replace").splitlines()
+                 if re.match(r"\w*(Error|Exception|Unavailable)\b", ln)]
+    text = lines[-1] if lines else (job.error or "failed")
+    msg = re.search(r'"msg":"([^"]+)"', text)
+    return (msg.group(1) if msg else text)[:200]
+
+
+def change_from_original(cfg: Config, scene: int, final: Path) -> float | None:
+    """Mean absolute difference (0-255) between the shipped picture and the original plate, both
+    at the original size. A redraw that barely changes the picture is not a remaster, however
+    well it scores: several "photoreal" ratings came back as high for the original renders."""
+    plate = prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate.png"
+    if not (plate.is_file() and final.is_file()):
+        return None
+    import numpy as np
+    with Image.open(plate) as a, Image.open(final) as b:
+        orig = np.asarray(a.convert("RGB"), dtype=np.float32)
+        new = np.asarray(b.convert("RGB").resize(a.size, Image.Resampling.LANCZOS), dtype=np.float32)
+    return round(float(np.abs(orig - new).mean()), 1)
+
+
 def collect(cfg: Config) -> list[dict]:
+    """One row per scene x backend x level. The job queue is authoritative: a job that failed in
+    the latest run reports as failed, even if an older run left a record on disk."""
     rows = []
+    jobs = _jobs(cfg)
     for scene in cfg.golden_scenes:
         for backend in redraw_bg.backends(cfg):
             for level in redraw_bg.levels(cfg):
@@ -51,14 +93,26 @@ def collect(cfg: Config) -> list[dict]:
                 geo = _read(geometry.job_dir(cfg, scene, backend, level) / "geometry.json").get("summary", {})
                 q = _read(qa.job_dir(cfg, scene, backend, level) / "qa.json").get("summary", {})
                 status = red.get("status") or "not run"
+                reason = red.get("reason")
+                job = jobs.get(f"{redraw_bg.NAME}:{redraw_bg.key(scene, backend, level)}")
+                if job and job.status == "failed":
+                    status, reason, geo, q = "failed", _failure_reason(job), {}, {}
+                elif job and job.status in ("pending", "running"):
+                    status, reason, geo, q = "not run", f"job {job.status}", {}, {}
                 if status == "ok" and not geo:
                     status = "geometry not run"
                 elif status == "ok" and not q:
                     status = "qa not run"
+                change, changed = None, None
+                if status == "ok":
+                    change = change_from_original(cfg, scene, geometry.job_dir(cfg, scene, backend, level) / "final.png")
+                    changed = change is not None and change >= cfg.threshold("bakeoff_min_change", 20.0)
+                    q = q | {"gates": q.get("gates", {}) | {"changed": changed}}
                 rows.append({"scene": scene, "backend": backend, "level": level, "status": status,
-                             "reason": red.get("reason"), "seconds": red.get("seconds"),
+                             "reason": reason, "seconds": red.get("seconds"),
                              "peak_memory_gb": red.get("peak_memory_gb"), "where": red.get("where"),
-                             "geometry": geo, "qa": q, "pass": bool(q.get("pass")), "score": q.get("score")})
+                             "geometry": geo, "qa": q, "change": change,
+                             "pass": bool(q.get("pass")) and bool(changed), "score": q.get("score")})
     return rows
 
 
@@ -74,6 +128,8 @@ def aggregate(rows: list[dict]) -> dict[str, dict]:
             continue
         if row["status"] != "ok":
             agg["failed"] += 1
+            if row["status"] == "failed":
+                agg["reasons"].add(f'{row["level"]} failed: {row["reason"]}')
             continue
         agg["images"] += 1
         agg["passes"] += row["pass"]
@@ -125,7 +181,14 @@ def sprite_rows(cfg: Config) -> list[dict]:
     for character in test.get("characters", {}):
         for backend in test.get("backends", []):
             rec = _read(sprite_test.job_dir(cfg, character, backend) / "record.json").get("summary", {})
-            rows.append({"character": character, "backend": backend, **({"status": "not run"} | rec)})
+            row = {"character": character, "backend": backend, **({"status": "not run"} | rec)}
+            # Far less frame-to-frame change than the original walk means the model ignored the
+            # pose and drew one still figure; the pose-IoU gate alone lets that through.
+            low = cfg.threshold("sprite_min_flicker_ratio", 0.6)
+            if row.get("status") == "ok" and (row.get("flicker_ratio") or 0) < low:
+                row["pass"] = False
+                row["note"] = f"static: flicker ratio {row.get('flicker_ratio')} < {low} (pose ignored)"
+            rows.append(row)
     return rows
 
 
@@ -173,7 +236,8 @@ def _fig(cfg: Config, src: Path, name: str, caption: str, cls: str = "") -> str:
 
 def _badges(row: dict) -> str:
     if row["status"] != "ok":
-        return f'<span class="bad">{html.escape(row["status"])}</span>'
+        why = f': {row["reason"]}' if row.get("reason") else ""
+        return f'<span class="bad">{html.escape(row["status"] + why)}</span>'
     q = row["qa"]
     gates = q.get("gates", {})
     parts = []
@@ -206,8 +270,8 @@ def contact_sheet(cfg: Config, rows: list[dict], aggs: dict, picks: dict, sprite
                 row = next(r for r in rows if r["scene"] == scene and r["backend"] == backend and r["level"] == level)
                 gdir = geometry.job_dir(cfg, scene, backend, level)
                 tag = f"s{scene}-{backend}-{level}"
-                if row["status"] == "unavailable":
-                    cells.append(f'<td class="na">unavailable: {html.escape(row["reason"] or "")}</td>')
+                if row["status"] in ("unavailable", "failed", "not run"):
+                    cells.append(f'<td class="na">{row["status"]}: {html.escape(row["reason"] or "")}</td>')
                     continue
                 figs = _fig(cfg, gdir / "final.png", tag, _badges(row))
                 if level == "L2":
@@ -268,20 +332,22 @@ Click a thumbnail for the full image. Local only: game-derived images.</p>
 
 
 def markdown(cfg: Config, rows: list[dict], aggs: dict, picks: dict, sprites: list[dict], sprite_pick: dict) -> str:
-    out = ["| backend | images | passed | mean score | mean s/image | peak GB | not run because |",
-           "| --- | ---: | ---: | ---: | ---: | ---: | --- |"]
+    out = ["| backend | images | passed | failed / not run | mean score | mean s/image | peak GB | not run because |",
+           "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |"]
     for b, a in aggs.items():
-        out.append(f'| `{b}` | {a["images"]} | {a["passes"]} | {a["mean_score"]} | {a["mean_seconds"]} | '
-                   f'{a["peak_memory_gb"]} | {"; ".join(a["reasons"])} |')
-    out += ["", "| scene | backend | level | pass | score | s | GB | warp p95 px | stretch | found | gates failed |",
-            "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |"]
+        out.append(f'| `{b}` | {a["images"]} | {a["passes"]} | {a["failed"] + a["unavailable"]} | '
+                   f'{a["mean_score"]} | {a["mean_seconds"]} | {a["peak_memory_gb"]} | {"; ".join(a["reasons"])} |')
+    out += ["", "| scene | backend | level | pass | score | change | s | GB | warp p95 px | stretch | found | gates failed |",
+            "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"]
     for r in rows:
         if r["status"] != "ok":
+            out.append(f'| {r["scene"]} | `{r["backend"]}` | {r["level"]} | {r["status"]} | | | | | | | | '
+                       f'{r["reason"] or ""} |')
             continue
         q, g = r["qa"], r["geometry"]
         failed = [k for k, v in q.get("gates", {}).items() if v is False]
         out.append(f'| {r["scene"]} | `{r["backend"]}` | {r["level"]} | {"yes" if r["pass"] else "no"} | '
-                   f'{r["score"]} | {r["seconds"]} | {r["peak_memory_gb"] or "-"} | {g.get("disp_p95")} | '
+                   f'{r["score"]} | {r["change"]} | {r["seconds"]} | {r["peak_memory_gb"] or "-"} | {g.get("disp_p95")} | '
                    f'{g.get("max_stretch")} | {q.get("found_ratio")} | {", ".join(failed)} |')
     out += ["", "| character | backend | status | pass | flicker x | drift excess | pose IoU | s/image | GB |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]

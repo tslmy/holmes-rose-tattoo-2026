@@ -130,6 +130,8 @@ l1_max_drift_px = 4.0          # ... and at L1
 warp_grid_spacing_px = 40      # control-grid spacing of the room warp (original px)
 warp_smoothness = 2.0
 qa_confident_score = 0.2       # objects found this confidently in the original must be found again
+bakeoff_min_change = 20.0     # bake-off: mean |shipped - original| (0-255) below this is not a remaster
+sprite_min_flicker_ratio = 0.6 # sprite test: less motion than this vs the baseline walk = one still pose
 sprite_max_flicker_ratio = 1.5 # sprite test: frame-to-frame change vs the ESRGAN baseline
 sprite_max_drift_excess = 0.1  # DINOv2 drift beyond the baseline's own pose variation
 sprite_min_pose_iou = 0.7

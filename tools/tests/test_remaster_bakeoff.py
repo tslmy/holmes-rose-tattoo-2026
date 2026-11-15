@@ -323,5 +323,50 @@ class PickTest(unittest.TestCase):
                                                       "why": "passed flicker, drift and pose gates"})
 
 
+class ReportGuardTest(unittest.TestCase):
+    """Guards added after reviewing the first remote bake-off by eye."""
+
+    def test_unchanged_redraw_is_not_a_remaster(self):
+        from PIL import Image
+        from remaster.stages import prepare
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "remaster.toml"
+            path.write_text("[golden]\nscenes = [4]\n")
+            cfg = load_config(path)
+            plate = prepare.out_root(cfg) / "scene_004" / "plate.png"
+            plate.parent.mkdir(parents=True)
+            Image.new("RGB", (32, 24), (90, 110, 160)).save(plate)
+            same, other = Path(tmp) / "same.png", Path(tmp) / "other.png"
+            Image.new("RGB", (64, 48), (92, 110, 158)).save(same)
+            Image.new("RGB", (64, 48), (150, 140, 90)).save(other)
+            self.assertLess(bakeoff.change_from_original(cfg, 4, same), 20)
+            self.assertGreater(bakeoff.change_from_original(cfg, 4, other), 20)
+            self.assertIsNone(bakeoff.change_from_original(cfg, 4, Path(tmp) / "missing.png"))
+
+    def test_failure_reason_pulls_the_server_message(self):
+        from remaster.jobs import Job
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "job.log"
+            log.write_text('Traceback ...\nRuntimeError: HTTP 422 from http://x: {"detail":[{"msg":"Value error, '
+                           'strength is supported only for FLUX.2 image-to-image requests","input":{}}]}\n')
+            job = Job("redraw-bg:k", "redraw-bg", "k", {}, "", [], [], 0.0, "failed", 3, 3, None,
+                      f"exit 1; log {log}", {})
+            self.assertEqual(bakeoff._failure_reason(job),
+                             "Value error, strength is supported only for FLUX.2 image-to-image requests")
+
+    def test_static_sprite_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "remaster.toml"
+            path.write_text('[bakeoff.sprite_test]\nbackends = ["x"]\n[bakeoff.sprite_test.characters.watson]\n'
+                            'file = "W.VGS"\n')
+            cfg = load_config(path)
+            rec = sprite_test.job_dir(cfg, "watson", "x") / "record.json"
+            rec.parent.mkdir(parents=True)
+            rec.write_text(json.dumps({"summary": {"status": "ok", "pass": True, "flicker_ratio": 0.44}}))
+            row = bakeoff.sprite_rows(cfg)[0]
+            self.assertFalse(row["pass"])
+            self.assertIn("static", row["note"])
+
+
 if __name__ == "__main__":
     unittest.main()
