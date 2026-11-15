@@ -28,9 +28,18 @@ disable_thinking = true
 [image]
 # Backend per asset class. Names refer to entries under [image.backends].
 # Provisional until the Phase 1 bake-off; recorded in review/queue.md.
-backgrounds = "flux3-klein-edit"
+backgrounds = "remote-flux2-klein-4b"   # decision #14 (2026-11-15)
 sprites = "esrgan"
-casting = "flux3-klein-edit"
+casting = "remote-flux2-klein-4b"
+
+[image.backends.remote-flux2-klein-4b]
+# mflux on the second laptop; see docs/local-models.md "Remote image server".
+# Send `image` (base64) to edit. The server sets steps itself. Key from the environment only.
+tool = "http"
+url = "http://10.0.0.26:8000/v1/images/generations"
+model = "flux2-klein-4b"
+api_key_env = "REMASTER_IMAGE_API_KEY"
+fallback = "flux3-klein-edit"           # local, when the remote laptop is off
 
 [image.backends.flux2-klein-edit]
 tool = "mflux-generate-flux2-edit"

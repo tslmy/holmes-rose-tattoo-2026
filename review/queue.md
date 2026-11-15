@@ -7,31 +7,11 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (3)
+## Pending (0)
 
-### #8 `mflux-project-pin` · decision: mflux version for the project environment
+Nothing waiting.
 
-- **Default in use:** mflux 0.24.0 as an isolated `uv tool`; project `zimage` extra left on git mflux 0.18.1
-- **Options:** keep; bump the zimage extra to mflux>=0.24 (re-test tools/img2img/z_image*.py)
-- Raised 2026-11-14
-
-Isolation avoided touching other agents' in-flight img2img changes.
-
-### #9 `launchd-autoresume` · approval: Auto-restart the runner after reboot
-
-- **Default in use:** not installed; after a reboot run `uv run remaster run` by hand (jobs resume)
-- **Options:** install: uv run remaster launchd > ~/Library/LaunchAgents/local.shcrt.remaster-runner.plist && launchctl load that file
-- Raised 2026-11-14
-
-### #14 `image-backend-provisional` · decision: Provisional image backend for plates and casting until the Phase 1 bake-off
-
-- **Default in use:** flux3-klein-edit for backgrounds and casting; esrgan for sprites
-- **Options:** flux2-klein-edit; qwen21-edit (at higher strength); zimage-controlnet
-- Raised 2026-11-14
-
-One smoke image each from the scene-26 plate (docs/local-models.md): FLUX 3 Klein kept the layout best at the lowest memory (12.9 GB, 225 s). Phase 1 decides by gate scores.
-
-## Decided or done (12)
+## Decided or done (15)
 
 ### #1 `download-flux2-klein-9b-q4` · download (9.5 GB): FLUX.2 klein 9B (4-bit) for edit / casting candidates
 
@@ -110,6 +90,22 @@ Objects needing a set flag are skipped (e.g. 5 in scene 4). Listed per scene in 
 - **Status:** confirmed, decision: keep
 - Raised 2026-11-14, updated 2026-11-14
 
+### #8 `mflux-project-pin` · decision: mflux version for the project environment
+
+- **Default in use:** mflux 0.24.0 as an isolated `uv tool`; project `zimage` extra left on git mflux 0.18.1
+- **Options:** keep; bump the zimage extra to mflux>=0.24 (re-test tools/img2img/z_image*.py)
+- **Status:** confirmed, decision: keep, but I don't think this matters materially, as we are using a remote img-gen backend now. BTW and FYI, the remote uses mflux 0.24.0.
+- Raised 2026-11-14, updated 2026-11-15
+
+Isolation avoided touching other agents' in-flight img2img changes.
+
+### #9 `launchd-autoresume` · approval: Auto-restart the runner after reboot
+
+- **Default in use:** not installed; after a reboot run `uv run remaster run` by hand (jobs resume)
+- **Options:** install: uv run remaster launchd > ~/Library/LaunchAgents/local.shcrt.remaster-runner.plist && launchctl load that file
+- **Status:** confirmed, decision: keep
+- Raised 2026-11-14, updated 2026-11-15
+
 ### #10 `push-fork-branch` · approval: Push the ScummVM fork branch so the submodule pointer is real
 
 - **Default in use:** not pushed: the branches diverged, so a push would be a force-push (see detail)
@@ -153,6 +149,15 @@ Multi-reference editing (up to 10 refs), strong text rendering; 16-step distille
 Downloaded and smoke-tested 2026-11-14 (docs/local-models.md).
 
 Done: downloaded and smoke-tested 2026-11-14. The alternatives above stay open; ask to swap any time.
+
+### #14 `image-backend-provisional` · decision: Provisional image backend for plates and casting until the Phase 1 bake-off
+
+- **Default in use:** flux3-klein-edit for backgrounds and casting; esrgan for sprites
+- **Options:** flux2-klein-edit; qwen21-edit (at higher strength); zimage-controlnet
+- **Status:** overturned, decision: remote-flux2-klein-4b for backgrounds and casting (flux2-klein-4b on the second laptop's image server; local flux3-klein-edit as fallback); esrgan for sprites
+- Raised 2026-11-14, updated 2026-11-15
+
+One smoke image each from the scene-26 plate (docs/local-models.md): FLUX 3 Klein kept the layout best at the lowest memory (12.9 GB, 225 s). Phase 1 decides by gate scores.
 
 ### #15 `disk-after-weights` · info: Free disk after Phase 0 downloads: 23 GB
 

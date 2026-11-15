@@ -143,12 +143,12 @@
         "keep",
         "bump the zimage extra to mflux>=0.24 (re-test tools/img2img/z_image*.py)"
       ],
-      "status": "pending",
-      "decision": "",
+      "status": "confirmed",
+      "decision": "keep, but I don't think this matters materially, as we are using a remote img-gen backend now. BTW and FYI, the remote uses mflux 0.24.0.",
       "size_gb": null,
       "images": [],
       "created": "2026-11-14T21:39:18-08:00",
-      "updated": "2026-11-14T21:39:18-08:00"
+      "updated": "2026-11-15T09:58:04-08:00"
     },
     {
       "id": "launchd-autoresume",
@@ -159,12 +159,12 @@
       "options": [
         "install: uv run remaster launchd > ~/Library/LaunchAgents/local.shcrt.remaster-runner.plist && launchctl load that file"
       ],
-      "status": "pending",
-      "decision": "",
+      "status": "confirmed",
+      "decision": "keep",
       "size_gb": null,
       "images": [],
       "created": "2026-11-14T21:39:18-08:00",
-      "updated": "2026-11-14T21:39:18-08:00"
+      "updated": "2026-11-15T09:58:47-08:00"
     },
     {
       "id": "push-fork-branch",
@@ -238,8 +238,8 @@
         "qwen21-edit (at higher strength)",
         "zimage-controlnet"
       ],
-      "status": "pending",
-      "decision": "",
+      "status": "overturned",
+      "decision": "remote-flux2-klein-4b for backgrounds and casting (flux2-klein-4b on the second laptop's image server; local flux3-klein-edit as fallback); esrgan for sprites",
       "size_gb": null,
       "images": [
         "work/smoke/flux3-klein-edit/output.png",
@@ -248,7 +248,7 @@
         "work/smoke/zimage-controlnet/output.png"
       ],
       "created": "2026-11-14T22:16:39-08:00",
-      "updated": "2026-11-14T22:16:39-08:00"
+      "updated": "2026-11-15T09:56:06-08:00"
     },
     {
       "id": "disk-after-weights",

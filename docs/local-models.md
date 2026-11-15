@@ -134,6 +134,35 @@ ControlNet weights were removed with `hf cache rm` to free disk; those two
 backends re-download (18.5 GB and 15.3 GB plus 6.7 GB) on next use. FLUX 3
 Klein and FLUX.2 klein 9B remain.
 
+### Remote image server
+
+A second laptop serves mflux behind an OpenAI-style
+`POST http://10.0.0.26:8000/v1/images/generations` (bearer key, kept out of
+the repo; `GET /healthz` lists models). Request fields: `prompt`, `model`,
+`width`, `height`, `seed`, optional base64 `image` for editing. There is no
+steps or strength field, so the server's defaults apply. Profiled on
+2026-11-15 with `REMASTER_IMAGE_API_KEY=... uv run python -m
+remaster.remote_profile` (same 1024x768 scene-26 input, prompt and seed as
+the local smoke; three runs each; the first includes the model load).
+Records are in `work/smoke/remote/profile.json`.
+
+| Model | Text-to-image first / warm | Edit first / warm | What the edit showed |
+| --- | ---: | ---: | --- |
+| `flux3-image-klein` | 17.9 s / 13.0 s | 36.5 s / 29.6 s | Almost identical to the input: lamps and figures redrawn slightly, no photoreal shift. The local 16-step run changed far more, so the server's step or strength default probably differs. |
+| `flux2-klein-4b` | 8.2 s / 4.0 s | 12.3 s / 7.3 s | Convincing photoreal restyle (wood grain, rugs, lit lamps) with the layout, figures and props kept. |
+| `flux2-klein-9b` | 37.4 s / 10.1 s | 22.8 s / 18.6 s | Similar to the 4B, slightly warmer and richer; layout kept. |
+
+The server reports no memory use. Warm edits are 6 to 30 times faster than
+the local runs (225 s for FLUX 3 Klein, 112 s for FLUX.2 9B), and this Mac's
+memory stays free. Text-to-image from all three gave plausible Victorian
+billiard rooms.
+
+**Decision #14 (2026-11-15):** `remote-flux2-klein-4b` is now the provisional
+backend for backgrounds and casting in `remaster.toml`, with local
+`flux3-klein-edit` as the fallback when the remote laptop is off. It is the
+fastest backend, edits as well as the 9B, and is Apache-2.0. Phase 1's
+bake-off can still change it.
+
 All four load and produce an image on this machine. These are single
 smoke images, not a bake-off: choosing a backend is Phase 1's job. Run one
 again with `uv run python -m remaster.mflux_smoke <backend> [--extra ...]`.
