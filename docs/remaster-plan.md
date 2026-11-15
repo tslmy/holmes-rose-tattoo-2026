@@ -24,6 +24,26 @@
 > here), and installing the launchd auto-restart. Remaining stages are stubs
 > that print what they will do.
 
+> **Status, 2026-11-15: Phase 1 bake-off run; picks queued** (details:
+> `docs/bakeoff-results.md`). Stages `brief`, `baseline`, `redraw-bg`,
+> `geometry` (room warp, protected regions, layer re-segmentation), `qa`,
+> `sprite-test` and `delegate` run as queue jobs; all diffusion goes to the
+> second laptop's image server. Three remote models ran at L0/L1/L2 on the 7
+> golden rooms, plus a cast-conditioned Holmes/Watson walk test.
+> **Provisional picks:**
+> - FLUX.2 klein 9B for backgrounds, at L2 for scenes 4 and 9; the other
+>   five rooms stay on the ESRGAN baseline.
+> - FLUX.2 klein 4B for sprites.
+>
+> **What did not work:**
+> - L0/L1 image-to-image moved room geometry at strength 0.6/0.45.
+> - FLUX.3 refuses `strength`, and its L2 edit barely changes the picture.
+> - 9B L2 often adds people.
+> - Protected patches need colour matching.
+> - The L2 warp handles kept compositions but not recompositions.
+>
+> Phase 2 batches have not started.
+
 Written 2026-11-14. This supersedes the "what's next" notes scattered across
 the other docs. It is a plan, not a record of work done.
 
@@ -143,9 +163,16 @@ Repo hygiene issues found:
    the provisional default and is tagged with it, so an overturned decision
    re-queues exactly the affected assets. Jobs run from a persistent queue
    under `caffeinate`, resumable after sleep, crash or reboot.
-11. **Cloud tokens only for engine C++ and pipeline design.** Every batch job
-   is a plain resumable Python process. The local LLM writes prompt briefs
-   and judges QA; it does not write engine code.
+11. **Cloud tokens for specs, reviews and engine C++ design; local models
+   do the engineering.** Every batch job is a plain resumable Python process.
+   The local LLM writes prompt briefs and judges QA. Implementation, test
+   writing, test fixing and mechanical script work go to headless OpenCode
+   on the local-model endpoints (qwen3.8-27b on the second laptop, Ollama as
+   fallback) as `delegate` jobs in the queue; Opus writes the spec,
+   interfaces and acceptance test for each, then reviews the diff and the
+   gate results. Opus keeps only what the local model demonstrably fails at
+   (each case recorded with the reason, so the split can be tuned) and
+   ScummVM C++ design (decided 2026-11-15).
 
 ## Target pipeline
 
@@ -240,11 +267,13 @@ premultiplied RGBA, alpha recovered by rendering over two backgrounds).
 | Python batch jobs | All extraction, generation, interpolation, audits |
 | LM Studio text model | Scene briefs, summarising QA reports into re-queue decisions |
 | LM Studio vision model (to add) | Original-vs-redraw review, sign/text checks |
-| OpenCode + local model | Unattended triage loop over failed QA items; small script edits with tests. Needs context raised to >= 32k |
-| Opus | Engine C++, pipeline skeleton, gate design, phase reviews |
+| OpenCode + local model | **Default for engineering**: stage implementations, tests, test fixes, mechanical script edits, the triage loop over failed QA items. Runs as `uv run remaster delegate` jobs: each task is a TOML in `tools/remaster/delegate_tasks/` (spec prompt, the files it may change, an acceptance test); the job records the transcript, diff, time and test result under `work/delegate/` and retries once with the test output before failing to the reviewer |
+| Image server (second laptop) | All diffusion (`[image].local_generation = false` keeps it off this Mac's GPU) |
+| Opus | Specs, interfaces and acceptance tests for delegated work; diff and gate review; phase reviews; ScummVM C++ design; work the local model was shown to fail at, recorded in the phase's results doc with why |
 
-`lms unload` the LLM while a diffusion batch runs; 32 GB does not hold both
-comfortably at 4x.
+The LLM and the image server both run on the second laptop, so no local
+model needs unloading for a batch; if the Ollama fallback is in use, stop
+it (`ollama stop qwen3.5-9b-32k`) before any local diffusion.
 
 ## Risks
 
