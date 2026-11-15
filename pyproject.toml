@@ -37,6 +37,10 @@ openai = [
 zimage = [
     "mflux>=0.18.1",
 ]
+bakeoff = [
+    "opencv-python-headless>=4.10",
+    "transformers>=4.50",
+]
 
 [build-system]
 requires = ["hatchling>=1.24"]
