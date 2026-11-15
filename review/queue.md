@@ -7,9 +7,79 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (0)
+## Pending (9)
 
-Nothing waiting.
+### #16 `download-detector-dino` · download (0.68 GB): Downloaded OWLv2 detector and DINOv2-small for the geometry and sprite gates
+
+- **Default in use:** Downloaded google/owlv2-base-patch16-ensemble (0.59 GB) and facebook/dinov2-small (0.08 GB) into the Hugging Face cache (proceeded)
+- **Options:** keep; swap the detector for Grounding DINO tiny (~0.7 GB)
+- Raised 2026-11-15
+
+Used by `geometry` (named-object anchors for the room warp) and `qa`/`sprite-test` (identity embeddings). The project gained a `bakeoff` extra: opencv-python-headless and transformers.
+
+### #17 `bakeoff-deleted-backends` · decision (40.5 GB): Bake-off is remote-only: local mflux candidates were not run
+
+- **Default in use:** Compared only the remote server's flux2-klein-4b, flux2-klein-9b and flux3-image-klein; [image].local_generation = false keeps diffusion off this Mac's GPU
+- **Options:** also run the local-only candidates: set local_generation = true and add flux2-klein-img2img (strength levels) to [bakeoff].backends; re-download Qwen-Image 2.1 (18.5 GB) and Z-Image ControlNet (22 GB), deleted by decision #15, and run them locally; ask for strength/steps fields on the remote server so img2img strengths can run there
+- Raised 2026-11-15, updated 2026-11-15
+
+Changed 2026-11-15 after you saw high local GPU use: the remote 9B and FLUX 3 Klein are the same models as the local flux2-klein-edit and flux3-klein-edit, so local runs only duplicated them. Scene 4 L0/L1 from the local flux2-klein-edit (145 s each, before the switch) stay on disk but are not in the comparison. Still local, but light: ESRGAN baseline (seconds per image) and the OWLv2/DINOv2 checks on MPS. The remote backend's `fallback = flux3-klein-edit` is inactive while local generation is off.
+
+### #18 `bakeoff-backend` · decision: Phase 1 pick: image backend for backgrounds (by gate scores)
+
+- **Default in use:** remote-flux2-klein-9b (2/21 results passed, mean score 0.621)
+- **Options:** remote-flux2-klein-4b (0/21 passed, score 0.535); remote-flux3-image-klein (0/7 passed, score 0.859)
+- Raised 2026-11-15, updated 2026-11-15
+
+Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).
+
+### #19 `bakeoff-settings` · decision: Phase 1 pick: settings for that backend
+
+- **Default in use:** {"levels": {"L0": {"steps": 8, "strength": 0.6}, "L1": {"steps": 8, "strength": 0.45}, "L2": {"steps": 8}}, "model": "flux2-klein-9b", "multi_image": true, "tool": "http"}; seed 7; ~1 MP generation; level instruction appended to the brief
+- **Options:** other strengths/levels from docs/bakeoff-results.md
+- Raised 2026-11-15, updated 2026-11-15
+
+The 4x tiled detail pass is not part of the bake-off (Phase 2).
+
+### #20 `bakeoff-room-levels` · decision: Phase 1 pick: freedom level per golden room
+
+- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: L2; 2: baseline; 9: L2; 36: baseline
+- **Options:** set a room to L0 / L1 / L2 / baseline
+- Raised 2026-11-15, updated 2026-11-15
+
+Most ambitious level whose result passed every known gate with the picked backend; 'baseline' = no level passed, the room keeps the ESRGAN baseline. Reasons per room in docs/bakeoff-results.md; overlays for L2 in work/bakeoff/contact.html (local).
+
+### #21 `bakeoff-sprite-route` · decision: Phase 1 pick: route for character sprites
+
+- **Default in use:** identity-conditioned with remote-flux2-klein-4b
+- **Options:** identity-conditioned redraw with a named backend; sr-baseline until Phase 3
+- Raised 2026-11-15, updated 2026-11-15
+
+passed flicker, drift and pose gates
+
+### #22 `bakeoff-l0l1-drift` · decision: L0/L1 (img2img at strength 0.6 / 0.45) move the room's geometry
+
+- **Default in use:** Leave L0/L1 configured but unused: no golden room picks them. FLUX.2 img2img still moves and resizes furniture (scene 26: billiards table, door) and adds people at these strengths; drift p95 8-400 px against the 2/4 px limits
+- **Options:** sweep 9B at strength 0.75 / 0.85 / 0.9 on the 7 golden scenes (~21 remote jobs, ~20 min) before Phase 2; drop L0/L1 and keep L2 + baseline only
+- Raised 2026-11-15
+
+FLUX.3 refuses strength (HTTP 422: FLUX.2 image-to-image only), so it has no L0/L1. docs/bakeoff-results.md
+
+### #23 `bakeoff-protected-paste` · decision: Protected writing/clue patches show as flat grey blocks when the redraw relights the room
+
+- **Default in use:** Fix in Phase 2 before batches: colour-match each pasted patch to the redraw around it (e.g. seamless clone or a local mean/variance transfer) and keep the mask feather; until then such rooms fail the VLM gate and stay on baseline
+- **Options:** paste only writing, let clues be redrawn and checked by the object gate
+- Raised 2026-11-15
+
+Seen on scene 18 (stairs, obelisk base) and scene 2 (left wall). The VLM flagged scene 18 ('white rectangular blocks').
+
+### #24 `bakeoff-scene4-fires` · decision: Scene 4 at L2 (9B) invented fires behind the police-station windows; the VLM gate did not catch it
+
+- **Default in use:** Keep scene 4 at L2 provisionally; please look at work/bakeoff/contact.html scene 4. Phase 2 QA should ask the VLM about light sources and fire explicitly
+- **Options:** set scene 4 to baseline; regenerate scene 4 with another seed
+- Raised 2026-11-15
+
+The VLM only fails on removed objects or added people; added light/fire lowers the score but does not fail.
 
 ## Decided or done (15)
 

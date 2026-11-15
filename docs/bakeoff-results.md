@@ -1,0 +1,292 @@
+# Phase 1 bake-off results
+
+Run 2026-11-15 on the golden set (scenes 1, 26, 18, 4, 2, 9, 36; Holmes and
+Watson) through `uv run remaster run`, then `uv run remaster bakeoff-report`.
+Images and the contact sheet stay local (`work/bakeoff/contact.html`, game
+data). This doc records the numbers, the provisional picks and what did not
+work. Every pick is queued in `review/queue.md` and used meanwhile.
+
+## Provisional picks
+
+| Decision | Pick | Review item |
+| --- | --- | --- |
+| Background backend | `remote-flux2-klein-9b` (FLUX.2 klein 9B on the image server) | `bakeoff-backend` |
+| Settings | seed 7, ~1 MP (1152x864 for 640x480), 8 steps; L2 = reference edit with no `strength` | `bakeoff-settings` |
+| Level per room | 4: L2, 9: L2; 1, 26, 18, 2, 36: ESRGAN baseline | `bakeoff-room-levels` |
+| Sprite route | identity-conditioned redraw with `remote-flux2-klein-4b` | `bakeoff-sprite-route` |
+
+9B is the only backend whose redraws both pass every gate and change the
+picture: 2 of 21 results (scenes 4 and 9 at L2). Five rooms keep the
+baseline for now. Each fails one or two gates at L2; the reasons are below,
+and most of the failures are real: 9B adds people the original does not have.
+
+The 4B wins for sprites: both characters pass flicker, identity drift and
+pose, and it is the fastest (8.5-13 s per frame). 9B passes too, at 27-28 s
+per frame.
+
+## What the levels are
+
+The image server takes `strength` (share of the input kept, mflux
+semantics), `steps`, `guidance` and up to 8 reference `images`.
+
+- **L0**: img2img at strength 0.6.
+- **L1**: img2img at strength 0.45.
+- **L2**: the free reference edit, with no strength.
+
+All three use 8 steps. Geometry ships an identity warp for L0/L1, so their
+drift must stay under 2 and 4 px p95. For L2 it ships the fitted room warp.
+
+The first run had L0-L2 differing only by one prompt sentence, so it was
+discarded (mean pixel difference between levels 2-14/255). Its 14 FLUX.3
+L0/L1 files are still on disk; the report now takes job state from the
+queue, so they show as failed.
+
+## Per backend and level
+
+Times are wall-clock seconds per request on the shared second laptop. The
+27B LLM was answering QA on the same machine, so expect ±50%. Peak memory is
+not measured for remote jobs. "Change" is the mean |shipped - original|
+(0-255) at the original size.
+
+| backend | level | results | passed | mean s | mean score | change | warp gate ok | median p95 drift px |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| flux2-klein-4b | L0 | 7 | 0 | 36 | 0.51 | 23 | 0 | 74 |
+| flux2-klein-4b | L1 | 7 | 0 | 10 | 0.44 | 31 | 0 | 97 |
+| flux2-klein-4b | L2 | 7 | 0 | 30 | 0.65 | 37 | 5 | 11 |
+| flux2-klein-9b | L0 | 7 | 0 | 50 | 0.59 | 24 | 0 | 19 |
+| flux2-klein-9b | L1 | 7 | 0 | 26 | 0.51 | 33 | 0 | 110 |
+| flux2-klein-9b | L2 | 7 | **2** | 63 | 0.76 | 42 | 6 | 11 |
+| flux3-image-klein | L0/L1 | 0 | - | - | - | - | - | - |
+| flux3-image-klein | L2 | 7 | 0 | 57 | 0.86 | 15 | 7 | 2 |
+
+**FLUX.3 L0/L1 never ran.** The server returns HTTP 422 because "strength is
+supported only for FLUX.2 image-to-image requests". That was recorded as a
+failure on the first attempt, not retried.
+
+**FLUX.3 L2 is close to a no-op.** It returns the input almost unchanged
+(change 8-22). That is why it passes the geometry gates and scores highest.
+The VLM rates the original 3D renders about as photoreal as a real remaster
+(8/10), so the photoreal score did not catch it. A new gate,
+`bakeoff_min_change = 20`, now requires a redraw to change the picture.
+Without it, FLUX.3 would have been the pick.
+
+**L0/L1 do not preserve geometry on FLUX.2.** At strength 0.6, image-to-image
+still moves and resizes furniture (scene 26: the billiards table grows, the
+door moves). At 0.45 it adds people (a second barman). The warp gate is right
+to fail all 28. Whether 0.75-0.9 keeps geometry while still remastering is
+open (`bakeoff-l0l1-drift`).
+
+**Local runs, before diffusion moved to the image server.** FLUX.2 klein 9B
+in mflux took 144 s and 23.2 GB peak per image on this Mac. The local
+Qwen-Image 2.1 and Z-Image + ControlNet candidates were not run. Their weights
+were deleted to free disk, and `[image].local_generation = false` keeps
+diffusion off this Mac (`bakeoff-deleted-backends`). The optional paid GPT
+Image comparison was not run.
+
+## Why the five baseline rooms failed (9B L2)
+
+| scene | gates failed | what it is |
+| ---: | --- | --- |
+| 1 | order | One left-right inversion. The VLM also lists an added lantern, books and a menu board (score only) |
+| 26 | objects, floor | The model zoomed in about 1.2x. The billiards table is not re-detected under the new framing, and the floor check doubts a walk zone that now runs under the corner table |
+| 18 | vlm, floor | The model added six people on the stairs and lit sconces on the walls |
+| 2 | objects, vlm, floor | Five objects not re-detected (fireplace, bedroom door, chair among them). The model added a seated man, a woman and a dog |
+| 36 | warp, vlm | Recomposed: people moved and new ones added (p95 drift 75 px, stretch 1.66 > 1.6) |
+
+Adding people is 9B's most common failure at L2. The brief and the level
+sentence say to keep every figure, so Phase 2 should try a negative-people
+instruction, or mask people out of the edit, before giving up on those rooms.
+
+Full per-row results are at the end.
+
+## Checked by eye, not caught by the gates
+
+**Scene 4, 9B L2: invented fires.** Flames appear behind the
+police-station windows. The VLM gate fails only on removed objects or added
+people, so it passed. Queued as `bakeoff-scene4-fires`. Phase 2 QA should ask
+about new light sources and fire.
+
+**Grey protected patches.** Writing and clue regions (≤ 8% of the room)
+are pasted from the ESRGAN baseline with a feathered mask. When the redraw
+relights the room, they stand out as flat grey rectangles. This shows on
+FLUX.3 L2: scene 18 on the stairs and the obelisk base, and scene 2 on the
+left wall. They need colour
+matching to the redraw before Phase 2 (`bakeoff-protected-paste`).
+
+**Static sprite passing.** Watson on FLUX.3 drew one frontal standing pose
+in every frame and passed the pose gate (IoU 0.84). A minimum-motion check
+now fails it (`sprite_min_flicker_ratio = 0.6`, flicker 0.44).
+
+## The L2 room warp, honestly
+
+The warp model is m(p) = s·(p + d(p)): a global scale times a smooth
+displacement on a 40 px grid. It is fitted from SIFT + MAGSAC, DIS optical
+flow and OWLv2 object anchors.
+
+**Where it works.** When the model keeps the composition, the fitted warp
+is invertible and hotspots land on their objects. On scene 9 (9B) the
+hotspots sit on the paintings, busts, fireplace and seated man, and the walk
+zones sit on the floor. On scenes 4 and 1 they line up as well. Across all
+L2 results, 18 of 21 pass the warp gate (det > 0.05, stretch ≤ 1.6,
+round-trip ≤ 0.5 px), with a median p95 drift of 11 px for FLUX.2.
+
+**Where it fails.**
+- **Recomposition is beyond a smooth warp.** 9B scene 36 (p95 75 px,
+  stretch 1.66) and 4B scenes 18 and 9 failed. On 4B scene 9, matching found
+  nothing usable, so the stretch is a sentinel.
+- **Zoom or crop is only partly handled.** Scene 26's zoom is absorbed by
+  the scale term, but a walk zone ends up under furniture.
+- **Added objects go unnoticed.** The warp moves existing hotspots and has
+  no idea that a new obstacle appeared, such as the side table and floor lamp
+  9B added in scene 9. The object gate checks only objects that exist in the
+  original.
+
+**Not yet verified.** Walk-zone overlays were checked by eye only on scenes
+26 and 9. The engine-side warp (Phase 4) has not been built, so no hotspot
+has been clicked in-game.
+
+## Sprite test
+
+Each test redraws a cast sheet from frame 88, then walk frames 24-31 at
+384x768 on grey. The cast sheet is passed as a second reference image.
+
+Results from before the server accepted `images` are invalid as identity
+tests. That server dropped the cast sheet silently; it is now recorded as
+`references_dropped` when it happens. This run had the field.
+
+| character | backend | pass | flicker vs baseline | DINOv2 drift excess | pose IoU | s/frame |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| holmes | 4b | yes | 1.05 | 0.074 | 0.93 | 13.0 |
+| holmes | 9b | yes | 1.09 | -0.035 | 0.93 | 28.1 |
+| holmes | flux3 | yes | 1.19 | 0.019 | 0.89 | 38.5 |
+| watson | 4b | yes | 0.98 | -0.060 | 0.90 | 8.5 |
+| watson | 9b | yes | 1.10 | -0.012 | 0.90 | 27.1 |
+| watson | flux3 | **no** | 0.44 (static) | -0.167 | 0.84 | 42.4 |
+
+**What looks good.** With the cast sheet reaching the model, coat
+silhouettes, the deerstalker and Watson's striped scarf stay recognisably
+the same across the walk. That is better than the earlier unconditioned
+strips.
+
+**What does not.** The fold and stripe detail the user pointed out still
+shifts between frames. The flicker gate (≤ 1.5x the baseline's
+frame-to-frame change) is too loose to catch it. The sprite-consistency
+research (session notes, `sprite-consistency-research.md`) measured a
+temporal warp error about 4x its floor for these redraws. It recommends
+keyframes plus flow propagation and that metric as a gate, for Phase 3.
+
+**Faces** stay small and soft at sprite scale. The face-detail research
+(`face-detail-research.md`) recommends a crop, upscale to 768, regenerate
+and blend-back stage, with a traits prompt or a face reference passed
+through `images`. Not built in Phase 1.
+
+## Delegation
+
+Most Phase 1 engineering was done by Opus before the instruction to
+delegate (2026-11-15). That covers the stages, the warp, the QA gates, the
+report and the disk-check fix; it was not redone to delegate it. After the
+instruction:
+
+- **Delegated to OpenCode on qwen3.8-27b (second laptop)**, as `delegate`
+  queue jobs with an Opus-written spec and acceptance test:
+  - `test-bakeoff-report`: 120 lines, 157 s, passed on attempt 1.
+  - `test-brief-fallback`: 133 lines, 544 s, passed on attempt 1. It also
+    found and documented that a MagicMock client hangs `write_json`.
+
+  Review changed one thing: the report test put its fixture images in the
+  redraw folder rather than the geometry folder. My spec did not say which
+  folder, so this is a spec gap, not a model failure.
+- **Run by local LLMs, no cloud tokens:** all 7 briefs (10-33 s each) and
+  every VLM QA review.
+- **Local-model failures recorded:** none this phase.
+- **Rough share:** about 10% of Phase 1 engineering by lines delegated,
+  plus 100% of briefs and QA judgement. Phase 2 starts delegation-first.
+
+## Pending decisions queued
+
+- `bakeoff-backend`, `bakeoff-settings`, `bakeoff-room-levels`,
+  `bakeoff-sprite-route`: the picks above.
+- `bakeoff-l0l1-drift`: sweep strength 0.75/0.85/0.9 on 9B, or drop L0/L1.
+- `bakeoff-protected-paste`: colour-match pasted patches (Phase 2 fix).
+- `bakeoff-scene4-fires`: keep scene 4 at L2, or set it to baseline.
+- `bakeoff-deleted-backends`: local candidates were not run.
+- `download-detector-dino`: OWLv2 and DINOv2-small downloaded (0.68 GB).
+
+## Per-result tables
+
+Generated by `remaster bakeoff-report` (`work/bakeoff/results.md`).
+
+| scene | backend | level | pass | score | change | s | GB | warp p95 px | stretch | found | gates failed |
+| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| 1 | `remote-flux2-klein-4b` | L0 | no | 0.368 | 25.6 | 57.77 | - | 530.86 | 1000000.0 | 0.0 | warp, objects |
+| 1 | `remote-flux2-klein-4b` | L1 | no | 0.606 | 34.7 | 9.61 | - | 28.34 | 1.481 | 0.643 | warp, objects, offsets |
+| 1 | `remote-flux2-klein-4b` | L2 | no | 0.805 | 51.6 | 20.55 | - | 11.16 | 1.094 | 0.857 | objects, vlm |
+| 1 | `remote-flux2-klein-9b` | L0 | no | 0.637 | 27.7 | 46.16 | - | 32.22 | 1.361 | 0.714 | warp, objects |
+| 1 | `remote-flux2-klein-9b` | L1 | no | 0.601 | 35.8 | 25.19 | - | 55.88 | 1.791 | 0.571 | warp, objects, offsets |
+| 1 | `remote-flux2-klein-9b` | L2 | no | 0.685 | 58.5 | 63.29 | - | 9.46 | 1.128 | 1.0 | order |
+| 1 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 1 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 1 | `remote-flux3-image-klein` | L2 | no | 0.916 | 12.3 | 58.31 | - | 1.47 | 1.023 | 0.929 | objects, changed |
+| 26 | `remote-flux2-klein-4b` | L0 | no | 0.666 | 20.1 | 34.21 | - | 22.64 | 1.199 | 0.778 | warp, objects, vlm |
+| 26 | `remote-flux2-klein-4b` | L1 | no | 0.454 | 30.6 | 9.3 | - | 88.3 | 1.845 | 0.333 | warp, objects, offsets, vlm, floor |
+| 26 | `remote-flux2-klein-4b` | L2 | no | 0.804 | 32.4 | 37.76 | - | 7.42 | 1.085 | 0.778 | objects, floor |
+| 26 | `remote-flux2-klein-9b` | L0 | no | 0.642 | 17.8 | 53.0 | - | 13.75 | 1.129 | 0.667 | warp, objects, floor, changed |
+| 26 | `remote-flux2-klein-9b` | L1 | no | 0.587 | 29.5 | 25.48 | - | 124.37 | 2.045 | 0.556 | warp, objects, offsets, vlm, floor |
+| 26 | `remote-flux2-klein-9b` | L2 | no | 0.877 | 38.7 | 71.95 | - | 22.35 | 1.182 | 0.889 | objects, floor |
+| 26 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 26 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 26 | `remote-flux3-image-klein` | L2 | no | 0.842 | 22.6 | 68.88 | - | 1.03 | 1.009 | 0.778 | objects |
+| 18 | `remote-flux2-klein-4b` | L0 | no | 0.425 | 13.1 | 33.23 | - | 102.64 | 2.245 | 0.6 | warp, vlm, floor, changed |
+| 18 | `remote-flux2-klein-4b` | L1 | no | 0.38 | 17.3 | 13.1 | - | 117.6 | 2.785 | 0.4 | warp, objects, offsets, vlm, changed |
+| 18 | `remote-flux2-klein-4b` | L2 | no | 0.631 | 21.3 | 39.18 | - | 78.53 | 1.733 | 1.0 | warp, vlm, floor |
+| 18 | `remote-flux2-klein-9b` | L0 | no | 0.507 | 11.7 | 54.44 | - | 19.03 | 1.224 | 0.8 | warp, vlm, floor, changed |
+| 18 | `remote-flux2-klein-9b` | L1 | no | 0.577 | 19.2 | 28.44 | - | 106.73 | 2.464 | 1.0 | warp, offsets, vlm, floor, changed |
+| 18 | `remote-flux2-klein-9b` | L2 | no | 0.671 | 24.9 | 70.0 | - | 59.85 | 1.568 | 0.8 | vlm, floor |
+| 18 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 18 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 18 | `remote-flux3-image-klein` | L2 | no | 0.751 | 18.9 | 65.37 | - | 2.8 | 1.024 | 0.8 | floor, changed |
+| 4 | `remote-flux2-klein-4b` | L0 | no | 0.595 | 26.8 | 6.45 | - | 6.0 | 1.086 | 0.75 | warp, objects, vlm |
+| 4 | `remote-flux2-klein-4b` | L1 | no | 0.554 | 36.5 | 7.66 | - | 21.54 | 1.228 | 0.625 | warp, objects, offsets, vlm |
+| 4 | `remote-flux2-klein-4b` | L2 | no | 0.643 | 44.8 | 16.37 | - | 4.52 | 1.045 | 0.875 | objects, order, vlm |
+| 4 | `remote-flux2-klein-9b` | L0 | no | 0.673 | 29.7 | 22.28 | - | 7.94 | 1.103 | 0.875 | warp, objects, vlm |
+| 4 | `remote-flux2-klein-9b` | L1 | no | 0.589 | 39.7 | 21.36 | - | 19.91 | 1.233 | 0.625 | warp, objects, offsets, vlm |
+| 4 | `remote-flux2-klein-9b` | L2 | yes | 0.87 | 49.1 | 43.91 | - | 9.88 | 1.186 | 1.0 |  |
+| 4 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 4 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 4 | `remote-flux3-image-klein` | L2 | no | 0.944 | 12.1 | 27.9 | - | 1.91 | 1.02 | 1.0 | changed |
+| 2 | `remote-flux2-klein-4b` | L0 | no | 0.484 | 25.6 | 32.78 | - | 74.16 | 3.13 | 0.381 | warp, objects, vlm, floor |
+| 2 | `remote-flux2-klein-4b` | L1 | no | 0.401 | 30.3 | 10.91 | - | 561.61 | 50223.208 | 0.238 | warp, objects, offsets, vlm, floor |
+| 2 | `remote-flux2-klein-4b` | L2 | no | 0.728 | 27.0 | 34.25 | - | 12.11 | 1.159 | 0.762 | objects, vlm, floor |
+| 2 | `remote-flux2-klein-9b` | L0 | no | 0.627 | 24.7 | 54.0 | - | 35.85 | 1.547 | 0.714 | warp, objects, vlm, floor |
+| 2 | `remote-flux2-klein-9b` | L1 | no | 0.491 | 30.7 | 24.36 | - | 129.64 | 175501.087 | 0.429 | warp, objects, offsets, vlm, floor |
+| 2 | `remote-flux2-klein-9b` | L2 | no | 0.776 | 30.1 | 63.09 | - | 10.83 | 1.123 | 0.714 | objects, vlm, floor |
+| 2 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 2 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 2 | `remote-flux3-image-klein` | L2 | no | 0.922 | 11.7 | 61.79 | - | 2.77 | 1.028 | 0.952 | floor, changed |
+| 9 | `remote-flux2-klein-4b` | L0 | no | 0.629 | 14.4 | 45.87 | - | 27.23 | 1.36 | 0.667 | warp, objects, vlm, changed |
+| 9 | `remote-flux2-klein-4b` | L1 | no | 0.345 | 19.8 | 11.02 | - | 343.33 | 1000000.0 | 0.0 | warp, objects, offsets, vlm, floor, changed |
+| 9 | `remote-flux2-klein-4b` | L2 | no | 0.357 | 31.7 | 33.0 | - | 485.19 | 1000000.0 | 0.0 | warp, objects |
+| 9 | `remote-flux2-klein-9b` | L0 | no | 0.585 | 15.0 | 56.82 | - | 7.98 | 1.152 | 0.667 | warp, objects, vlm, changed |
+| 9 | `remote-flux2-klein-9b` | L1 | no | 0.358 | 21.7 | 28.88 | - | 411.98 | 1000000.0 | 0.0 | warp, objects, offsets, vlm, floor |
+| 9 | `remote-flux2-klein-9b` | L2 | yes | 0.863 | 35.3 | 64.06 | - | 8.63 | 1.085 | 1.0 |  |
+| 9 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 9 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 9 | `remote-flux3-image-klein` | L2 | no | 0.919 | 8.1 | 57.22 | - | 1.75 | 1.017 | 1.0 | changed |
+| 36 | `remote-flux2-klein-4b` | L0 | no | 0.422 | 37.6 | 42.25 | - | 101.48 | 2.349 | 0.7 | warp, order, vlm |
+| 36 | `remote-flux2-klein-4b` | L1 | no | 0.321 | 45.5 | 11.04 | - | 97.15 | 5.874 | 0.4 | warp, objects, order, offsets, vlm, floor |
+| 36 | `remote-flux2-klein-4b` | L2 | no | 0.612 | 49.8 | 30.94 | - | 9.57 | 1.133 | 0.8 | order, vlm |
+| 36 | `remote-flux2-klein-9b` | L0 | no | 0.435 | 38.2 | 62.43 | - | 155.08 | 12.062 | 0.7 | warp, order, vlm |
+| 36 | `remote-flux2-klein-9b` | L1 | no | 0.39 | 54.4 | 26.93 | - | 109.57 | 4.055 | 0.5 | warp, objects, order, offsets |
+| 36 | `remote-flux2-klein-9b` | L2 | no | 0.596 | 55.5 | 62.33 | - | 75.44 | 1.66 | 0.7 | warp, vlm |
+| 36 | `remote-flux3-image-klein` | L0 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 36 | `remote-flux3-image-klein` | L1 | failed | | | | | | | | Value error, strength is supported only for FLUX.2 image-to-image requests |
+| 36 | `remote-flux3-image-klein` | L2 | no | 0.722 | 19.1 | 60.67 | - | 3.77 | 1.02 | 0.6 | objects, changed |
+
+| character | backend | status | pass | flicker x | drift excess | pose IoU | s/image | GB |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| holmes | `remote-flux2-klein-4b` | ok | True | 1.05 | 0.0741 | 0.926 | 13.0 | None |
+| holmes | `remote-flux2-klein-9b` | ok | True | 1.094 | -0.0352 | 0.926 | 28.1 | None |
+| holmes | `remote-flux3-image-klein` | ok | True | 1.189 | 0.0191 | 0.888 | 38.5 | None |
+| watson | `remote-flux2-klein-4b` | ok | True | 0.981 | -0.0596 | 0.896 | 8.5 | None |
+| watson | `remote-flux2-klein-9b` | ok | True | 1.099 | -0.0123 | 0.895 | 27.1 | None |
+| watson | `remote-flux3-image-klein` | ok | False | 0.438 | -0.167 | 0.842 | 42.4 | None |
