@@ -5,6 +5,43 @@ Every command below also works with a plain `python3` as long as Pillow is
 installed in the active interpreter; `uv run python3 ...` is the recommended,
 reproducible way to get there (see the root [README](../README.md#setup)).
 
+## Pipeline entry point (`remaster`)
+
+Iteration 2 drives the scripts below through one command, configured by
+`remaster.toml` at the repository root (game data path, LLM endpoint and
+models, image backend per asset class, scales, thresholds, golden set):
+
+```sh
+uv sync
+uv run remaster extract prepare            # golden set; --scenes 1 2 or --all
+uv run remaster status                     # job counts, failures, free disk
+uv run remaster run                        # resume every pending job (unattended)
+uv run remaster review                     # rewrite review/queue.md + sheet.html
+uv run remaster review decide 5 keep    # by number or id (golden-set)
+```
+
+- Stages (`extract`, `prepare`, then registered stubs `brief`, `redraw-bg`,
+  `cast`, `redraw-sprites`, `geometry`, `interpolate`, `qa`, `assemble`,
+  `smoke`) live in `tools/remaster/stages/`. `extract` runs the existing
+  extractors unchanged, one job per scene/resource, then the extraction audit.
+  `prepare` de-dithers (`tools/remaster/dedither.py`) and builds default-state
+  plates (`tools/remaster/plates.py`) with edge control images.
+- Outputs go to stable directories under `work/` (ignored), each stamped with a
+  content hash of its inputs and settings; unchanged jobs are skipped.
+- Jobs are kept in `work/state/jobs.sqlite`. The runner holds a lock, runs
+  under `caffeinate`, runs each job in a child process (logs in
+  `work/state/logs/`), checks free disk before every batch and job, and on
+  start puts jobs orphaned by a crash, sleep or reboot back in the queue.
+  `uv run remaster launchd` prints a LaunchAgent that restarts it after reboot.
+- Decisions that need a human go to `review/queue.json` / `review/queue.md`
+  (tracked) and `review/sheet.html` (local, may show game art) with the
+  provisional default in use. Jobs carry the ids of the defaults they assume;
+  overturning one re-queues exactly those jobs.
+- Tests: `uv run python -m unittest tools.tests.test_remaster_prepare
+  tools.tests.test_remaster_jobs`.
+
+Local models and OpenCode: see [`docs/local-models.md`](../docs/local-models.md).
+
 ## Native img2img backends
 
 The neural backends live under `tools/img2img/`: `flux.py` (FLUX.1),
@@ -181,7 +218,16 @@ Useful flags:
 For LLM-polished prompts (recommended — every scene gets one, with no
 per-scene manual overrides):
 
+The default provider is any OpenAI-compatible server, with URL and model
+from `[llm]` in `remaster.toml` (Ollama's `/v1` with `qwen3.5-9b-32k`; see
+[`docs/local-models.md`](../docs/local-models.md)); pass `--base-url` and
+`--model` for LM Studio. The native Ollama path is still available:
+
 ```sh
+uv run python tools/polish_rosetattoo_prompts.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/prompt-briefs
+
 python3 tools/polish_rosetattoo_prompts.py \
   --provider ollama \
   --ollama-url http://127.0.0.1:11434 \

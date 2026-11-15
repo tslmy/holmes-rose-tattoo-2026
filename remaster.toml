@@ -1,0 +1,97 @@
+# Configuration for `uv run remaster <stage>`. Paths are relative to this file.
+# Everything here is a default; CLI flags such as --scenes override it.
+
+[paths]
+game_data = "scummvm"          # legally obtained game files (ignored by git)
+work = "work"                  # stable stage outputs (ignored by git)
+review = "review"              # review queue: queue.md is tracked, sheet/assets are not
+scummvm = "scummvm-src/scummvm"
+
+[llm]
+# Any OpenAI-compatible server (LM Studio, Ollama's /v1, llama.cpp, ...).
+base_url = "http://10.0.0.26:1234/v1"   # LM Studio on the second laptop (decision #4/#11)
+api_key = "lm-studio"           # LM Studio ignores it; Ollama ignores it too
+# Text model: scene briefs, QA summaries. See docs/local-models.md.
+text_model = "qwen/qwen3.8-27b"
+text_base_url = "http://10.0.0.26:1234/v1"
+# Vision model: original-vs-redraw review, sign/text checks.
+vision_model = "qwen/qwen3.8-27b"
+vision_base_url = "http://10.0.0.26:1234/v1"
+# Used when the remote server is unreachable or lacks the model (ChatClient.from_config).
+fallback_base_url = "http://127.0.0.1:11434/v1"   # Ollama on this Mac
+fallback_text_model = "qwen3.5-9b-32k"
+fallback_vision_model = "qwen3.5-9b-32k"
+context_tokens = 32768
+timeout_s = 600
+disable_thinking = true
+
+[image]
+# Backend per asset class. Names refer to entries under [image.backends].
+# Provisional until the Phase 1 bake-off; recorded in review/queue.md.
+backgrounds = "flux3-klein-edit"
+sprites = "esrgan"
+casting = "flux3-klein-edit"
+
+[image.backends.flux2-klein-edit]
+tool = "mflux-generate-flux2-edit"
+model = "mflux-community/flux2-klein-9b-mflux-q4"
+base_model = "flux2-klein-9b"
+steps = 4
+
+[image.backends.flux3-klein-edit]
+tool = "mflux-generate-flux3-edit"
+model = "mflux-community/flux-3-image-klein-mflux-q8"
+base_model = "flux3-image-klein"
+steps = 16
+
+[image.backends.qwen21-edit]
+tool = "mflux-generate-qwen-2.1-edit"
+model = "mflux-community/qwen-image-2-1-mflux-q8"
+base_model = "qwen-image-2.1"
+steps = 25
+
+[image.backends.zimage-controlnet]
+tool = "mflux-generate-z-image-controlnet"
+model = "mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8"
+base_model = "z-image-controlnet"
+steps = 20
+
+[image.backends.esrgan]
+tool = "tools/upscale_rosetattoo_sprites.py"
+scale = 2
+
+[scales]
+backgrounds = 4
+ui = 4
+text = 4
+sprites = 2
+
+[prepare]
+# De-dither: edge-preserving average over neighbours whose colour is within
+# `threshold` (RGB Euclidean, 0-441). Deterministic; see tools/remaster/dedither.py.
+dedither_radius = 1
+dedither_threshold = 48.0
+dedither_iterations = 2
+edge_low = 40
+edge_high = 120
+
+[thresholds]
+min_free_disk_gb = 15          # the runner pauses and queues a request below this
+job_max_attempts = 3
+# QA gates (used from Phase 1)
+max_warp_stretch = 1.6
+max_sprite_offset_px = 3
+max_alpha_area_change = 0.05
+
+[golden]
+# About six scenes (plus 36, added by decision #5): street, interior, haze room, a clue with writing,
+# a scrolling room, a dark room. See docs/remaster-plan.md, Phase 0.
+scenes = [1, 26, 18, 4, 2, 9, 36]
+scene_roles = { 1 = "street (Outside 221B Baker Street)", 26 = "interior (St. Bernard's Billiard Academy; existing engine fixtures)", 18 = "haze room, bright exterior (Cleopatra's Needle)", 4 = "clue with writing (Scotland Yard sign)", 2 = "scrolling room, 1280 wide (Inside Baker Street)", 9 = "dark room (The Strangers Room, mean luma 23)", 36 = "scrolling street, 1280 wide (Spitalfields; added by decision #5)" }
+# Shared VGS resources (extracted with the palette of `sprite_palette_scene`).
+sprites = ["SVGAWALK.VGS", "WATSON.VGS", "RMOUSE.VGS", "OMOUSE.VGS", "ITEM01.VGS", "ITEM10.VGS"]
+sprite_palette_scene = 1
+sprite_roles = { "SVGAWALK.VGS" = "Holmes walk", "WATSON.VGS" = "Watson walk", "RMOUSE.VGS" = "room cursors", "OMOUSE.VGS" = "map cursors", "ITEM01.VGS" = "inventory item", "ITEM10.VGS" = "inventory item" }
+# Streamed cAnims as scene/index (zero-based, as the runtime looks them up).
+canims = ["026/000", "044/004"]
+canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "044/004" = "10 frames; the one contour fallback in the candidate pack" }
