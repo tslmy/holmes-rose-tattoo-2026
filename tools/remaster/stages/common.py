@@ -101,10 +101,18 @@ def up_to_date(directory: Path, fp: str) -> bool:
     return read_stamp(directory).get("fingerprint") == fp
 
 
+def _plain(value: Any) -> Any:
+    """JSON fallback for numpy scalars/arrays and paths."""
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    return str(value)
+
+
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=False) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=False, default=_plain) + "\n",
+                   encoding="utf-8")
     os.replace(tmp, path)
 
 

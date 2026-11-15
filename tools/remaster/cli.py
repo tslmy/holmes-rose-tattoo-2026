@@ -6,6 +6,7 @@
   remaster status                                    queue counts and failures
   remaster review [decide ID CHOICE]                 render / answer the review queue
   remaster launchd                                   print a LaunchAgent plist for auto-resume
+  remaster bakeoff-report                            Phase 1 summary, contact sheet, provisional picks
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from .config import load_config
 from .review import ReviewQueue
 from .stages import PIPELINE, STAGES, get
 
-COMMANDS = {"run", "status", "review", "launchd", "_job", "retry"}
+COMMANDS = {"run", "status", "review", "launchd", "_job", "retry", "bakeoff-report"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +58,12 @@ def main(argv: list[str] | None = None) -> int:
         return _status(cfg)
     if command == "review":
         return _review(cfg, args.targets[1:])
+    if command == "bakeoff-report":
+        from . import bakeoff
+
+        result = bakeoff.report(cfg, queue=not args.enqueue_only)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
     if command == "launchd":
         print(runner.launchd_plist(cfg))
         return 0

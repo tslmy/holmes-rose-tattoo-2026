@@ -41,6 +41,27 @@ model = "flux2-klein-4b"
 api_key_env = "REMASTER_IMAGE_API_KEY"
 fallback = "flux3-klein-edit"           # local, when the remote laptop is off
 
+[image.backends.remote-flux2-klein-9b]
+tool = "http"
+url = "http://10.0.0.26:8000/v1/images/generations"
+model = "flux2-klein-9b"
+api_key_env = "REMASTER_IMAGE_API_KEY"
+
+[image.backends.remote-flux3-image-klein]
+tool = "http"
+url = "http://10.0.0.26:8000/v1/images/generations"
+model = "flux3-image-klein"
+api_key_env = "REMASTER_IMAGE_API_KEY"
+
+[image.backends.flux2-klein-img2img]
+# Same FLUX.2 klein 9B weights as flux2-klein-edit, used as img2img. mflux's image strength is
+# how strongly the init image is kept (0 = ignored), so L0 keeps the most.
+tool = "mflux-generate-flux2"
+model = "mflux-community/flux2-klein-9b-mflux-q4"
+base_model = "flux2-klein-9b"
+steps = 8
+levels = { L0 = { strength = 0.7 }, L1 = { strength = 0.55 }, L2 = { strength = 0.4 } }
+
 [image.backends.flux2-klein-edit]
 tool = "mflux-generate-flux2-edit"
 model = "mflux-community/flux2-klein-9b-mflux-q4"
@@ -64,6 +85,7 @@ tool = "mflux-generate-z-image-controlnet"
 model = "mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8"
 base_model = "z-image-controlnet"
 steps = 20
+levels = { L0 = { control_strength = 0.9 }, L1 = { control_strength = 0.75 }, L2 = { control_strength = 0.55 } }
 
 [image.backends.esrgan]
 tool = "tools/upscale_rosetattoo_sprites.py"
@@ -91,6 +113,15 @@ job_max_attempts = 3
 max_warp_stretch = 1.6
 max_sprite_offset_px = 3
 max_alpha_area_change = 0.05
+disk_wait_minutes = 360        # short only because of purgeable space: wait this long, then pause
+l0_max_drift_px = 2.0          # p95 measured drift (original px) allowed at L0
+l1_max_drift_px = 4.0          # ... and at L1
+warp_grid_spacing_px = 40      # control-grid spacing of the room warp (original px)
+warp_smoothness = 2.0
+qa_confident_score = 0.2       # objects found this confidently in the original must be found again
+sprite_max_flicker_ratio = 1.5 # sprite test: frame-to-frame change vs the ESRGAN baseline
+sprite_max_drift_excess = 0.1  # DINOv2 drift beyond the baseline's own pose variation
+sprite_min_pose_iou = 0.7
 
 [golden]
 # About six scenes (plus 36, added by decision #5): street, interior, haze room, a clue with writing,
@@ -104,3 +135,20 @@ sprite_roles = { "SVGAWALK.VGS" = "Holmes walk", "WATSON.VGS" = "Watson walk", "
 # Streamed cAnims as scene/index (zero-based, as the runtime looks them up).
 canims = ["026/000", "044/004"]
 canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "044/004" = "10 frames; the one contour fallback in the candidate pack" }
+
+[bakeoff]
+# Phase 1 (docs/remaster-plan.md): every golden scene x backend x freedom level.
+# Backends that cannot run here are recorded with the reason (weights deleted, no API key).
+backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b", "remote-flux3-image-klein",
+            "flux2-klein-edit", "flux2-klein-img2img", "flux3-klein-edit", "qwen21-edit", "zimage-controlnet"]
+levels = ["L0", "L1", "L2"]
+seed = 7
+megapixels = 1.0
+# ChatGPT reference images (outside the repo) for scenes that have a matching one.
+reference_dir = "~/Pictures/260805 ChatGPT reimagined Holmes Rose Tattoo"
+references = { 4 = "ChatGPT Image Aug 5, 2026, 10_02_50 PM.png", 2 = "ChatGPT Image Aug 4, 2026, 10_03_08 PM.png" }
+
+[bakeoff.sprite_test]
+backends = ["remote-flux2-klein-4b", "flux2-klein-edit", "flux3-klein-edit"]
+characters.holmes = { resource = "SVGAWALK.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Sherlock Holmes: a tall, lean man with a sharp profile, grey deerstalker cap, grey Inverness cape coat over a black frock coat and waistcoat, white shirt, black trousers and shoes." }
+characters.watson = { resource = "WATSON.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Dr John Watson: a sturdy man with a moustache, black bowler hat, dark brown three-piece suit, striped orange and blue wool scarf, white shirt, dark shoes." }

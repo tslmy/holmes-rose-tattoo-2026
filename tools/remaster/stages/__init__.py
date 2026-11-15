@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from . import extract, prepare, selftest
+from . import baseline, brief, extract, geometry, prepare, qa, redraw_bg, selftest, sprite_test
 from .stubs import STUBS
 
-_ORDER = ["extract", "prepare", "brief", "redraw-bg", "cast", "redraw-sprites", "geometry",
-          "interpolate", "qa", "assemble", "smoke"]
+_ORDER = ["extract", "prepare", "brief", "baseline", "redraw-bg", "cast", "redraw-sprites", "geometry",
+          "interpolate", "qa", "sprite-test", "assemble", "smoke"]
 
-STAGES = {stage.NAME: stage for stage in (extract, prepare, selftest, *STUBS)}
+STAGES = {stage.NAME: stage for stage in (extract, prepare, brief, baseline, redraw_bg, geometry, qa, sprite_test,
+                                          selftest, *STUBS)}
 PIPELINE = [name for name in _ORDER if name in STAGES]
 
 
