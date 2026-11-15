@@ -6,9 +6,13 @@
   start recovers orphaned jobs (jobs.JobQueue.recover).
 - Each job runs in a child process, so a crash in a model or extractor marks
   only that job failed/pending; its output goes to work/state/logs/.
-- Free disk space is checked before every batch and every job. Below the
-  threshold the runner stops and raises a `disk` item in the review queue
-  instead of deleting anything.
+- Free disk space is checked before every batch and every job. macOS can
+  report much less free space than is really reclaimable: Time Machine local
+  snapshots pin deleted files for about a day. The check therefore reports
+  free and purgeable space separately. Short only because of purgeable space,
+  the runner raises a `disk-purgeable` review item and waits for the
+  snapshots to age out (up to `disk_wait_minutes`); short for real, it stops
+  with a `disk-low` item. It never deletes anything itself.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config, TOOLS_DIR
@@ -36,6 +41,56 @@ def queue_for(cfg: Config) -> JobQueue:
 def free_gb(path: Path) -> float:
     path.mkdir(parents=True, exist_ok=True)
     return shutil.disk_usage(path).free / 1e9
+
+
+@dataclass
+class DiskSpace:
+    free_gb: float        # what df reports: usable right now
+    purgeable_gb: float   # extra macOS would reclaim on demand (snapshots, caches)
+    snapshots: int        # Time Machine local snapshots on the volume (-1 unknown)
+
+    @property
+    def available_gb(self) -> float:
+        return self.free_gb + self.purgeable_gb
+
+    def describe(self) -> str:
+        snaps = f", {self.snapshots} local snapshot(s)" if self.snapshots >= 0 else ""
+        return f"free {self.free_gb:.1f} GB, purgeable {self.purgeable_gb:.1f} GB{snaps}"
+
+
+_JXA = ('ObjC.import("Foundation");var u=$.NSURL.fileURLWithPath(%s);'
+        'var d=u.resourceValuesForKeysError(["NSURLVolumeAvailableCapacityForImportantUsageKey"],$());'
+        'String(ObjC.unwrap(d.objectForKey("NSURLVolumeAvailableCapacityForImportantUsageKey")))')
+
+
+def _important_capacity(path: Path) -> float | None:
+    """Finder's "available" figure (free + purgeable), via NSURL; None off macOS."""
+    if sys.platform != "darwin" or not shutil.which("osascript"):
+        return None
+    try:
+        out = subprocess.run(["osascript", "-l", "JavaScript", "-e", _JXA % json.dumps(str(path))],
+                             capture_output=True, text=True, timeout=15).stdout.strip()
+        return float(out) / 1e9
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _snapshot_count(path: Path) -> int:
+    if sys.platform != "darwin" or not shutil.which("tmutil"):
+        return -1
+    try:
+        out = subprocess.run(["tmutil", "listlocalsnapshots", str(path)], capture_output=True, text=True,
+                             timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    return sum(1 for line in out.splitlines() if "com.apple.TimeMachine" in line)
+
+
+def disk_space(path: Path) -> DiskSpace:
+    free = free_gb(path)
+    important = _important_capacity(path)
+    purgeable = max(0.0, important - free) if important is not None else 0.0
+    return DiskSpace(free, purgeable, _snapshot_count(path) if purgeable > 0.5 else 0)
 
 
 def ensure_caffeinated(argv: list[str]) -> None:
@@ -71,22 +126,60 @@ class RunnerLock:
             self.handle.close()
 
 
-def _disk_ok(cfg: Config, need_gb: float, review: ReviewQueue) -> bool:
+def _disk_ok(cfg: Config, need_gb: float, review: ReviewQueue, *, probe=None, sleep=time.sleep,
+             wait_minutes: float | None = None) -> bool:
+    """True when `need_gb` plus the reserve is free. Never deletes anything.
+
+    Short for real (free + purgeable below the line): raise `disk-low`, return False.
+    Short only because of purgeable space: raise `disk-purgeable` and wait, re-checking every
+    few minutes, up to `disk_wait_minutes`; then return whether space came back.
+    """
+    probe = probe or disk_space
     minimum = cfg.threshold("min_free_disk_gb", 15)
-    free = free_gb(cfg.work)
-    if free >= minimum + need_gb:
+    line = minimum + need_gb
+    space = probe(cfg.work)
+    if space.free_gb >= line:
         return True
+    stamp = time.strftime('%Y-%m-%d %H:%M')
+    if space.available_gb < line:
+        review.add(ReviewItem(
+            id="disk-low", kind="disk",
+            title=f"Disk short: {space.describe()}; runner needs {line:.1f} GB and paused",
+            default="Runner stops before the next job; nothing is deleted. Old pilot trees stay.",
+            options=["free space yourself, then `uv run remaster run`",
+                     "lower thresholds.min_free_disk_gb in remaster.toml",
+                     "approve deleting a named pilot tree (see docs/pilot-lessons.md)"],
+            detail=f"Work dir: {cfg.work}. Checked {stamp}.",
+        ))
+        print(f"[runner] {space.describe()} < {line:.1f} GB; pausing (see review/queue.md)", flush=True)
+        return False
+    wait = cfg.threshold("disk_wait_minutes", 360) if wait_minutes is None else wait_minutes
     review.add(ReviewItem(
-        id="disk-low", kind="disk",
-        title=f"Free disk {free:.1f} GB is below {minimum + need_gb:.1f} GB; runner paused",
-        default="Runner stops before the next job; nothing is deleted. Old pilot trees stay.",
-        options=["free space yourself, then `uv run remaster run`",
-                 "lower thresholds.min_free_disk_gb in remaster.toml",
-                 "approve deleting a named pilot tree (see docs/pilot-lessons.md)"],
-        detail=f"Work dir: {cfg.work}. Checked {time.strftime('%Y-%m-%d %H:%M')}.",
+        id="disk-purgeable", kind="disk",
+        title=f"Free disk {space.free_gb:.1f} GB is below {line:.1f} GB, but {space.purgeable_gb:.1f} GB "
+              "is purgeable (Time Machine local snapshots)",
+        default=f"Runner waits up to {wait:.0f} min for the snapshots to age out (hourly snapshots expire "
+                "after about 24 h), then pauses; nothing is deleted",
+        options=["delete the local snapshots yourself: `tmutil listlocalsnapshots /` then "
+                 "`sudo tmutil deletelocalsnapshots <date>`",
+                 "lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml"],
+        detail=f"{space.describe()} at {stamp}. Work dir: {cfg.work}. df under-reports reclaimable space "
+               "after large deletions while snapshots still reference the deleted blocks.",
     ))
-    print(f"[runner] free disk {free:.1f} GB < {minimum + need_gb:.1f} GB; pausing (see review/queue.md)",
-          flush=True)
+    print(f"[runner] {space.describe()}; below {line:.1f} GB only because of purgeable space; "
+          f"waiting up to {wait:.0f} min (see review/queue.md)", flush=True)
+    deadline = time.monotonic() + wait * 60
+    while time.monotonic() < deadline:
+        sleep(min(300.0, max(1.0, deadline - time.monotonic())))
+        space = probe(cfg.work)
+        if space.free_gb >= line:
+            review.mark_done("disk-purgeable", f"Space came back at {time.strftime('%Y-%m-%d %H:%M')}: "
+                                               f"{space.describe()}.")
+            print(f"[runner] {space.describe()}; resuming", flush=True)
+            return True
+        if space.available_gb < line:
+            break
+    print(f"[runner] still {space.describe()}; pausing", flush=True)
     return False
 
 

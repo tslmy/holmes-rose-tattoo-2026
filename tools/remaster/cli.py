@@ -124,7 +124,7 @@ def _status(cfg) -> int:
         print(f"  {stage}: " + ", ".join(f"{k} {v}" for k, v in sorted(c.items())))
     for job in queue.iter_jobs("failed"):
         print(f"FAILED {job.id}: {job.error.splitlines()[0] if job.error else ''}")
-    print(f"free disk: {runner.free_gb(cfg.work):.1f} GB")
+    print(f"disk: {runner.disk_space(cfg.work).describe()}")
     pending = [i for i in ReviewQueue(cfg.review_dir, cfg.root).load() if i.status == "pending"]
     print(f"review queue: {len(pending)} pending (review/queue.md)")
     queue.close()

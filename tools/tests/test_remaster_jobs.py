@@ -120,6 +120,61 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("disk-low", (self.root / "review" / "queue.md").read_text())
 
 
+class DiskCheckTest(unittest.TestCase):
+    """Purgeable space (Time Machine snapshots) is reported apart from free space."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.cfg = load_config(write_config(self.root, min_free=15))
+        self.review = ReviewQueue(self.root / "review", self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def probe(self, *readings):
+        seq = list(readings)
+        calls = []
+
+        def fake(path):
+            calls.append(path)
+            return seq[min(len(calls), len(seq)) - 1]
+        return fake
+
+    def test_enough_free_space_passes_quietly(self):
+        ok = runner._disk_ok(self.cfg, 0, self.review, probe=self.probe(runner.DiskSpace(40, 0, 0)))
+        self.assertTrue(ok)
+        self.assertEqual(self.review.load(), [])
+
+    def test_purgeable_shortage_waits_then_resumes_without_failing(self):
+        slept = []
+        probe = self.probe(runner.DiskSpace(10, 60, 13), runner.DiskSpace(12, 58, 12), runner.DiskSpace(30, 40, 4))
+        ok = runner._disk_ok(self.cfg, 0, self.review, probe=probe, sleep=slept.append, wait_minutes=60)
+        self.assertTrue(ok)
+        self.assertTrue(slept)
+        item = self.review.get("disk-purgeable")
+        self.assertEqual(item.kind, "disk")
+        self.assertEqual(item.status, "done")
+        self.assertIn("purgeable 60.0 GB", item.detail)
+        self.assertIsNone(self.review.get("disk-low"))
+
+    def test_purgeable_shortage_pauses_after_the_wait(self):
+        ok = runner._disk_ok(self.cfg, 0, self.review, probe=self.probe(runner.DiskSpace(10, 60, 13)),
+                             sleep=lambda s: None, wait_minutes=0)
+        self.assertFalse(ok)
+        self.assertEqual(self.review.get("disk-purgeable").status, "pending")
+
+    def test_real_shortage_raises_disk_low(self):
+        ok = runner._disk_ok(self.cfg, 0, self.review, probe=self.probe(runner.DiskSpace(5, 2, 0)))
+        self.assertFalse(ok)
+        self.assertIn("purgeable 2.0 GB", self.review.get("disk-low").title)
+
+    def test_disk_space_reports_free_at_least(self):
+        space = runner.disk_space(self.root)
+        self.assertGreater(space.free_gb, 0)
+        self.assertGreaterEqual(space.purgeable_gb, 0)
+
+
 class ReviewTest(unittest.TestCase):
     def test_add_keeps_decision_and_effective_value(self):
         with tempfile.TemporaryDirectory() as tmp:
