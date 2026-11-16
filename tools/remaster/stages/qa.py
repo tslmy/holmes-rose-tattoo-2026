@@ -32,11 +32,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
+from .. import textcheck
 from ..config import Config
 from ..jobs import JobSpec
 from ..llm import ChatClient
 from ..warp import GridWarp
-from . import brief, common, geometry, prepare
+from . import brief, common, geometry, prepare, redraw_bg
 
 NAME = "qa"
 SUMMARY = "Background gates (objects, order, warp, offsets, protected text), VLM review, palette score"
@@ -44,12 +45,16 @@ CODE = [Path(__file__)]
 
 PEOPLE = re.compile(r"\b(person|people|man|men|woman|women|figure|figures|child|children|boy|girl|crowd|"
                     r"pedestrian|passer|customer|patron|officer|constable|gentleman|lady)s?\b", re.IGNORECASE)
+OBSTACLE_QUERIES = ["table", "chair", "lamp", "floor lamp", "statue", "bust", "cabinet", "barrel",
+                    "crate", "cart", "bench", "person"]
 VLM_SYSTEM = "You are a meticulous art director checking a remastered video game background. Answer with JSON only."
 VLM_DIFF = """Image 1 (left) is the original 1996 game room; image 2 (right) is a photoreal remaster of it.
 List the differences in content, not in style or rendering quality. Return JSON:
 {"removed": [objects or people in the original that are missing from the remaster],
  "added": [objects or people in the remaster that were not in the original],
  "moved": [objects that clearly changed position or order],
+ "new_light_sources": [lamps, candles, fires, flames or lit windows in the remaster that are not lit or
+not present in the original],
  "writing_changed": true if any sign, poster or printed text was changed, garbled or lost,
  "photoreal": 1-10 how much the remaster looks like a real photograph of a built set,
  "palette_kept": 1-10 how well the remaster keeps the original's colours and their vibrancy}
@@ -57,6 +62,10 @@ Only list clear, specific objects (e.g. "fire hydrant", "man behind the bar"); u
 VLM_FLOOR = """The cyan-tinted areas mark where characters walk in this game room. Return JSON:
 {"floor": true if every tinted area lies on walkable ground (floor, street, pavement, rug, stairs) and not on
 walls, furniture tops, windows or sky, "problems": [short descriptions of tinted areas that are not ground]}"""
+VLM_TEXT = """Image 1 (left) is the original 1996 game room; image 2 (right) is a photoreal remaster of it.
+Transcribe the signs and printed text exactly as written (empty list when none is legible). Return JSON:
+{"original_text": [every sign, poster or printed text legible in image 1],
+ "remaster_text": [the same for image 2]}"""
 
 
 def job_dir(cfg: Config, scene: int, backend: str, level: str) -> Path:
@@ -70,7 +79,7 @@ def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
         p = spec.params
         src = geometry.job_dir(cfg, p["scene"], p["backend"], p["level"])
         fp = common.fingerprint(common.read_stamp(src).get("fingerprint"), llm.get("vision_model"),
-                                cfg.section("thresholds"), VLM_DIFF, VLM_FLOOR, *CODE)
+                                cfg.section("thresholds"), VLM_DIFF, VLM_FLOOR, VLM_TEXT, *CODE)
         specs.append(JobSpec(NAME, spec.key, dict(p), fp, after=[spec.id], tags=spec.tags + ["llm-models"]))
     return specs
 
@@ -79,6 +88,53 @@ def _bbox(poly: np.ndarray) -> list[float]:
     x0, y0 = poly.min(axis=0)
     x1, y1 = poly.max(axis=0)
     return [float(x0), float(y0), float(x1 - x0), float(y1 - y0)]
+
+
+def new_objects(orig_dets: list[dict], final_dets: list[dict], warp: GridWarp, queries: list[str],
+                iou: float = 0.2, min_score: float = 0.25) -> list[dict]:
+    """Redraw detections (picture px) with no confident original match (mapped to picture px)."""
+    mapped = []
+    for d in orig_dets:
+        if d["score"] < 0.1:
+            continue
+        x, y, w, h = d["box"]
+        corners = np.array([[x, y], [x + w, y], [x, y + h], [x + w, y + h]], float)
+        pts = warp.forward(corners).reshape(-1, 2)
+        box = [float(pts[:, 0].min()), float(pts[:, 1].min()),
+               float(pts[:, 0].max() - pts[:, 0].min()), float(pts[:, 1].max() - pts[:, 1].min())]
+        mapped.append((d["query"], box))
+    found = []
+    for d in final_dets:
+        if d["score"] < min_score:
+            continue
+        if any(q == d["query"] and brief.iou(box, d["box"]) >= iou for q, box in mapped):
+            continue
+        found.append({"label": queries[d["query"]], "box": d["box"], "score": d["score"]})
+    return found
+
+
+def blocking(new: list[dict], walk_polys: list, hot_polys: list, picture_size: tuple[int, int],
+             frac: float = 0.2) -> list[dict]:
+    """New objects whose box lies at least `frac` of the way inside the walk/hotspot union."""
+    import cv2
+
+    width, height = picture_size
+    mask = np.zeros((height, width), np.uint8)
+    for poly in list(walk_polys) + list(hot_polys):
+        if poly:
+            cv2.fillPoly(mask, [np.asarray(poly, np.int32).reshape(-1, 1, 2)], 1)
+    out = []
+    for d in new:
+        x, y, w, h = d["box"]
+        x0, y0 = max(int(x), 0), max(int(y), 0)
+        x1, y1 = min(int(x + w), width), min(int(y + h), height)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        area = (x1 - x0) * (y1 - y0)
+        inside = int(mask[y0:y1, x0:x1].sum())
+        if inside / area >= frac:
+            out.append(d)
+    return out
 
 
 def object_gates(sidecar: dict, confident: float) -> dict:
@@ -188,6 +244,12 @@ def vlm_review(cfg: Config, original: Image.Image, result: Image.Image, sidecar:
         review["diff_seconds"] = reply.seconds
     except Exception as err:  # noqa: BLE001
         review["errors"].append(f"diff: {type(err).__name__}: {str(err)[:300]}")
+    try:
+        reply = client.chat(VLM_SYSTEM, VLM_TEXT, images=[pair], max_tokens=400)
+        review["text"] = parse_json(reply.text)
+        review["text_seconds"] = reply.seconds
+    except Exception as err:  # noqa: BLE001
+        review["errors"].append(f"text: {type(err).__name__}: {str(err)[:300]}")
     polys = sidecar.get("walk_zones_picture") or []
     if polys:
         tinted = walk_tint(result, polys, out / "walk.jpg")
@@ -231,13 +293,27 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
     gates: dict = {"warp": geo["warp_ok"]}
     objs = object_gates(sidecar, confident)
     gates["objects"], gates["order"] = objs["objects_ok"], objs["order_ok"]
-    if level == "L1":
+    if redraw_bg.base_level(cfg, level) == "L1":
         gates["offsets"] = geo.get("layers_offset_ok", True)
     regions = sidecar.get("protected_regions", [])
     # every region is either warped in from the baseline or explicitly left (too large, with a reason)
     gates["protected"] = all(r.get("pasted") or r.get("reason") for r in regions)
     review = vlm_review(cfg, original, result, sidecar, out)
+    new_objs, blocked = [], []
+    try:
+        from .. import detect as remaster_detect
+
+        warp = GridWarp.from_json(sidecar["warp"])
+        new_objs = new_objects(remaster_detect.detect(original, OBSTACLE_QUERIES),
+                               remaster_detect.detect(result, OBSTACLE_QUERIES), warp, OBSTACLE_QUERIES)
+        blocked = blocking(new_objs, sidecar.get("walk_zones_picture") or [],
+                           sidecar.get("hotspots_picture") or [], result.size)
+        gates["obstacles"] = not blocked
+    except Exception as err:  # noqa: BLE001
+        gates["obstacles"] = None
+        review.setdefault("errors", []).append(f"obstacles: {type(err).__name__}: {str(err)[:300]}")
     diff = review.get("diff") or {}
+    new_light = list(diff.get("new_light_sources") or []) if "diff" in review else None
     if "diff" in review:
         removed, added = list(diff.get("removed") or []), list(diff.get("added") or [])
         # Removing anything, or adding a figure (an extra character misleads the player), fails;
@@ -247,10 +323,16 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
     else:
         removed = added = []
         gates["vlm"] = None
+    gates["light"] = not new_light if new_light is not None else None
     if "floor" in review:
         gates["floor"] = bool(review["floor"].get("floor"))
     elif sidecar.get("walk_zones_picture"):
         gates["floor"] = None
+    if "text" in review:
+        gates["text"], text_missing = textcheck.text_gate(list(review["text"].get("original_text") or []),
+                                                          list(review["text"].get("remaster_text") or []))
+    else:
+        gates["text"], text_missing = None, []
     palette = palette_scores(original, result)
     known = [v for v in gates.values() if v is not None]
     passed = all(known)
@@ -265,6 +347,9 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
                "gates_passed": sum(1 for v in known if v), "gates_known": len(known),
                "found_ratio": objs["found_ratio"], "missing": objs["missing_confident"],
                "inversions": len(objs["order_inversions"]), "removed": removed, "added": added,
+               "new_objects": new_objs, "blocking_objects": blocked,
+               "new_light_sources": list(new_light) if new_light is not None else None,
+                "text_missing": text_missing,
                "writing_changed": diff.get("writing_changed"), "photoreal": photoreal,
                "palette_kept": diff.get("palette_kept"), **palette, "score": round(score, 3),
                "vlm_errors": review.get("errors", [])}

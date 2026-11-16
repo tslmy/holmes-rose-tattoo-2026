@@ -33,8 +33,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from .. import warp as warpmod
+from .. import textcheck, warp as warpmod
 from ..config import Config
+from ..llm import ChatClient
 from ..jobs import JobSpec
 from . import baseline, brief, common, extract, prepare, redraw_bg
 
@@ -133,6 +134,14 @@ def anchor_points(anchors: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(src, float).reshape(-1, 2), np.asarray(dst, float).reshape(-1, 2)
 
 
+def _bbox_px(poly: list[list[float]], size: tuple[int, int]) -> list[float]:
+    xs = [p[0] for p in poly]
+    ys = [p[1] for p in poly]
+    x0, y0 = max(0.0, min(xs)), max(0.0, min(ys))
+    x1, y1 = min(float(size[0]), max(xs)), min(float(size[1]), max(ys))
+    return [x0, y0, max(1.0, x1 - x0), max(1.0, y1 - y0)]
+
+
 def warp_rect_polygon(w: warpmod.GridWarp, box, samples: int = 8) -> list[list[float]]:
     x, y, bw, bh = box
     t = np.linspace(0, 1, samples)
@@ -180,6 +189,38 @@ def resegment(redraw: np.ndarray, seed: np.ndarray, scale: float) -> np.ndarray:
     fg = np.isin(mask, (cv2.GC_FGD, cv2.GC_PR_FGD)).astype(np.float32)
     out[y0:y1, x0:x1] = cv2.GaussianBlur(fg, (0, 0), 0.7)
     return out
+
+
+def relight_patch(patch: np.ndarray, target: np.ndarray, mask: np.ndarray,
+                  inner: int = 8, outer: int = 24) -> np.ndarray:
+    """Match a pasted patch to the redraw's lighting.
+
+    `patch` and `target` are HxWx3 (any numeric dtype); `mask` is HxW in 0..1
+    marking the pasted region. The relight (per-channel gain * patch + offset)
+    is fitted (mean and spread) over the ring of pixels that sit between
+    `inner` and `outer` px from the region (dilated with an elliptical kernel).
+    Gain is clipped to [0.5, 2.0]; the offset is refit as mean(target - gain * patch).
+    The result is applied to the whole patch, unclipped (the caller clips).
+    """
+    import cv2
+
+    p = np.asarray(patch, dtype=np.float32)
+    t = np.asarray(target, dtype=np.float32)
+    region = (np.asarray(mask) > 0.5).astype(np.uint8)
+    if not region.any():
+        return p
+    k_in = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(2, int(2 * inner)) | 1, max(2, int(2 * inner)) | 1))
+    k_out = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(2, int(2 * outer)) | 1, max(2, int(2 * outer)) | 1))
+    ring = (cv2.dilate(region, k_out) > 0) & (cv2.dilate(region, k_in) == 0)
+    if int(ring.sum()) < 50:
+        return p
+    x, y = p[ring], t[ring]  # x: patch (predictor), y: target (response); both NxC
+    xm, ym = x.mean(axis=0), y.mean(axis=0)
+    # Match spread, not a regression slope: at L2 the redraw's texture in the ring does not line up
+    # pixel for pixel with the baseline, and a least-squares slope would shrink towards 0 (flat patches).
+    gain = np.clip(y.std(axis=0) / np.maximum(x.std(axis=0), 1e-6), 0.5, 2.0)
+    offset = ym - gain * xm
+    return (p * gain + offset).astype(np.float32)
 
 
 # -- job -------------------------------------------------------------------
@@ -249,7 +290,8 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
         fitted.meta["note"] = "too few matches; identity"
     measured = fitted.jacobian_stats()
     measured["roundtrip_px"] = fitted.roundtrip_error()
-    if level == "L2":
+    base = redraw_bg.base_level(cfg, level)
+    if base == "L2":
         shipped = fitted
     else:
         shipped = warpmod.GridWarp.identity(W, H, scale, limits["spacing"])
@@ -261,9 +303,9 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
         "anchors_used": int(len(a_src) // 5),
         "homography_scale": float(np.sqrt(abs(np.linalg.det(homography[:2, :2])))),
     }
-    if level == "L0":
+    if base == "L0":
         checks["drift_ok"] = measured["disp_p95"] <= limits["l0_drift"]
-    elif level == "L1":
+    elif base == "L1":
         checks["drift_ok"] = measured["disp_p95"] <= limits["l1_drift"]
     else:
         checks["drift_ok"] = True
@@ -278,6 +320,21 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
     base_warped = remap(np.asarray(base_img), (map_x + 0.5) * bscale - 0.5, (map_y + 0.5) * bscale - 0.5)
     protect = np.zeros((H, W), np.uint8)
     regions = []
+    vision_client = None
+
+    def vision() -> ChatClient:
+        nonlocal vision_client
+        if vision_client is None:
+            vision_client = ChatClient.from_config(cfg.section("llm"), "vision")
+        return vision_client
+
+    def read_region_text(box) -> tuple[str, str]:
+        """Read the sign's words in the original and in the redraw ("" if unreadable/failed)."""
+        orig_text = textcheck.read_text(vision(), original, box)
+        redraw_text = textcheck.read_text(vision(), redraw,
+                                          _bbox_px(warp_rect_polygon(shipped, box), redraw.size))
+        return orig_text, redraw_text
+
     for obj in objects:
         x, y, w, h = obj["box"]
         if not (obj.get("writing") or obj.get("clue")):
@@ -286,14 +343,39 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
             regions.append({"id": obj["id"], "label": obj["label"], "box": obj["box"], "pasted": False,
                             "reason": "too large to paste; left to the redraw and the VLM check"})
             continue
+        rec = {"id": obj["id"], "label": obj["label"], "box": obj["box"],
+               "writing": obj.get("writing"), "clue": obj.get("clue"),
+               "polygon": warp_rect_polygon(shipped, obj["box"])}
+        if obj.get("writing"):
+            text_ok = False
+            try:
+                orig_text, redraw_text = read_region_text(obj["box"])
+                rec["text_original"], rec["text_redraw"] = orig_text, redraw_text
+                text_ok = textcheck.text_matches(orig_text, redraw_text) is True
+            except Exception as err:  # noqa: BLE001
+                rec["text_error"] = f"{type(err).__name__}: {str(err)[:300]}"
+            if text_ok:
+                rec["pasted"], rec["reason"] = False, "redraw text legible"
+                regions.append(rec)
+                continue
         m = 2
         protect[max(0, y - m):y + h + m, max(0, x - m):x + w + m] = 255
-        regions.append({"id": obj["id"], "label": obj["label"], "box": obj["box"], "pasted": True,
-                        "writing": obj.get("writing"), "clue": obj.get("clue"),
-                        "polygon": warp_rect_polygon(shipped, obj["box"])})
+        rec["pasted"] = True
+        regions.append(rec)
+    if redraw_bg.variant(cfg, level)["mask_people"]:
+        # the people were stripped from the input before the redraw; paste them
+        # back from the ESRGAN baseline like any other protected region
+        protect |= redraw_bg.people_mask(cfg, scene)
+        for obj in objects:
+            if obj.get("kind") != "person":
+                continue
+            regions.append({"id": obj["id"], "label": obj["label"], "box": obj["box"],
+                            "pasted": True, "person": True,
+                            "polygon": warp_rect_polygon(shipped, obj["box"])})
     if protect.any():
         mask = remap(protect, map_x, map_y)
         mask = cv2.GaussianBlur(mask.astype(np.float32) / 255, (0, 0), 1.0 * max(scale))[..., None]
+        base_warped = relight_patch(base_warped, final, mask[..., 0])
         final = final * (1 - mask) + base_warped.astype(np.float32) * mask
     final_img = Image.fromarray(np.clip(final + 0.5, 0, 255).astype(np.uint8))
     final_img.save(out / "final.png")
@@ -308,7 +390,7 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
         seed_orig = (layer_index == idx).astype(np.uint8) * 255
         if not seed_orig.any():
             continue
-        if level == "L2":
+        if base == "L2":
             seed = remap(seed_orig, map_x, map_y, cv2.INTER_LINEAR)
         else:
             seed = cv2.resize(seed_orig, redraw.size, interpolation=cv2.INTER_LINEAR)
@@ -331,7 +413,7 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
             rgba = np.dstack([final_np[y0:y1, x0:x1], (alpha[y0:y1, x0:x1] * 255 + 0.5).astype(np.uint8)])
             Image.fromarray(rgba, "RGBA").save(out / "layers" / f"{idx:02d}.png")
             rec["bbox_picture"] = [int(x0), int(y0), int(x1 - x0), int(y1 - y0)]
-        if level == "L1":
+        if base == "L1":
             rec["offset_ok"] = bool(np.hypot(*offset) <= limits["max_offset"])
         layers.append(rec)
 

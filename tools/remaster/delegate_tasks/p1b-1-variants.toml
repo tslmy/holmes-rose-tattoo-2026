@@ -1,0 +1,38 @@
+# Delegated 2026-11-15 (Phase 1b). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/redraw_bg.py", "tools/remaster/imagegen.py", "tools/remaster/stages/geometry.py",
+         "tools/remaster/stages/qa.py", "tools/remaster/bakeoff.py", "tools/remaster/stages/brief.py"]
+test = "python -m unittest tests.test_remaster_variants tests.test_remaster_bakeoff tests.test_remaster_bakeoff_report"
+timeout_s = 3600
+prompt = """
+Add named level variants to the remaster pipeline (Python, package tools/remaster). Read the acceptance test
+tools/tests/test_remaster_variants.py first: it defines every name and signature; do not edit it.
+
+A variant is a name in [bakeoff].levels. "L0", "L1", "L2" are plain levels. Any other name must have a table
+[bakeoff.variants.<name>] with: level ("L0"/"L1"/"L2", required), and optional seed (int), strength (float),
+extras (list of keys of imagegen.PROMPT_EXTRAS), mask_people (bool).
+
+1. tools/remaster/imagegen.py: add PROMPT_EXTRAS = {
+   "keep_figures": "Keep exactly the people already in the picture, in the same places and poses; do not add any person, animal or crowd.",
+   "no_new_light": "Do not add any light source, fire, flame, candle or lit window that is not in the original.",
+   "framing": "Keep the original framing edge to edge: do not zoom in, crop or widen the view."}
+   generate() gets a new keyword argument settings: dict | None = None; when given it is used instead of
+   level_settings(bk, level) (and stored in record["settings"]).
+2. tools/remaster/stages/redraw_bg.py: add
+   - variant(cfg, name) -> {"name", "level", "seed", "strength", "extras", "mask_people"} (seed defaults to
+     [bakeoff].seed or 7, strength None, extras [], mask_people False; KeyError for an unknown name).
+   - base_level(cfg, name) -> variant(cfg, name)["level"].
+   - request_settings(cfg, bk, name) -> imagegen.level_settings(bk, base level) with "strength" replaced by the
+     variant's strength when it is set.
+   - prompt_for(cfg, scene, name) -> brief text + "\\n\\n" + level_prompt(base level), then each extra's sentence
+     appended with a space, in order (no extras -> exactly brief + "\\n\\n" + level prompt).
+   - plan(): the job's params carry level = the variant name and seed = the variant's seed; the fingerprint
+     includes the variant dict and prompt extras. run_job passes settings=request_settings(...) and the
+     variant's seed to imagegen.generate. (mask_people is only stored for now; another task implements it.)
+3. tools/remaster/stages/geometry.py and qa.py: every comparison of the level name (level == "L2" etc.) must
+   use redraw_bg.base_level(cfg, level) instead (geometry.estimate and qa.evaluate already receive cfg and
+   level). Job directories keep the variant name.
+4. tools/remaster/bakeoff.py: pick() ranks levels by the base level (LEVEL_RANK[redraw_bg.base_level(cfg, ...)]),
+   so a passing "L2-fix" beats a passing "L1-s85".
+5. tools/remaster/stages/brief.py: in STYLE, replace "practical lighting from the lamps, windows and fires that
+   are in the scene" with "practical lighting from the lamps and windows that are in the scene".
+"""

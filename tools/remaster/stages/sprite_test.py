@@ -11,6 +11,9 @@ One job per (character, backend) -> work/sprite-test/<character>/<backend>/:
 Scores, each also computed for the de-dithered ESRGAN baseline of the same frames:
   flicker            mean absolute change between consecutive frames inside the figure,
                      divided by the baseline's (the baseline changes only with the motion)
+  temporal warp      high-frequency residual after warping each frame onto the next along the
+                     original's optical flow, divided by the baseline's (catches texture crawl,
+                     e.g. coat folds and scarf stripes changing between walk frames)
   identity drift     DINOv2 cosine distance of each frame to the first frame and to the cast
                      sheet; spread across the sequence
   pose agreement     IoU of the redraw's silhouette with the original's
@@ -100,6 +103,81 @@ def sequence_scores(frames: list[np.ndarray], alphas: list[np.ndarray]) -> dict:
             deltas.append(float(np.abs(a.astype(np.float32) - b.astype(np.float32))[m].mean()))
     return {"mean_delta": round(float(np.mean(deltas)), 2) if deltas else None,
             "deltas": [round(d, 2) for d in deltas]}
+
+
+def _bilinear_sample(img: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+    """Bilinear-sample a 2D/3D image at (xs, ys); out-of-bounds samples contribute zero."""
+    h, w = img.shape[:2]
+    x0 = np.floor(xs).astype(np.intp)
+    y0 = np.floor(ys).astype(np.intp)
+    fx = (xs - x0).astype(np.float64)
+    fy = (ys - y0).astype(np.float64)
+    out = np.zeros((len(xs),) + img.shape[2:], dtype=np.float64) if img.ndim == 3 else np.zeros(len(xs), dtype=np.float64)
+    for dx, cx in ((0, 1 - fx), (1, fx)):
+        for dy, cy in ((0, 1 - fy), (1, fy)):
+            xa, ya = x0 + dx, y0 + dy
+            inb = (xa >= 0) & (xa < w) & (ya >= 0) & (ya < h)
+            if not np.any(inb):
+                continue
+            wgt = (cx * cy)[inb]
+            if img.ndim == 3:
+                out[inb] += wgt[:, None] * img[ya[inb], xa[inb]].astype(np.float64)
+            else:
+                out[inb] += wgt * img[ya[inb], xa[inb]].astype(np.float64)
+    return out
+
+
+def _flow_sample(f: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Sample a 2-channel flow field at (xs, ys) bilinearly; returns (fx, fy)."""
+    s = _bilinear_sample(f, xs, ys)
+    return s[..., 0], s[..., 1]
+
+
+def temporal_warp_error(frames: list[np.ndarray], alphas: list[np.ndarray],
+                        flow_frames: list[np.ndarray] | None = None, loop: bool = True,
+                        fb_px: float = 2.0, sigma: float = 2.5) -> dict:
+    """High-frequency residual after warping frame t onto frame t+1 along the flow of `flow_frames`."""
+    import cv2
+
+    if flow_frames is None:
+        flow_frames = frames
+    n = len(frames)
+    pairs = [(t, (t + 1) % n) for t in range(n if loop else n - 1)]
+    kernel = np.ones((7, 7), np.uint8)
+    errors, hf_errors, coverages = [], [], []
+    for i, j in pairs:
+        gray_i = cv2.cvtColor(flow_frames[i], cv2.COLOR_RGB2GRAY)
+        gray_j = cv2.cvtColor(flow_frames[j], cv2.COLOR_RGB2GRAY)
+        flow = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+        b = flow.calc(gray_j, gray_i, None)   # backward flow, t+1 -> t
+        f = flow.calc(gray_i, gray_j, None)   # forward flow, t -> t+1
+        valid = (cv2.erode((alphas[j] > 0.5).astype(np.uint8), kernel) > 0)
+        h, w = alphas[j].shape
+        ys, xs = np.nonzero(valid)
+        if ys.size == 0:
+            continue
+        px, py = xs.astype(np.float64) + b[ys, xs, 0], ys.astype(np.float64) + b[ys, xs, 1]
+        fx, fy = _flow_sample(f, px, py)
+        fb_ok = np.abs(b[ys, xs, 0] + fx) + np.abs(b[ys, xs, 1] + fy) < fb_px
+        if not fb_ok.any():
+            continue
+        vx, vy = xs[fb_ok], ys[fb_ok]
+        # Build a full warped image so the high-pass (Gaussian blur) is spatially correct
+        x_map = np.tile(np.arange(w, dtype=np.float64)[None, :], (h, 1)) + b[:, :, 0].astype(np.float64)
+        y_map = np.tile(np.arange(h, dtype=np.float64)[:, None], (1, w)) + b[:, :, 1].astype(np.float64)
+        warped = _bilinear_sample(frames[i].astype(np.float64),
+                                  x_map.ravel(), y_map.ravel()).reshape(h, w, 3)
+        a = frames[j].astype(np.float32)
+        errors.append(float(np.abs(a[vy, vx].astype(np.float64) - warped[vy, vx]).mean()))
+        hp_a = a.astype(np.float64) - cv2.GaussianBlur(a, (0, 0), sigma).astype(np.float64)
+        hp_w = warped - cv2.GaussianBlur(warped.astype(np.float32), (0, 0), sigma).astype(np.float64)
+        hf_errors.append(float(np.abs(hp_a - hp_w)[vy, vx].mean()))
+        coverages.append(float(valid.sum() / np.count_nonzero(alphas[j] > 0.5)))
+    if not errors:
+        return {"e": None, "e_hf": None, "e_hf_max": None, "coverage": 0, "pairs": len(pairs)}
+    return {"e": round(float(np.mean(errors)), 3), "e_hf": round(float(np.mean(hf_errors)), 3),
+            "e_hf_max": round(float(np.max(hf_errors)), 3),
+            "coverage": round(float(np.mean(coverages)), 3), "pairs": len(pairs)}
 
 
 def identity_scores(images: list[Image.Image], cast: Image.Image | None) -> dict:
@@ -200,12 +278,18 @@ def run_test(cfg: Config, spec: dict, backend: str, seed: int, out: Path) -> dic
     base_id = identity_scores(crops(base_cut), None)
     flicker = (red_seq["mean_delta"] / base_seq["mean_delta"]
                if red_seq["mean_delta"] and base_seq["mean_delta"] else None)
+    base_twe = temporal_warp_error(base_cut, base_alpha)
+    red_twe = temporal_warp_error(red_cut, base_alpha, flow_frames=base_cut)
+    twe_ratio = (red_twe["e_hf"] / base_twe["e_hf"]
+                 if red_twe["e_hf"] and base_twe["e_hf"] else None)
     seconds = [i["seconds"] for i in images]
     peaks = [i.get("peak_memory_gb") for i in images if i.get("peak_memory_gb")]
     dropped = sum(i.get("references_dropped", 0) for i in images)
     summary = {"status": "ok", "frames": len(spec["walk"]),
                "identity_conditioned": dropped == 0,
                "flicker_ratio": round(flicker, 3) if flicker else None,
+               "twe_ratio": round(twe_ratio, 3) if twe_ratio else None,
+               "twe_coverage": red_twe["coverage"],
                "drift": red_id["drift"], "baseline_drift": base_id["drift"],
                "drift_excess": round(red_id["drift"] - base_id["drift"], 4),
                "cos_to_cast_mean": red_id.get("cos_to_cast_mean"),
@@ -218,6 +302,8 @@ def run_test(cfg: Config, spec: dict, backend: str, seed: int, out: Path) -> dic
                            "these are single-image edits, not identity-conditioned")
     summary["pass"] = bool(summary["identity_conditioned"] and summary["flicker_ratio"] is not None
                            and summary["flicker_ratio"] <= float(limits.get("sprite_max_flicker_ratio", 1.5))
+                           and summary["twe_ratio"] is not None
+                           and summary["twe_ratio"] <= float(limits.get("sprite_max_twe_ratio", 1.5))
                            and summary["drift_excess"] <= float(limits.get("sprite_max_drift_excess", 0.1))
                            and summary["pose_iou_min"] >= float(limits.get("sprite_min_pose_iou", 0.7)))
     # contact strip: baseline row over redraw row
@@ -227,6 +313,7 @@ def run_test(cfg: Config, spec: dict, backend: str, seed: int, out: Path) -> dic
         strip.paste(Image.fromarray(b).resize((strip_w, frame_size[1] // 2)), (k * strip_w, 0))
         strip.paste(Image.fromarray(r).resize((strip_w, frame_size[1] // 2)), (k * strip_w, frame_size[1] // 2))
     strip.save(out / "strip.jpg", quality=88)
-    return {"summary": summary, "images": images, "redraw": {"sequence": red_seq, "identity": red_id},
-            "baseline": {"sequence": base_seq, "identity": base_id}, "pose_iou": ious,
-            "walk": spec["walk"], "cast_frame": spec["cast_frame"]}
+    return {"summary": summary, "images": images,
+            "redraw": {"sequence": red_seq, "identity": red_id, "twe": red_twe},
+            "baseline": {"sequence": base_seq, "identity": base_id, "twe": base_twe},
+            "pose_iou": ious, "walk": spec["walk"], "cast_frame": spec["cast_frame"]}

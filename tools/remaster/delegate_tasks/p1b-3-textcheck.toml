@@ -1,0 +1,35 @@
+# Delegated 2026-11-15 (Phase 1b). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/textcheck.py", "tools/remaster/stages/geometry.py", "tools/remaster/stages/qa.py"]
+test = "python -m unittest tests.test_remaster_textcheck tests.test_remaster_relight tests.test_remaster_variants"
+prompt = """
+Problem: geometry.estimate() always pastes writing regions from the ESRGAN baseline, whose lettering is garbled,
+even when the redraw wrote the sign correctly; and QA never checks that text stayed legible. Read the acceptance
+test tools/tests/test_remaster_textcheck.py first; do not edit it.
+
+1. New module tools/remaster/textcheck.py:
+   - normalise(s) -> uppercase, keep only A-Z and 0-9.
+   - text_matches(original, other, threshold=0.8) -> None if normalise(original) is empty, else
+     difflib.SequenceMatcher(None, normalise(original), normalise(other)).ratio() >= threshold.
+   - read_text(client, image, box, min_side=512) -> str: crop box [x, y, w, h] (pad 4 px, clamp), upscale with
+     LANCZOS so the longer side is >= min_side, save to a temp PNG, call
+     client.chat(SYSTEM, PROMPT, images=[path], max_tokens=200) where PROMPT asks to transcribe exactly the
+     words written in the picture and answer JSON {"text": "..."} ("" if nothing is legible); parse the first
+     {...} in the reply with json; return its "text" or "" on any parse failure.
+   - text_gate(original_texts, remaster_texts) -> (ok, missing): every original string whose normalised form
+     has >= 4 characters must be matched by some remaster string, either text_matches(...) is True or its
+     normalised form is a substring of the remaster string's normalised form. missing lists the originals
+     (as given) that are not matched; ok = not missing.
+2. geometry.estimate(), step 4 (protected regions): create the vision client once, lazily, with
+   remaster.llm.ChatClient.from_config(cfg.section("llm"), "vision"). For an object with writing=True, read
+   its text in the original (the de-dithered plate, box in original px) and in the redraw (the bounding box of
+   warp_rect_polygon(shipped, box), which is in picture px). If textcheck.text_matches(original, redraw) is
+   True, do not paste it: append {"id", "label", "box", "pasted": False, "reason": "redraw text legible",
+   "text_original": ..., "text_redraw": ...}. Otherwise paste as now and add "text_original"/"text_redraw" to the
+   region record. If the client or a read raises, paste as now and record "text_error". Clue-only objects are
+   pasted as now.
+3. qa.py: add VLM_TEXT, a prompt for the side-by-side pair.jpg asking for JSON
+   {"original_text": [every sign, poster or printed text legible in image 1], "remaster_text": [the same for
+   image 2]}; in vlm_review ask it after the diff question and store review["text"]. In evaluate():
+   gates["text"] = ok from textcheck.text_gate(review["text"]["original_text"], ...["remaster_text"]) when
+   review has "text", else None; add "text_missing" to the summary.
+"""

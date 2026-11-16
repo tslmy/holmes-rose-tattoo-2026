@@ -159,7 +159,8 @@ def pick(cfg: Config, rows: list[dict], aggs: dict[str, dict]) -> dict:
         mine = [r for r in rows if r["scene"] == scene and r["backend"] == backend and r["status"] == "ok"]
         passed = [r for r in mine if r["pass"]]
         if passed:
-            best = max(passed, key=lambda r: (LEVEL_RANK[r["level"]], r["score"] or 0))
+            best = max(passed, key=lambda r: (LEVEL_RANK[redraw_bg.base_level(cfg, r["level"])],
+                                              r["score"] or 0))
             levels[scene] = {"level": best["level"], "score": best["score"], "why": "most ambitious level that passed"}
         else:
             best = max(mine, key=lambda r: (r["score"] or 0), default=None)

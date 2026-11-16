@@ -39,6 +39,15 @@ LEVEL_PROMPTS = {
            "left-to-right and front-to-back order. Add nothing, remove nothing, keep all writing."),
 }
 
+# Optional prompt sentences a level variant appends after the level instruction
+# (named by key under [bakeoff.variants.<name>].extras):
+PROMPT_EXTRAS = {
+    "keep_figures": ("Keep exactly the people already in the picture, in the same places and poses; do not add "
+                     "any person, animal or crowd."),
+    "no_new_light": "Do not add any light source, fire, flame, candle or lit window that is not in the original.",
+    "framing": "Keep the original framing edge to edge: do not zoom in, crop or widen the view.",
+}
+
 # Optional request fields of the remote image server, sent from a backend's `levels` table:
 #   strength  float 0..1, edit requests only: how much of the input image is KEPT (mflux semantics,
 #             as in `mflux-generate-flux2 --image PATH STRENGTH`): 0 = ignore the input, 1 = return it.
@@ -142,13 +151,17 @@ def _peak(log: str, label: str) -> float | None:
 
 
 def generate(cfg: Config, name: str, *, prompt: str, images: list[Path], size: tuple[int, int], seed: int,
-             out: Path, level: str | None = None, log_dir: Path | None = None) -> dict[str, Any]:
-    """Run one image; returns {seconds, peak_memory_gb, settings, ...}. Raises Unavailable."""
+             out: Path, level: str | None = None, settings: dict | None = None,
+             log_dir: Path | None = None) -> dict[str, Any]:
+    """Run one image; returns {seconds, peak_memory_gb, settings, ...}. Raises Unavailable.
+
+    `settings`, when given, is used instead of the backend's per-level settings
+    (a variant's request settings from redraw_bg.request_settings)."""
     reason = availability(cfg, name)
     if reason:
         raise Unavailable(reason)
     bk = backend(cfg, name)
-    settings = level_settings(bk, level) if level else {}
+    settings = dict(settings) if settings is not None else (level_settings(bk, level) if level else {})
     out.parent.mkdir(parents=True, exist_ok=True)
     width, height = size
     record: dict[str, Any] = {"backend": name, "model": bk.get("model"), "size": [width, height], "seed": seed,

@@ -1,0 +1,29 @@
+# Delegated 2026-11-15 (Phase 1b). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/qa.py"]
+test = "python -m unittest tests.test_remaster_newcontent tests.test_remaster_textcheck tests.test_remaster_variants"
+prompt = """
+QA misses objects and light sources the redraw invented (a side table and floor lamp standing in a walk zone, fires
+behind windows). Add two gates to tools/remaster/stages/qa.py. Read tools/tests/test_remaster_newcontent.py first;
+do not edit it.
+
+1. OBSTACLE_QUERIES = ["table", "chair", "lamp", "floor lamp", "statue", "bust", "cabinet", "barrel", "crate",
+   "cart", "bench", "person"].
+2. new_objects(orig_dets, final_dets, warp, queries, iou=0.2, min_score=0.25) -> list of
+   {"label": queries[d["query"]], "box": d["box"], "score": d["score"]}: detections are dicts
+   {"query": index, "score", "box": [x, y, w, h]}; orig boxes are in original px and are mapped into picture px
+   by warp.forward() on their 4 corners (take the bounding box); final boxes are already picture px. A final
+   detection with score >= min_score is new when no original detection of the same query (score >= 0.1) has IoU
+   >= iou with it. Keep final_dets order.
+3. blocking(new, walk_polys, hot_polys, picture_size, frac=0.2) -> the new objects whose box has at least `frac`
+   of its area inside the union of the given polygons (lists of [x, y] in picture px; rasterise with
+   cv2.fillPoly on a mask of picture_size = (width, height)).
+4. In evaluate(): run remaster.detect.detect(original, OBSTACLE_QUERIES) and detect(result, OBSTACLE_QUERIES)
+   (import inside the function; result = final.png at picture size), warp =
+   remaster.warp.GridWarp.from_json(sidecar["warp"]); blocked = blocking(new_objects(...),
+   sidecar.get("walk_zones_picture") or [], sidecar.get("hotspots_picture") or [], result.size);
+   gates["obstacles"] = not blocked; summary gets "new_objects" (all) and "blocking_objects". If detection
+   raises, gates["obstacles"] = None and record the error in summary["vlm_errors"].
+5. Add to VLM_DIFF's JSON a key "new_light_sources": [lamps, candles, fires, flames or lit windows in the remaster
+   that are not lit or not present in the original]. In evaluate(), gates["light"] =
+   not diff.get("new_light_sources") when the diff exists, else None; add "new_light_sources" to the summary.
+"""

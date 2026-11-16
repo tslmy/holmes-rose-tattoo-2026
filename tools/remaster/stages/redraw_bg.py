@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -43,6 +44,43 @@ def backends(cfg: Config) -> list[str]:
 
 def levels(cfg: Config) -> list[str]:
     return list(bakeoff(cfg).get("levels", ["L0", "L1", "L2"]))
+
+
+def variant(cfg: Config, name: str) -> dict:
+    """A named level variant: `name` must be in [bakeoff].levels; anything that is not a plain
+    level (L0/L1/L2) must have a [bakeoff.variants.<name>] table with its base level and optional
+    seed, strength, extras (keys of imagegen.PROMPT_EXTRAS) and mask_people."""
+    table = cfg.section("bakeoff").get("variants", {})
+    if name in ("L0", "L1", "L2"):
+        base, table_name = name, {}
+    else:
+        if name not in table:
+            raise KeyError(f"[bakeoff.variants.{name}] is missing from {cfg.path.name} (levels: {levels(cfg)})")
+        base = table[name].get("level")
+        if base not in ("L0", "L1", "L2"):
+            raise KeyError(f"[bakeoff.variants.{name}].level must be L0/L1/L2, got {base!r}")
+        table_name = table[name]
+    extras = list(table_name.get("extras") or [])
+    for key in extras:
+        if key not in imagegen.PROMPT_EXTRAS:
+            raise KeyError(f"[bakeoff.variants.{name}].extras key {key!r} is not in imagegen.PROMPT_EXTRAS")
+    return {"name": name, "level": base, "seed": int(table_name.get("seed", bakeoff(cfg).get("seed", 7))),
+            "strength": table_name.get("strength"), "extras": extras,
+            "mask_people": bool(table_name.get("mask_people", False))}
+
+
+def base_level(cfg: Config, name: str) -> str:
+    return variant(cfg, name)["level"]
+
+
+def request_settings(cfg: Config, bk: dict, name: str) -> dict:
+    """The backend's settings for the variant's base level, with `strength` replaced when the
+    variant sets its own."""
+    settings = imagegen.level_settings(bk, base_level(cfg, name))
+    strength = variant(cfg, name)["strength"]
+    if strength is not None:
+        settings["strength"] = strength
+    return settings
 
 
 def job_dir(cfg: Config, scene: int, backend: str, level: str) -> Path:
@@ -73,18 +111,72 @@ def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
             reason = imagegen.availability(cfg, backend)
             bk = imagegen.backend(cfg, backend) if reason is None or "no [image" not in reason else {}
             for level in levels(cfg):
-                fp = common.fingerprint(brief_fp, prep_fp, bk, imagegen.level_prompt(level), seed,
+                var = variant(cfg, level)
+                fp = common.fingerprint(brief_fp, prep_fp, bk, imagegen.level_prompt(var["level"]),
+                                        var, var["extras"], var["seed"],
                                         f"unavailable:{reason}" if reason else "available", *CODE)
                 tags = ["image-backend-provisional", "bakeoff-backend"]
                 specs.append(JobSpec(NAME, key(scene, backend, level),
-                                     {"scene": scene, "backend": backend, "level": level, "seed": seed}, fp,
-                                     after=[f"brief:scene/{scene:03d}", f"prepare:scene/{scene:03d}"], tags=tags))
+                                     {"scene": scene, "backend": backend, "level": level, "seed": var["seed"]},
+                                     fp,
+                                     after=[f"brief:scene/{scene:03d}", f"prepare:scene/{scene:03d}"],
+                                     tags=tags))
     return specs
 
 
-def prompt_for(cfg: Config, scene: int, level: str) -> str:
+def people_mask(cfg: Config, scene: int, size: tuple[int, int] | None = None) -> "np.ndarray":
+    """A 0/255 mask (uint8) of every person in the scene: the silhouette pixels
+    (nonzero plate layers) inside each person's box, or the whole box when the
+    silhouette has no pixels there; dilated 3 px. In original px, or nearest
+    resized to `size` = (width, height)."""
+    import cv2
+    import numpy as np
+
+    objects = json.loads((brief.out_dir(cfg, scene) / "objects.json").read_text(encoding="utf-8"))["objects"]
+    layers = np.asarray(Image.open(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_layers.png"))
+    mask = np.zeros_like(layers, np.uint8)
+    for obj in objects:
+        if obj.get("kind") != "person":
+            continue
+        x, y, w, h = obj["box"]
+        x0, y0 = max(0, int(x)), max(0, int(y))
+        x1, y1 = min(mask.shape[1], int(x) + int(w)), min(mask.shape[0], int(y) + int(h))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        inside = (layers[y0:y1, x0:x1] != 0).astype(np.uint8) * 255
+        mask[y0:y1, x0:x1] = inside if inside.any() else 255
+    mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    if size is not None:
+        mask = cv2.resize(mask, size, interpolation=cv2.INTER_NEAREST)
+    return (mask > 0).astype(np.uint8) * 255
+
+
+def strip_people(text: str) -> str:
+    """Keep the text up to and including the first blank line unchanged; in the
+    rest, drop every sentence that names a person (remaster.stages.qa.PEOPLE)."""
+    from . import qa
+
+    parts = text.split("\n\n", 1)
+    if len(parts) == 1:
+        return text
+    head, tail = parts
+    kept = []
+    for sentence in re.split(r"([.!?])", tail):
+        if sentence.strip() and qa.PEOPLE.search(sentence):
+            continue
+        kept.append(sentence)
+    return head + "\n\n" + "".join(kept)
+
+
+def prompt_for(cfg: Config, scene: int, name: str) -> str:
+    """The scene's visual brief, the base level's instruction, then each of the variant's extra
+    sentences, in order."""
     text = (brief.out_dir(cfg, scene) / "visual_brief.txt").read_text(encoding="utf-8").strip()
-    return f"{text}\n\n{imagegen.level_prompt(level)}"
+    var = variant(cfg, name)
+    prompt = f"{text}\n\n{imagegen.level_prompt(var['level'])}"
+    for key in var["extras"]:
+        prompt += " " + imagegen.PROMPT_EXTRAS[key]
+    return prompt
 
 
 def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
@@ -96,12 +188,32 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
     source = input_path(cfg, scene)
     if not source.exists() or Image.open(source).size != size:
         imagegen.resize_to(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png", source, size)
+    var = variant(cfg, level)
     prompt = prompt_for(cfg, scene, level)
+    masked_pixels = 0
+    if var["mask_people"]:
+        import cv2
+
+        import numpy as np
+
+        rgb = np.asarray(Image.open(source).convert("RGB"))
+        mask = people_mask(cfg, scene, size)
+        prompt = strip_people(prompt) + " The set is empty: there are no people in it."
     tmp = common.scratch_dir(cfg, f"redraw-{scene}-{backend}-{level}")
+    if var["mask_people"]:
+        masked_pixels = int((mask > 0).sum())
+        cv2.inpaint(rgb, mask, 5, cv2.INPAINT_TELEA)
+        masked = tmp / "input_masked.png"
+        Image.fromarray(rgb).save(masked)
+        source = masked
     try:
         record = imagegen.generate(cfg, backend, prompt=prompt, images=[source], size=size,
                                    seed=int(params.get("seed", 7)), out=tmp / "redraw.png", level=level,
+                                   settings=request_settings(cfg, imagegen.backend(cfg, backend), level),
                                    log_dir=tmp)
+        record["mask_people"] = var["mask_people"]
+        if var["mask_people"]:
+            record["masked_pixels"] = masked_pixels
         record["status"] = "ok"
     except imagegen.Unavailable as err:
         record = {"backend": backend, "level": level, "status": "unavailable", "reason": str(err)}
