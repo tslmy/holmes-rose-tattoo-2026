@@ -306,18 +306,15 @@
       "id": "bakeoff-backend",
       "kind": "decision",
       "title": "Phase 1 pick: image backend for backgrounds (by gate scores)",
-      "default": "remote-flux2-klein-9b (2/21 results passed, mean score 0.621)",
+      "default": "remote-flux2-klein-9b (0/56 results passed, mean score 0.763)",
       "detail": "Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).",
-      "options": [
-        "remote-flux2-klein-4b (0/21 passed, score 0.535)",
-        "remote-flux3-image-klein (0/7 passed, score 0.859)"
-      ],
+      "options": [],
       "status": "pending",
       "decision": "",
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T13:17:32-08:00"
+      "updated": "2026-11-15T17:14:07-08:00"
     },
     {
       "id": "bakeoff-settings",
@@ -333,13 +330,13 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T13:17:32-08:00"
+      "updated": "2026-11-15T17:14:07-08:00"
     },
     {
       "id": "bakeoff-room-levels",
       "kind": "decision",
       "title": "Phase 1 pick: freedom level per golden room",
-      "default": "1: baseline; 26: baseline; 18: baseline; 4: L2; 2: baseline; 9: L2; 36: baseline",
+      "default": "1: baseline; 26: baseline; 18: baseline; 4: baseline; 2: baseline; 9: baseline; 36: baseline",
       "detail": "Most ambitious level whose result passed every known gate with the picked backend; 'baseline' = no level passed, the room keeps the ESRGAN baseline. Reasons per room in docs/bakeoff-results.md; overlays for L2 in work/bakeoff/contact.html (local).",
       "options": [
         "set a room to L0 / L1 / L2 / baseline"
@@ -349,14 +346,14 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T13:17:32-08:00"
+      "updated": "2026-11-15T17:14:07-08:00"
     },
     {
       "id": "bakeoff-sprite-route",
       "kind": "decision",
       "title": "Phase 1 pick: route for character sprites",
-      "default": "identity-conditioned with remote-flux2-klein-4b",
-      "detail": "passed flicker, drift and pose gates",
+      "default": "sr-baseline",
+      "detail": "no backend passed the flicker/drift/pose gates; characters stay on de-dithered SR (plan risk fallback) until Phase 3's research",
       "options": [
         "identity-conditioned redraw with a named backend",
         "sr-baseline until Phase 3"
@@ -366,57 +363,126 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T13:17:32-08:00"
+      "updated": "2026-11-15T17:14:08-08:00"
     },
     {
       "id": "bakeoff-l0l1-drift",
       "kind": "decision",
       "title": "L0/L1 (img2img at strength 0.6 / 0.45) move the room's geometry",
       "default": "Leave L0/L1 configured but unused: no golden room picks them. FLUX.2 img2img still moves and resizes furniture (scene 26: billiards table, door) and adds people at these strengths; drift p95 8-400 px against the 2/4 px limits",
-      "detail": "FLUX.3 refuses strength (HTTP 422: FLUX.2 image-to-image only), so it has no L0/L1. docs/bakeoff-results.md",
+      "detail": "FLUX.3 refuses strength (HTTP 422: FLUX.2 image-to-image only), so it has no L0/L1. docs/bakeoff-results.md\n\nPhase 1b: strength sweep 0.75/0.85/0.9 on 9B. No strength both holds geometry and changes the picture, so L0/L1 are dropped. See docs/bakeoff-results.md.",
       "options": [
         "sweep 9B at strength 0.75 / 0.85 / 0.9 on the 7 golden scenes (~21 remote jobs, ~20 min) before Phase 2",
         "drop L0/L1 and keep L2 + baseline only"
       ],
-      "status": "pending",
+      "status": "done",
       "decision": "",
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:18:43-08:00",
-      "updated": "2026-11-15T13:18:43-08:00"
+      "updated": "2026-11-15T17:16:34-08:00"
     },
     {
       "id": "bakeoff-protected-paste",
       "kind": "decision",
       "title": "Protected writing/clue patches show as flat grey blocks when the redraw relights the room",
       "default": "Fix in Phase 2 before batches: colour-match each pasted patch to the redraw around it (e.g. seamless clone or a local mean/variance transfer) and keep the mask feather; until then such rooms fail the VLM gate and stay on baseline",
-      "detail": "Seen on scene 18 (stairs, obelisk base) and scene 2 (left wall). The VLM flagged scene 18 ('white rectangular blocks').",
+      "detail": "Seen on scene 18 (stairs, obelisk base) and scene 2 (left wall). The VLM flagged scene 18 ('white rectangular blocks').\n\nPhase 1b: pasted patches are colour-matched (gain/offset fitted on a ring around each region).",
       "options": [
         "paste only writing, let clues be redrawn and checked by the object gate"
       ],
-      "status": "pending",
+      "status": "done",
       "decision": "",
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:18:50-08:00",
-      "updated": "2026-11-15T13:18:50-08:00"
+      "updated": "2026-11-15T17:16:34-08:00"
     },
     {
       "id": "bakeoff-scene4-fires",
       "kind": "decision",
       "title": "Scene 4 at L2 (9B) invented fires behind the police-station windows; the VLM gate did not catch it",
       "default": "Keep scene 4 at L2 provisionally; please look at work/bakeoff/contact.html scene 4. Phase 2 QA should ask the VLM about light sources and fire explicitly",
-      "detail": "The VLM only fails on removed objects or added people; added light/fire lowers the score but does not fail.",
+      "detail": "The VLM only fails on removed objects or added people; added light/fire lowers the score but does not fail.\n\nPhase 1b: scene 4 now fails the new light gate (lit doorway, lamp) and stays on baseline.",
       "options": [
         "set scene 4 to baseline",
         "regenerate scene 4 with another seed"
+      ],
+      "status": "done",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-15T13:18:50-08:00",
+      "updated": "2026-11-15T17:16:34-08:00"
+    },
+    {
+      "id": "bakeoff-1b-invented-content",
+      "kind": "decision",
+      "title": "9B L2 invents people, lamps and fires despite prompt and masking",
+      "default": "all golden rooms stay on the ESRGAN baseline; Phase 2 plans on baseline plus targeted fixes",
+      "detail": "Phase 1b: keep-figures/no-new-light instructions over 3 seeds and masking people out all still add figures or lights in every room. See docs/bakeoff-results.md (Phase 1b).",
+      "options": [
+        "masked edit: let L2 touch only non-floor, non-figure areas",
+        "try another model at L2",
+        "accept baseline for Phase 2"
       ],
       "status": "pending",
       "decision": "",
       "size_gb": null,
       "images": [],
-      "created": "2026-11-15T13:18:50-08:00",
-      "updated": "2026-11-15T13:18:50-08:00"
+      "created": "2026-11-15T17:16:34-08:00",
+      "updated": "2026-11-15T17:16:34-08:00"
+    },
+    {
+      "id": "bakeoff-retypeset-signs",
+      "kind": "decision",
+      "title": "Re-typeset writing regions (signs, plaques)",
+      "default": "Phase 2 renders known sign text with a period font over writing regions",
+      "detail": "The scene 4 \"METROPOLITAN POLICE\" sign is garbled in both the ESRGAN baseline and 9B redraws; neither can produce it legibly.",
+      "options": [
+        "re-typeset in Phase 2",
+        "leave the ESRGAN baseline lettering"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-15T17:16:34-08:00",
+      "updated": "2026-11-15T17:16:34-08:00"
+    },
+    {
+      "id": "bakeoff-text-gate-ocr",
+      "kind": "decision",
+      "title": "QA text gate: VLM reads text from context",
+      "default": "keep the VLM text gate; add an OCR cross-check (local) when Phase 2 touches signs",
+      "detail": "qwen3.8-27b read \"METROPOLITAN POLICE\" from a garbled final (scene 4), so the gate can pass unreadable signs. It does catch rewritten signs (scene 36).",
+      "options": [
+        "add OCR cross-check",
+        "keep VLM only"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-15T17:16:35-08:00",
+      "updated": "2026-11-15T17:16:35-08:00"
+    },
+    {
+      "id": "bakeoff-light-gate-lit-lamps",
+      "kind": "decision",
+      "title": "Light gate flags existing street lamps drawn lit",
+      "default": "keep the gate strict (lit existing lamps count as new light)",
+      "detail": "Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other gates.",
+      "options": [
+        "keep strict",
+        "ignore lamps that match an original object"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-15T17:16:35-08:00",
+      "updated": "2026-11-15T17:16:35-08:00"
     }
   ]
 }

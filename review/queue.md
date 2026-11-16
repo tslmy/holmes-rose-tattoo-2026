@@ -7,7 +7,7 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (9)
+## Pending (10)
 
 ### #16 `download-detector-dino` · download (0.68 GB): Downloaded OWLv2 detector and DINOv2-small for the geometry and sprite gates
 
@@ -27,8 +27,7 @@ Changed 2026-11-15 after you saw high local GPU use: the remote 9B and FLUX 3 Kl
 
 ### #18 `bakeoff-backend` · decision: Phase 1 pick: image backend for backgrounds (by gate scores)
 
-- **Default in use:** remote-flux2-klein-9b (2/21 results passed, mean score 0.621)
-- **Options:** remote-flux2-klein-4b (0/21 passed, score 0.535); remote-flux3-image-klein (0/7 passed, score 0.859)
+- **Default in use:** remote-flux2-klein-9b (0/56 results passed, mean score 0.763)
 - Raised 2026-11-15, updated 2026-11-15
 
 Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).
@@ -43,7 +42,7 @@ The 4x tiled detail pass is not part of the bake-off (Phase 2).
 
 ### #20 `bakeoff-room-levels` · decision: Phase 1 pick: freedom level per golden room
 
-- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: L2; 2: baseline; 9: L2; 36: baseline
+- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: baseline; 2: baseline; 9: baseline; 36: baseline
 - **Options:** set a room to L0 / L1 / L2 / baseline
 - Raised 2026-11-15, updated 2026-11-15
 
@@ -51,37 +50,45 @@ Most ambitious level whose result passed every known gate with the picked backen
 
 ### #21 `bakeoff-sprite-route` · decision: Phase 1 pick: route for character sprites
 
-- **Default in use:** identity-conditioned with remote-flux2-klein-4b
+- **Default in use:** sr-baseline
 - **Options:** identity-conditioned redraw with a named backend; sr-baseline until Phase 3
 - Raised 2026-11-15, updated 2026-11-15
 
-passed flicker, drift and pose gates
+no backend passed the flicker/drift/pose gates; characters stay on de-dithered SR (plan risk fallback) until Phase 3's research
 
-### #22 `bakeoff-l0l1-drift` · decision: L0/L1 (img2img at strength 0.6 / 0.45) move the room's geometry
+### #25 `bakeoff-1b-invented-content` · decision: 9B L2 invents people, lamps and fires despite prompt and masking
 
-- **Default in use:** Leave L0/L1 configured but unused: no golden room picks them. FLUX.2 img2img still moves and resizes furniture (scene 26: billiards table, door) and adds people at these strengths; drift p95 8-400 px against the 2/4 px limits
-- **Options:** sweep 9B at strength 0.75 / 0.85 / 0.9 on the 7 golden scenes (~21 remote jobs, ~20 min) before Phase 2; drop L0/L1 and keep L2 + baseline only
+- **Default in use:** all golden rooms stay on the ESRGAN baseline; Phase 2 plans on baseline plus targeted fixes
+- **Options:** masked edit: let L2 touch only non-floor, non-figure areas; try another model at L2; accept baseline for Phase 2
 - Raised 2026-11-15
 
-FLUX.3 refuses strength (HTTP 422: FLUX.2 image-to-image only), so it has no L0/L1. docs/bakeoff-results.md
+Phase 1b: keep-figures/no-new-light instructions over 3 seeds and masking people out all still add figures or lights in every room. See docs/bakeoff-results.md (Phase 1b).
 
-### #23 `bakeoff-protected-paste` · decision: Protected writing/clue patches show as flat grey blocks when the redraw relights the room
+### #26 `bakeoff-retypeset-signs` · decision: Re-typeset writing regions (signs, plaques)
 
-- **Default in use:** Fix in Phase 2 before batches: colour-match each pasted patch to the redraw around it (e.g. seamless clone or a local mean/variance transfer) and keep the mask feather; until then such rooms fail the VLM gate and stay on baseline
-- **Options:** paste only writing, let clues be redrawn and checked by the object gate
+- **Default in use:** Phase 2 renders known sign text with a period font over writing regions
+- **Options:** re-typeset in Phase 2; leave the ESRGAN baseline lettering
 - Raised 2026-11-15
 
-Seen on scene 18 (stairs, obelisk base) and scene 2 (left wall). The VLM flagged scene 18 ('white rectangular blocks').
+The scene 4 "METROPOLITAN POLICE" sign is garbled in both the ESRGAN baseline and 9B redraws; neither can produce it legibly.
 
-### #24 `bakeoff-scene4-fires` · decision: Scene 4 at L2 (9B) invented fires behind the police-station windows; the VLM gate did not catch it
+### #27 `bakeoff-text-gate-ocr` · decision: QA text gate: VLM reads text from context
 
-- **Default in use:** Keep scene 4 at L2 provisionally; please look at work/bakeoff/contact.html scene 4. Phase 2 QA should ask the VLM about light sources and fire explicitly
-- **Options:** set scene 4 to baseline; regenerate scene 4 with another seed
+- **Default in use:** keep the VLM text gate; add an OCR cross-check (local) when Phase 2 touches signs
+- **Options:** add OCR cross-check; keep VLM only
 - Raised 2026-11-15
 
-The VLM only fails on removed objects or added people; added light/fire lowers the score but does not fail.
+qwen3.8-27b read "METROPOLITAN POLICE" from a garbled final (scene 4), so the gate can pass unreadable signs. It does catch rewritten signs (scene 36).
 
-## Decided or done (15)
+### #28 `bakeoff-light-gate-lit-lamps` · decision: Light gate flags existing street lamps drawn lit
+
+- **Default in use:** keep the gate strict (lit existing lamps count as new light)
+- **Options:** keep strict; ignore lamps that match an original object
+- Raised 2026-11-15
+
+Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other gates.
+
+## Decided or done (18)
 
 ### #1 `download-flux2-klein-9b-q4` · download (9.5 GB): FLUX.2 klein 9B (4-bit) for edit / casting candidates
 
@@ -241,3 +248,36 @@ mflux weights in ~/.cache/huggingface/hub: FLUX.2 klein 9B q4 8.9 GB, Z-Image Co
 Not done yet: waiting for you to say which items to delete (asked 2026-11-14).
 
 Done 2026-11-14: `hf cache rm` removed mflux-community/qwen-image-2-1-mflux-q8, mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8 and alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 (fetched by the Z-Image smoke run): 40.5 GB freed in the cache (60.9 -> 20.4 GB). Free disk stayed ~25 GB, so something else used about as much at the same time; not identified. FLUX 3 Klein and FLUX.2 9B weights remain. The qwen21-edit and zimage-controlnet backends would re-download on next use.
+
+### #22 `bakeoff-l0l1-drift` · decision: L0/L1 (img2img at strength 0.6 / 0.45) move the room's geometry
+
+- **Default in use:** Leave L0/L1 configured but unused: no golden room picks them. FLUX.2 img2img still moves and resizes furniture (scene 26: billiards table, door) and adds people at these strengths; drift p95 8-400 px against the 2/4 px limits
+- **Options:** sweep 9B at strength 0.75 / 0.85 / 0.9 on the 7 golden scenes (~21 remote jobs, ~20 min) before Phase 2; drop L0/L1 and keep L2 + baseline only
+- **Status:** done
+- Raised 2026-11-15, updated 2026-11-15
+
+FLUX.3 refuses strength (HTTP 422: FLUX.2 image-to-image only), so it has no L0/L1. docs/bakeoff-results.md
+
+Phase 1b: strength sweep 0.75/0.85/0.9 on 9B. No strength both holds geometry and changes the picture, so L0/L1 are dropped. See docs/bakeoff-results.md.
+
+### #23 `bakeoff-protected-paste` · decision: Protected writing/clue patches show as flat grey blocks when the redraw relights the room
+
+- **Default in use:** Fix in Phase 2 before batches: colour-match each pasted patch to the redraw around it (e.g. seamless clone or a local mean/variance transfer) and keep the mask feather; until then such rooms fail the VLM gate and stay on baseline
+- **Options:** paste only writing, let clues be redrawn and checked by the object gate
+- **Status:** done
+- Raised 2026-11-15, updated 2026-11-15
+
+Seen on scene 18 (stairs, obelisk base) and scene 2 (left wall). The VLM flagged scene 18 ('white rectangular blocks').
+
+Phase 1b: pasted patches are colour-matched (gain/offset fitted on a ring around each region).
+
+### #24 `bakeoff-scene4-fires` · decision: Scene 4 at L2 (9B) invented fires behind the police-station windows; the VLM gate did not catch it
+
+- **Default in use:** Keep scene 4 at L2 provisionally; please look at work/bakeoff/contact.html scene 4. Phase 2 QA should ask the VLM about light sources and fire explicitly
+- **Options:** set scene 4 to baseline; regenerate scene 4 with another seed
+- **Status:** done
+- Raised 2026-11-15, updated 2026-11-15
+
+The VLM only fails on removed objects or added people; added light/fire lowers the score but does not fail.
+
+Phase 1b: scene 4 now fails the new light gate (lit doorway, lamp) and stays on baseline.

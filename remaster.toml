@@ -131,6 +131,7 @@ warp_grid_spacing_px = 40      # control-grid spacing of the room warp (original
 warp_smoothness = 2.0
 qa_confident_score = 0.2       # objects found this confidently in the original must be found again
 bakeoff_min_change = 20.0     # bake-off: mean |shipped - original| (0-255) below this is not a remaster
+sprite_max_twe_ratio = 1.5   # sprite test: texture warp error vs the baseline walk (Phase 1b)
 sprite_min_flicker_ratio = 0.6 # sprite test: less motion than this vs the baseline walk = one still pose
 sprite_max_flicker_ratio = 1.5 # sprite test: frame-to-frame change vs the ESRGAN baseline
 sprite_max_drift_excess = 0.1  # DINOv2 drift beyond the baseline's own pose variation
@@ -155,15 +156,27 @@ canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "
 # Remote only: the server's flux2-klein-9b and flux3-image-klein are the same models as the local
 # flux2-klein-edit / flux3-klein-edit. Local-only candidates (img2img strengths, Qwen, Z-Image) are
 # queued for review instead of run (review item bakeoff-local-backends).
-backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b", "remote-flux3-image-klein"]
-levels = ["L0", "L1", "L2"]
+# Phase 1b (2026-11-15): the Phase 1 pick only, with fixes as variants (results in docs/bakeoff-results.md;
+# Phase 1 ran all three remote models at L0/L1/L2).
+backends = ["remote-flux2-klein-9b"]
+levels = ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90"]
 seed = 7
 megapixels = 1.0
 # ChatGPT reference images (outside the repo) for scenes that have a matching one.
 reference_dir = "~/Pictures/260805 ChatGPT reimagined Holmes Rose Tattoo"
 references = { 4 = "ChatGPT Image Aug 5, 2026, 10_02_50 PM.png", 2 = "ChatGPT Image Aug 4, 2026, 10_03_08 PM.png" }
 
+# Named variants (redraw_bg.variant): base level + optional seed, strength, prompt extras, mask_people.
+[bakeoff.variants]
+L2-fix = { level = "L2", extras = ["keep_figures", "no_new_light", "framing"] }
+L2-fix-s11 = { level = "L2", extras = ["keep_figures", "no_new_light", "framing"], seed = 11 }
+L2-fix-s23 = { level = "L2", extras = ["keep_figures", "no_new_light", "framing"], seed = 23 }
+L2-mask = { level = "L2", extras = ["no_new_light", "framing"], mask_people = true }
+L1-s75 = { level = "L1", strength = 0.75 }
+L1-s85 = { level = "L1", strength = 0.85 }
+L1-s90 = { level = "L1", strength = 0.9 }
+
 [bakeoff.sprite_test]
-backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b", "remote-flux3-image-klein"]
+backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b"]
 characters.holmes = { resource = "SVGAWALK.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Sherlock Holmes: a tall, lean man with a sharp profile, grey deerstalker cap, grey Inverness cape coat over a black frock coat and waistcoat, white shirt, black trousers and shoes." }
 characters.watson = { resource = "WATSON.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Dr John Watson: a sturdy man with a moustache, black bowler hat, dark brown three-piece suit, striped orange and blue wool scarf, white shirt, dark shoes." }

@@ -1,5 +1,126 @@
 # Phase 1 bake-off results
 
+## Phase 1b: fixes and re-run (2026-11-15)
+
+**Result: 0 of 7 golden rooms pass, down from 2 of 7. Every room stays on the
+ESRGAN baseline.** The two Phase 1 passes (scenes 4 and 9 at 9B L2) now fail
+gates that are new in 1b. Both failures are real: scene 9 gains table lamps and
+a lit fire, and scene 4 gains a lit doorway with a lamp. No gate was loosened.
+
+Re-run: `remote-flux2-klein-9b` only, 8 variants x 7 rooms = 56 redraws, plus
+the sprite test on 4B and 9B (`[bakeoff.variants]` in `remaster.toml`).
+
+| Room | Phase 1 (9B) | Phase 1b best variant | Gates still failing | Why it stays on baseline |
+| --- | --- | --- | --- | --- |
+| 1 | fail (inverted order) | L2-fix-s11, 0.82 | objects, light | the newsstand is restocked and the windows are lit; seeds swap which gate fails |
+| 26 | fail (zoom) | L2-fix-s11, 0.90 | vlm, floor | a bar shelf and a chair are added and the dartboard is removed; the scene is still recomposed (warp p95 13-50 px at every variant); the floor gate flags the pool table in every variant |
+| 18 | fail (people) | L2-mask, 0.78 | obstacles, vlm, light, floor | two to six people are still invented on the stairs, the water becomes pavement, and wall lights are added |
+| 4 | **pass** | L2-fix-s11, 0.85 | obstacles, light | a lit door and a lamp are added in the archway; the sign problem is below |
+| 2 | fail (people) | L2-fix-s11, 0.86 | obstacles, vlm, light, floor | a woman, a man and a dog are invented at every seed and with masking |
+| 9 | **pass** | L2-fix-s23, 0.91 | light | table lamps and a lit fire are added; this was invisible to the Phase 1 gates |
+| 36 | fail (people moved) | L2-fix, 0.75 | obstacles, vlm, light, text | four to six people are added, and shop signs are rewritten |
+
+### What each fix did
+
+1. **Invented people: neither fix works.**
+   - The keep-figures instruction (`L2-fix`, three seeds) did not stop it.
+   - Masking the people out (`L2-mask`: inpaint them out, strip them from the
+     brief, paste them back relit) did not stop it either. 9B fills empty
+     floor with new figures on its own.
+   - At L2, prompt-level control is exhausted. The remaining routes are an
+     edit restricted to a mask that leaves the floor and figure areas
+     untouched, or another model. Queued as `bakeoff-1b-invented-content`.
+2. **Invented light and fire: the gate works, the prompt fix does not.**
+   - Removing "fires" from the style brief and adding the no-new-light
+     instruction did not stop 9B adding lamps, fires and lit windows.
+   - The new `light` gate fails them, as intended. It also flags street lamps
+     that are in the original but are now drawn lit (scenes 1, 4 and 36).
+     That is a partial false positive, but no room's result depends on it.
+3. **Scene 4 sign: fixed where it can be, and a weakness in the gate found.**
+   - Diagnosis: Phase 1 had a legible "METROPOLITAN POLICE" from 9B, and the
+     protection step pasted the garbled ESRGAN baseline over it.
+   - Fix: the geometry stage now asks the VLM to read each writing region in
+     the original and in the redraw. It keeps the redraw only when the two
+     match. In this run 9B's sign was itself garbled ("DOLE IT FLDR..."), so
+     the baseline was pasted, which is correct.
+   - The baseline is garbled too, though (ESRGAN on 320x200 lettering). The
+     real fix is to re-typeset writing regions. Queued as
+     `bakeoff-retypeset-signs`.
+   - Weakness: the new QA `text` gate read "METROPOLITAN POLICE" from that
+     garbled final. qwen3.8-27b fills in text from context, so the gate can
+     pass unreadable signs. It does catch rewritten signs (scene 36). Queued as
+     `bakeoff-text-gate-ocr`.
+4. **Protected-patch colour: fixed.**
+   - Pasted patches get a per-channel gain and offset fitted on a ring around
+     each region, then are applied to the patch. The scene 4 sign blends into
+     the relit wall.
+   - Spec correction (mine): a least-squares slope shrinks towards zero when
+     the redraw is misaligned. The gain is now the ratio of standard
+     deviations, clipped to 0.5-2.
+5. **Added obstacles: gate added.**
+   - OWLv2 boxes in the final that have no match in the warped original and
+     cover more than 20% of a walk zone or hotspot fail the `obstacles` gate.
+   - It fires on the scene 9 lamps, the scene 4 wall lamp, the scene 2 table
+     and the people in scenes 18 and 36.
+6. **L0/L1: dropped.**
+   - Sweeping strength 0.75 / 0.85 / 0.9 (the share of the input kept):
+     - geometry holds at 0.9 (warp p95 0.4-2.6 px), but the picture barely
+       changes (change 4-13, gate at 20);
+     - at 0.75 only scene 36 reaches change 20, and there it drifts 5.4 px.
+       Elsewhere p95 is 0.9-3.9 px at change 6-15.
+   - 0.75 and 0.85 gave byte-identical images. At 8 steps the server appears
+     to round strength to the same starting step.
+   - No room passes, so there is no strength at which geometry holds and the
+     picture still changes. Phase 2 uses L2 or the baseline only.
+7. **Scene 26 zoom and scene 1 inversion: not fixed by prompt or seed.**
+   - Scene 26 is still recomposed with the framing instruction at every seed:
+     warp p95 is 13-50 px and stretch is 1.15-2.1.
+   - Scene 1 swaps an order inversion for missing objects across seeds.
+8. **Sprite flicker: gate added; all sprites fail it.**
+   - The temporal warp error (DIS flow, forward-backward check, high-pass at
+     sigma 2.5, loop pair included), redraw over baseline:
+
+     | | 4B | 9B |
+     | --- | --- | --- |
+     | Holmes | 3.48 | 3.25 |
+     | Watson | 3.96 | 3.86 |
+
+   - The gate is 1.5, and sprite-consistency-research.md predicted about 3.5.
+     Characters stay on de-dithered SR until Phase 3's keyframe and flow work.
+
+### Delegation (Phase 1b)
+
+- Six tasks went to OpenCode on qwen3.8-27b: variants, relight, textcheck,
+  newcontent, maskpeople and twe. Opus wrote each spec and acceptance test.
+- All six passed on the first attempt. Agent time ranged from 2 to 28 min; the
+  text check and the flicker metric took longest.
+- **Local-model failure:**
+  - In `temporal_warp_error` it swapped rows and columns
+    (`a[vx, vy]`, `b[vx, vy]`). That crashed on the real 384-wide frames.
+    It passed the test only because my synthetic frames were square.
+  - I fixed it by hand. The flaw shared by the test is my spec gap.
+- **Opus spec fix:** the relight gain (item 4).
+- **Stricter than asked:** the text match also requires equal length and a long
+  common run. This is what correctly rejected the garbled sign in this run.
+
+### Review queue changes
+
+- **Settled:**
+  - `bakeoff-l0l1-drift`: dropped;
+  - `bakeoff-protected-paste`: the relight is in;
+  - `bakeoff-scene4-fires`: scene 4 is on baseline, and the light gate
+    catches fires.
+- **Refreshed by the report:**
+  - `bakeoff-room-levels`: all rooms on baseline;
+  - `bakeoff-sprite-route`: SR baseline.
+- **New:**
+  - `bakeoff-1b-invented-content`
+  - `bakeoff-retypeset-signs`
+  - `bakeoff-text-gate-ocr`
+  - `bakeoff-light-gate-lit-lamps`
+
+## Phase 1 (original run)
+
 Run 2026-11-15 on the golden set (scenes 1, 26, 18, 4, 2, 9, 36; Holmes and
 Watson) through `uv run remaster run`, then `uv run remaster bakeoff-report`.
 Images and the contact sheet stay local (`work/bakeoff/contact.html`, game
