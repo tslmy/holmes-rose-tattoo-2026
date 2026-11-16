@@ -7,7 +7,7 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (10)
+## Pending (12)
 
 ### #16 `download-detector-dino` · download (0.68 GB): Downloaded OWLv2 detector and DINOv2-small for the geometry and sprite gates
 
@@ -27,7 +27,8 @@ Changed 2026-11-15 after you saw high local GPU use: the remote 9B and FLUX 3 Kl
 
 ### #18 `bakeoff-backend` · decision: Phase 1 pick: image backend for backgrounds (by gate scores)
 
-- **Default in use:** remote-flux2-klein-9b (0/56 results passed, mean score 0.763)
+- **Default in use:** remote-flux2-klein-9b (2/56 results passed, mean score 0.762)
+- **Options:** zimage-controlnet (0/21 passed, score 0.455)
 - Raised 2026-11-15, updated 2026-11-15
 
 Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).
@@ -42,7 +43,7 @@ The 4x tiled detail pass is not part of the bake-off (Phase 2).
 
 ### #20 `bakeoff-room-levels` · decision: Phase 1 pick: freedom level per golden room
 
-- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: baseline; 2: baseline; 9: baseline; 36: baseline
+- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: baseline; 2: baseline; 9: L2-fix-s11; 36: baseline
 - **Options:** set a room to L0 / L1 / L2 / baseline
 - Raised 2026-11-15, updated 2026-11-15
 
@@ -80,15 +81,31 @@ The scene 4 "METROPOLITAN POLICE" sign is garbled in both the ESRGAN baseline an
 
 qwen3.8-27b read "METROPOLITAN POLICE" from a garbled final (scene 4), so the gate can pass unreadable signs. It does catch rewritten signs (scene 36).
 
-### #28 `bakeoff-light-gate-lit-lamps` · decision: Light gate flags existing street lamps drawn lit
+### #29 `bakeoff-1c-controlnet` · decision: ControlNet (Z-Image + Union 2.1, depth+HED) pins layout but is murky, not photoreal
 
-- **Default in use:** keep the gate strict (lit existing lamps count as new light)
-- **Options:** keep strict; ignore lamps that match an original object
+- **Default in use:** not used: all rooms except 9 stay on the ESRGAN baseline; weights kept in the cache
+- **Options:** try canny-only / lower control / more steps; try a tile or img2img+control hybrid; try a ControlNet on the image server; drop ControlNet
 - Raised 2026-11-15
 
-Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other gates.
+Phase 1c sweep 0.65/0.8/0.95: 0/7 pass; VLM photoreal 2-4/10, palette 2-5/10; fog, lost lamps, people turned to ghosts (scene 36). ~23 GB of weights re-downloaded. See docs/bakeoff-results.md (Phase 1c).
 
-## Decided or done (18)
+### #30 `bakeoff-scene4-archway-lamp` · decision: Scene 4 fails only on a lamp added in the archway
+
+- **Default in use:** keep the obstacles gate strict; scene 4 stays on baseline
+- **Options:** keep strict; exempt wall-mounted fixtures that do not stand on a walk zone
+- Raised 2026-11-15
+
+Under the new light rule scene 4 L2-fix-s11/s23 fail only the obstacles gate: the new archway lamp overlaps a hotspot polygon.
+
+### #31 `image-server-controlnet-route` · approval: Add a ControlNet route to the image server on the second laptop
+
+- **Default in use:** not done: ControlNet runs locally (allow_local) when needed
+- **Options:** add the route on the server (someone at that laptop); enable SSH there so jobs can run remotely; keep running locally
+- Raised 2026-11-15
+
+The server API accepts only the FLUX klein models and rejects extra fields; its source is not in this repo and SSH is closed. On the server ControlNet would likely be several times faster than the 4-5 min per image here.
+
+## Decided or done (19)
 
 ### #1 `download-flux2-klein-9b-q4` · download (9.5 GB): FLUX.2 klein 9B (4-bit) for edit / casting candidates
 
@@ -281,3 +298,14 @@ Phase 1b: pasted patches are colour-matched (gain/offset fitted on a ring around
 The VLM only fails on removed objects or added people; added light/fire lowers the score but does not fail.
 
 Phase 1b: scene 4 now fails the new light gate (lit doorway, lamp) and stays on baseline.
+
+### #28 `bakeoff-light-gate-lit-lamps` · decision: Light gate flags existing street lamps drawn lit
+
+- **Default in use:** keep the gate strict (lit existing lamps count as new light)
+- **Options:** keep strict; ignore lamps that match an original object
+- **Status:** done
+- Raised 2026-11-15, updated 2026-11-15
+
+Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other gates.
+
+Phase 1c: settled by the user ("Yes, to both."): new lighting is score-only; a narrow fire gate fails only story fire (burning buildings, flames from windows).

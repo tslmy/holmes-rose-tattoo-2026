@@ -95,7 +95,12 @@ steps = 25
 tool = "mflux-generate-z-image-controlnet"
 model = "mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8"
 base_model = "z-image-controlnet"
-steps = 20
+steps = 9
+# Phase 1c (2026-11-15): the image server has no ControlNet route (its API takes only the FLUX klein
+# models), so this one backend may run on this Mac despite local_generation = false. One job at a time,
+# the runner's disk check applies; weights (~15 GB, re-download approved) and DepthPro fetch on first use.
+allow_local = true
+extra_args = ["--low-ram"]
 levels = { L0 = { control_strength = 0.9 }, L1 = { control_strength = 0.75 }, L2 = { control_strength = 0.55 } }
 
 [image.backends.esrgan]
@@ -158,8 +163,9 @@ canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "
 # queued for review instead of run (review item bakeoff-local-backends).
 # Phase 1b (2026-11-15): the Phase 1 pick only, with fixes as variants (results in docs/bakeoff-results.md;
 # Phase 1 ran all three remote models at L0/L1/L2).
-backends = ["remote-flux2-klein-9b"]
-levels = ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90"]
+backends = ["remote-flux2-klein-9b", "zimage-controlnet"]
+levels = ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90",
+          "ZC-65", "ZC-80", "ZC-95"]
 seed = 7
 megapixels = 1.0
 # ChatGPT reference images (outside the repo) for scenes that have a matching one.
@@ -168,13 +174,18 @@ references = { 4 = "ChatGPT Image Aug 5, 2026, 10_02_50 PM.png", 2 = "ChatGPT Im
 
 # Named variants (redraw_bg.variant): base level + optional seed, strength, prompt extras, mask_people.
 [bakeoff.variants]
-L2-fix = { level = "L2", extras = ["keep_figures", "no_new_light", "framing"] }
-L2-fix-s11 = { level = "L2", extras = ["keep_figures", "no_new_light", "framing"], seed = 11 }
-L2-fix-s23 = { level = "L2", extras = ["keep_figures", "no_new_light", "framing"], seed = 23 }
-L2-mask = { level = "L2", extras = ["no_new_light", "framing"], mask_people = true }
-L1-s75 = { level = "L1", strength = 0.75 }
-L1-s85 = { level = "L1", strength = 0.85 }
-L1-s90 = { level = "L1", strength = 0.9 }
+L2-fix = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"] }
+L2-fix-s11 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 11 }
+L2-fix-s23 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 23 }
+L2-mask = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["no_new_light", "framing"], mask_people = true }
+# Phase 1c: structure-conditioned redraws (Z-Image Turbo + ControlNet Union 2.1), text-to-image under depth
+# and HED outline maps of the original, so the layout is pinned; base level L1 = identity warp + offsets gate.
+ZC-65 = { level = "L1", backends = ["zimage-controlnet"], controls = [["depth", 0.65], ["hed", 0.65]] }
+ZC-80 = { level = "L1", backends = ["zimage-controlnet"], controls = [["depth", 0.8], ["hed", 0.8]] }
+ZC-95 = { level = "L1", backends = ["zimage-controlnet"], controls = [["depth", 0.95], ["hed", 0.95]] }
+L1-s75 = { level = "L1", backends = ["remote-flux2-klein-9b"], strength = 0.75 }
+L1-s85 = { level = "L1", backends = ["remote-flux2-klein-9b"], strength = 0.85 }
+L1-s90 = { level = "L1", backends = ["remote-flux2-klein-9b"], strength = 0.9 }
 
 [bakeoff.sprite_test]
 backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b"]

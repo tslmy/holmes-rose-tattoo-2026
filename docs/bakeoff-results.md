@@ -1,5 +1,113 @@
 # Phase 1 bake-off results
 
+## Phase 1c: new lighting allowed, and structure-conditioned redraws (2026-11-15)
+
+The user approved two changes after Phase 1b: new lighting is allowed, and a
+ControlNet route gets a try. People, obstacles, objects, warp, floor and text
+gates are unchanged.
+
+**Result: (a) alone, 1 of 7 rooms passes (scene 9 at `L2-fix-s11`). (b)
+ControlNet: 0 of 7, and the images are worse than the original.** Scene 9 is
+the only room off the ESRGAN baseline.
+
+| Room | Phase 1b | (a) new light rule, best 9B variant | (b) ControlNet, best of 0.65/0.8/0.95 | Still on baseline because |
+| --- | --- | --- | --- | --- |
+| 1 | fail | fail: L2-fix-s11 (objects), L2/L2-fix (order) | fail: warp, objects, offsets, vlm | inverted or missing objects at L2; ControlNet loses the lamp light and the banner |
+| 26 | fail | fail: L2-fix-s11 (vlm, floor) | fail: warp, objects, offsets, vlm, floor | added bar furniture, recomposition; floor gate flags the pool table every time |
+| 18 | fail | fail: L2-mask (obstacles, vlm, floor) | fail: warp, offsets, floor, changed | invented people on the stairs; ControlNet removes the water and barely changes the rest |
+| 4 | fail | fail: L2-fix-s11 / s23 (obstacles only) | fail: warp, objects, offsets | the lamp added in the archway overlaps a hotspot (obstacles gate unchanged) |
+| 2 | fail | fail: L2-fix-s11 (obstacles, vlm, floor) | fail: warp, objects, offsets, obstacles, vlm | invented woman, man and dog |
+| 9 | fail (light) | **pass: L2-fix-s11 (0.91), L2-fix-s23** | fail: warp, vlm, changed | **picked: L2-fix-s11** |
+| 36 | fail | fail: L2-fix (obstacles, vlm, text) | fail: warp, objects, offsets, obstacles, vlm, text | invented people, rewritten signs; ControlNet fogs the street and turns the people into ghosts |
+
+### (a) Light is score-only; a narrow fire gate remains
+
+- `light` no longer gates. `new_light_sources` is still recorded in each
+  `qa.json`.
+- A new `fire` gate fails only fire that changes the story. The VLM diff
+  question gained a `story_fire` field: flames anywhere other than inside a
+  fireplace, stove, lamp, candle or torch.
+- **Reliability.** I made six scene 4 edits on the server: flames from the
+  upper windows, flames from the doorway, and a burning cart, two seeds each.
+  Each was asked three times (temperature 0 and 0.7):
+  - all 18 answers failed them;
+  - six Phase 1b finals with lit fireplaces or lamps passed in all 18 answers
+    (scene 9 x3, 26, 4, 36);
+  - across the 70 re-judged Phase 1b and 1c results, the gate never fired.
+
+  Caveat: the positives are blatant. A faint orange glow in a window is
+  untested.
+- Re-judged without regenerating (QA only). Scene 9 now passes. Scene 4 is held
+  back only by its archway lamp, which the obstacles gate catches by design.
+
+### (b) Z-Image Turbo + ControlNet Union 2.1, depth + HED
+
+- **Where it ran:** on this Mac. The image server's API accepts only the three
+  FLUX klein models and rejects extra fields, its source is on the other
+  laptop, and SSH to it is closed.
+  - The `zimage-controlnet` backend has `allow_local = true`. Every other local
+    backend stays off.
+  - The weights re-downloaded on the first job: about 23 GB with DepthPro.
+    Free disk went from 60 to 37 GB.
+  - Runs were one job at a time, 9 steps, `--low-ram`. Each took 250-290 s
+    (755 s for the first, including the download). Peak memory was 22 GB.
+- **The sweep:** depth and HED, both at 0.65, 0.8 and 0.95; text-to-image from
+  the visual brief. These variants use base level L1: an identity warp plus
+  the layer-offset gate.
+- **By eye:**
+  - The layout is pinned. 50/50 blends with the original show almost no
+    doubled edges in any room at any strength, and no people are invented.
+  - But the pictures are neither photoreal nor a sharper original. They are
+    murkier: brown-grey, foggy, soft and low-detail.
+    - Scene 36 dissolves into fog and its people become ghosts.
+    - Scene 9 loses the bookcases and the green lamp, and its armchairs turn
+      red.
+    - Scene 1 loses "221B", the headline and the cobbles.
+  - The VLM agrees: photoreal 2-4/10 (9B L2 scores about 9) and palette 2-5/10.
+- **A measurement bug found and fixed.**
+  - The first QA pass failed every room on warp and offsets, with a p95 of
+    hundreds of px, and found 0 of 8 objects in scene 1.
+  - Cause: SIFT found nothing in common between the flat 1996 render and the
+    retextured image. The resulting nonsense homography (scale 0.017) then
+    drove object prediction and the warp fit.
+  - `geometry.homography_degenerate` now detects that case. Object positions
+    are then predicted with the identity, and the warp is fitted on the object
+    anchors alone; thresholds are unchanged. With it, scene 1's p95 dropped
+    from 587 to 8-19 px.
+  - Rooms whose objects the detector can't find in the murky images (26, 36)
+    still measure badly. Those fail on objects and vlm regardless.
+- **Verdict:** this configuration is not a route to photoreal rooms. It removes
+  the invented-people problem only by replacing the picture with a worse one.
+  Untried: canny-only or lower control, more steps, a tile/img2img hybrid, or
+  a ControlNet on the server. Queued as `bakeoff-1c-controlnet`.
+
+### Delegation (Phase 1c)
+
+- Three tasks went to OpenCode on qwen3.8-27b: firegate, controlnet and
+  degenerate. All passed on the first attempt (137 s, 388 s, 176 s), with
+  non-square fixtures this time.
+- **Review fix:** for `controlnet` it wrapped variants in a 40-line dict
+  subclass. That satisfied two of my tests that contradicted each other: the
+  1b test wanted an exact dict, the 1c test wanted new keys. The spec conflict
+  is mine. I replaced the subclass with a plain dict and loosened the older
+  test.
+- **Local-model rule break:** for `firegate` it edited
+  `test_remaster_newcontent.py`, my Phase 1b test, which still required the
+  old `light` gate.
+  - That test was outside its allowed files. The delegate guard did not stop it
+    because test files are not tracked as outputs.
+  - The change was right, so I kept it. Next time the guard should also flag
+    edits to acceptance tests.
+
+### Review queue changes (Phase 1c)
+
+- **Settled:** `bakeoff-light-gate-lit-lamps`, replaced by the user's rule.
+- **Refreshed:** `bakeoff-room-levels` (scene 9: L2-fix-s11).
+- **New:**
+  - `bakeoff-1c-controlnet`
+  - `bakeoff-scene4-archway-lamp`
+  - `image-server-controlnet-route`
+
 ## Phase 1b: fixes and re-run (2026-11-15)
 
 **Result: 0 of 7 golden rooms pass, down from 2 of 7. Every room stays on the
