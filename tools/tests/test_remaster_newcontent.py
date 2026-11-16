@@ -37,7 +37,9 @@ class NewContentTest(unittest.TestCase):
         self.assertIn("new_light_sources", qa.VLM_DIFF)
         src = inspect.getsource(qa.evaluate)
         self.assertIn('gates["obstacles"]', src)
-        self.assertIn('gates["light"]', src)
+        # Phase 1c: new light is score-only; story fire is the gate (see test_remaster_firegate).
+        self.assertNotIn('gates["light"]', src)
+        self.assertIn('gates["fire"]', src)
 
 
 if __name__ == "__main__":

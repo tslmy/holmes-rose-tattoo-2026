@@ -1,0 +1,26 @@
+# Delegated 2026-11-15 (Phase 1c). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/imagegen.py", "tools/remaster/stages/redraw_bg.py"]
+test = "python -m unittest tests.test_remaster_controlnet tests.test_remaster_variants tests.test_remaster_maskpeople"
+timeout_s = 3600
+prompt = """
+Add structure-conditioned (ControlNet) redraws to the remaster pipeline (Python, package tools/remaster).
+Read the acceptance test tools/tests/test_remaster_controlnet.py first; it defines every name and behaviour;
+do not edit it. Its images are 96 wide by 64 high: keep width and height straight.
+
+1. tools/remaster/imagegen.py, availability(): an mflux backend whose table has allow_local = true is not
+   blocked by [image].local_generation = false (the other checks, tool installed and weights cached, still
+   apply). Without allow_local the existing "local generation is off" reason is unchanged.
+   Note: hf_cached must not block a backend with allow_local = true whose weights are simply not downloaded
+   yet, because mflux downloads them on first use: for such backends skip the hf_cached check.
+2. imagegen.generate(), the controlnet branch: when settings has "controls" (a list of [kind, strength]
+   pairs), add one "--control" argument per pair, each "kind:<images[0]>:strength", in order. Without
+   "controls" keep the current single control (kind from settings/backend "control", default canny, strength
+   settings["control_strength"] default 0.8).
+3. tools/remaster/stages/redraw_bg.py:
+   - variant() returns two more keys: "backends" (list of backend names from the variant table, or None) and
+     "controls" (list of [kind, strength] pairs as lists, or None). Plain levels L0/L1/L2 have both None.
+   - request_settings(): when the variant has controls, settings["controls"] = those pairs (the base level's
+     settings such as control_strength are kept).
+   - plan(): skip a (backend, level) pair when variant(cfg, level)["backends"] is set and does not contain the
+     backend. Plain levels run on every backend as before.
+"""

@@ -55,6 +55,8 @@ List the differences in content, not in style or rendering quality. Return JSON:
  "moved": [objects that clearly changed position or order],
  "new_light_sources": [lamps, candles, fires, flames or lit windows in the remaster that are not lit or
 not present in the original],
+ "story_fire": [flames anywhere other than inside a fireplace, stove, lamp, candle or torch: a burning
+building, flames from windows or doors, a room, vehicle or object on fire; [] when none],
  "writing_changed": true if any sign, poster or printed text was changed, garbled or lost,
  "photoreal": 1-10 how much the remaster looks like a real photograph of a built set,
  "palette_kept": 1-10 how well the remaster keeps the original's colours and their vibrancy}
@@ -201,6 +203,15 @@ def palette_scores(original: Image.Image, result: Image.Image) -> dict:
     return {"chroma_ratio": round(ratio, 3), "hue_overlap": round(overlap, 3), "palette_score": round(score, 3)}
 
 
+def fire_gate(diff: dict | None) -> bool | None:
+    """New lighting is allowed; only fire that changes the story (burning building, flames from
+    windows, a room or object on fire) fails. Missing key counts as no story fire."""
+    if diff is None:
+        return None
+    story = [s for s in diff.get("story_fire") or [] if s and str(s).strip()]
+    return not story
+
+
 def parse_json(text: str) -> dict:
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
@@ -323,7 +334,7 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
     else:
         removed = added = []
         gates["vlm"] = None
-    gates["light"] = not new_light if new_light is not None else None
+    gates["fire"] = fire_gate(diff if "diff" in review else None)
     if "floor" in review:
         gates["floor"] = bool(review["floor"].get("floor"))
     elif sidecar.get("walk_zones_picture"):
@@ -349,6 +360,7 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
                "inversions": len(objs["order_inversions"]), "removed": removed, "added": added,
                "new_objects": new_objs, "blocking_objects": blocked,
                "new_light_sources": list(new_light) if new_light is not None else None,
+               "story_fire": list(diff.get("story_fire") or []) if "diff" in review else None,
                 "text_missing": text_missing,
                "writing_changed": diff.get("writing_changed"), "photoreal": photoreal,
                "palette_kept": diff.get("palette_kept"), **palette, "score": round(score, 3),

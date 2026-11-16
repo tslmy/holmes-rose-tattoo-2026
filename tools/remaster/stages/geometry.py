@@ -88,6 +88,26 @@ def anchor_objects(objects: list[dict], orig_dets: list[dict], queries: list[str
     return out
 
 
+def homography_degenerate(h: np.ndarray, size: tuple[float, float]) -> bool:
+    """True when a SIFT homography is nonsense (scale, mirror, strong perspective)."""
+    W, H = float(size[0]), float(size[1])
+    h = np.asarray(h, float)
+    if h.shape != (3, 3) or not np.all(np.isfinite(h)):
+        return True
+    if abs(h[2, 0]) * W > 0.1 or abs(h[2, 1]) * H > 0.1:
+        return True
+    n = h / h[2, 2]
+    det = float(np.linalg.det(n[:2, :2]))
+    if det <= 0.0 or not 0.25 <= det <= 4.0:
+        return True
+    cx, cy = W / 2, H / 2
+    w = h @ np.array([cx, cy, 1.0])
+    px, py = w[0] / w[2], w[1] / w[2]
+    if np.hypot(px - cx, py - cy) > 0.25 * W:
+        return True
+    return False
+
+
 def _project(h: np.ndarray, pts: np.ndarray) -> np.ndarray:
     p = np.hstack([pts, np.ones((len(pts), 1))]) @ np.asarray(h).T
     return p[:, :2] / p[:, 2:3]
@@ -265,6 +285,15 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
     # 1. dense + sparse matching in original units
     matches = warpmod.match_points(np.asarray(original.convert("L")), np.asarray(redraw_small.convert("L")))
     homography = np.asarray(matches["homography"])
+    degenerate = bool(homography_degenerate(homography, (W, H)))
+    if degenerate:
+        # a nonsense SIFT homography (e.g. ControlNet redraws sharing no texture)
+        # would poison object prediction and the warp fit: use identity and
+        # fit on the object anchors only
+        homography = np.eye(3)
+        matches["src"] = np.zeros((0, 2))
+        matches["dst"] = np.zeros((0, 2))
+        matches["weights"] = np.zeros(0)
 
     # 2. named-object anchors (detector on both images, boxes in original units)
     queries = sorted({o["query"] for o in objects}) or ["object"]
@@ -447,7 +476,8 @@ def estimate(cfg: Config, scene: int, level: str, redraw_path: Path, out: Path) 
     sidecar = {
         "summary": summary, "scene": scene, "level": level, "picture_size": list(redraw.size),
         "original_size": [W, H], "warp": shipped.to_json(), "measured_warp": fitted.to_json(),
-        "measured": measured, "matching": {k: v for k, v in matches.items() if k not in ("src", "dst", "weights")},
+        "measured": measured, "matching": {k: v for k, v in matches.items() if k not in ("src", "dst", "weights")}
+        | {"degenerate": degenerate},
         "anchors": anchors, "protected_regions": regions, "layers": layers,
         "walk_zones_picture": walk_polys, "hotspots_picture": hot_polys,
     }

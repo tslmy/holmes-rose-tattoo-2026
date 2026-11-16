@@ -57,8 +57,9 @@ class VariantTest(unittest.TestCase):
             self.assertEqual(redraw_bg.base_level(cfg, "L2-fix"), "L2")
             self.assertEqual(redraw_bg.base_level(cfg, "L1-s85"), "L1")
             plain = redraw_bg.variant(cfg, "L2")
-            self.assertEqual(plain, {"name": "L2", "level": "L2", "seed": 7, "strength": None, "extras": [],
-                                     "mask_people": False})
+            self.assertEqual({k: plain[k] for k in ("name", "level", "seed", "strength", "extras", "mask_people")},
+                             {"name": "L2", "level": "L2", "seed": 7, "strength": None, "extras": [],
+                              "mask_people": False})
             fix = redraw_bg.variant(cfg, "L2-fix")
             self.assertEqual((fix["level"], fix["seed"]), ("L2", 11))
             self.assertEqual(fix["extras"], ["keep_figures", "no_new_light", "framing"])

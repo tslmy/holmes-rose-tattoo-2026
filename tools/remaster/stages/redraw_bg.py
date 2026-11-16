@@ -49,7 +49,9 @@ def levels(cfg: Config) -> list[str]:
 def variant(cfg: Config, name: str) -> dict:
     """A named level variant: `name` must be in [bakeoff].levels; anything that is not a plain
     level (L0/L1/L2) must have a [bakeoff.variants.<name>] table with its base level and optional
-    seed, strength, extras (keys of imagegen.PROMPT_EXTRAS) and mask_people."""
+    seed, strength, extras (keys of imagegen.PROMPT_EXTRAS), mask_people, backends (which backends
+    it may run on) and controls (a list of [kind, strength] ControlNet pairs). Plain levels L0/L1/L2
+    have no backends and no controls."""
     table = cfg.section("bakeoff").get("variants", {})
     if name in ("L0", "L1", "L2"):
         base, table_name = name, {}
@@ -64,9 +66,12 @@ def variant(cfg: Config, name: str) -> dict:
     for key in extras:
         if key not in imagegen.PROMPT_EXTRAS:
             raise KeyError(f"[bakeoff.variants.{name}].extras key {key!r} is not in imagegen.PROMPT_EXTRAS")
+    named = name not in ("L0", "L1", "L2")
     return {"name": name, "level": base, "seed": int(table_name.get("seed", bakeoff(cfg).get("seed", 7))),
             "strength": table_name.get("strength"), "extras": extras,
-            "mask_people": bool(table_name.get("mask_people", False))}
+            "mask_people": bool(table_name.get("mask_people", False)),
+            "backends": list(table_name.get("backends") or []) if named else None,
+            "controls": [list(c) for c in table_name.get("controls") or []] if named else None}
 
 
 def base_level(cfg: Config, name: str) -> str:
@@ -75,11 +80,13 @@ def base_level(cfg: Config, name: str) -> str:
 
 def request_settings(cfg: Config, bk: dict, name: str) -> dict:
     """The backend's settings for the variant's base level, with `strength` replaced when the
-    variant sets its own."""
+    variant sets its own and `controls` added when the variant carries ControlNet pairs."""
     settings = imagegen.level_settings(bk, base_level(cfg, name))
-    strength = variant(cfg, name)["strength"]
-    if strength is not None:
-        settings["strength"] = strength
+    var = variant(cfg, name)
+    if var["strength"] is not None:
+        settings["strength"] = var["strength"]
+    if var["controls"]:
+        settings["controls"] = var["controls"]
     return settings
 
 
@@ -112,6 +119,8 @@ def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
             bk = imagegen.backend(cfg, backend) if reason is None or "no [image" not in reason else {}
             for level in levels(cfg):
                 var = variant(cfg, level)
+                if var["backends"] is not None and backend not in var["backends"]:
+                    continue  # the variant names the backends it runs on; this one is not one of them
                 fp = common.fingerprint(brief_fp, prep_fp, bk, imagegen.level_prompt(var["level"]),
                                         var, var["extras"], var["seed"],
                                         f"unavailable:{reason}" if reason else "available", *CODE)

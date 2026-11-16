@@ -134,12 +134,14 @@ def availability(cfg: Config, name: str) -> str | None:
             return f"server lists {health}, not {bk['model']}"
         return None
     if bk.get("tool", "").startswith("mflux"):
-        if not cfg.section("image").get("local_generation", True):
+        if not bk.get("allow_local", False) and not cfg.section("image").get("local_generation", True):
             return ("local generation is off ([image].local_generation = false): diffusion runs on the "
                     "remote image server, not this Mac's GPU")
         if not mflux_tool(bk["tool"]):
             return f"{bk['tool']} not installed (uv tool install --python 3.13 mflux)"
-        if not hf_cached(bk["model"]):
+        # allow_local backends download their weights on first use, so a missing cache is not an
+        # unavailability; every other mflux backend needs its weights in the Hugging Face cache.
+        if not bk.get("allow_local", False) and not hf_cached(bk["model"]):
             return f"weights {bk['model']} not in the Hugging Face cache (deleted or never downloaded)"
         return None
     return f"tool {bk.get('tool')!r} is not an image generation backend"
@@ -198,8 +200,12 @@ def generate(cfg: Config, name: str, *, prompt: str, images: list[Path], size: t
         if "guidance" in settings or "guidance" in bk:
             cmd += ["--guidance", str(settings.get("guidance", bk.get("guidance")))]
         if "controlnet" in bk["tool"]:
-            kind = settings.get("control", bk.get("control", "canny"))
-            cmd += ["--control", f"{kind}:{images[0]}:{settings.get('control_strength', 0.8)}"]
+            if settings.get("controls"):  # one --control per [kind, strength] pair, in order
+                for kind, strength in settings["controls"]:
+                    cmd += ["--control", f"{kind}:{images[0]}:{strength}"]
+            else:
+                kind = settings.get("control", bk.get("control", "canny"))
+                cmd += ["--control", f"{kind}:{images[0]}:{settings.get('control_strength', 0.8)}"]
         elif "strength" in settings:  # img2img: init image + how strongly it is kept (mflux: 0 = ignored)
             cmd += ["--image", str(images[0]), str(settings["strength"])]
         elif images:
