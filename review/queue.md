@@ -7,15 +7,7 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (12)
-
-### #16 `download-detector-dino` · download (0.68 GB): Downloaded OWLv2 detector and DINOv2-small for the geometry and sprite gates
-
-- **Default in use:** Downloaded google/owlv2-base-patch16-ensemble (0.59 GB) and facebook/dinov2-small (0.08 GB) into the Hugging Face cache (proceeded)
-- **Options:** keep; swap the detector for Grounding DINO tiny (~0.7 GB)
-- Raised 2026-11-15
-
-Used by `geometry` (named-object anchors for the room warp) and `qa`/`sprite-test` (identity embeddings). The project gained a `bakeoff` extra: opencv-python-headless and transformers.
+## Pending (11)
 
 ### #17 `bakeoff-deleted-backends` · decision (40.5 GB): Bake-off is remote-only: local mflux candidates were not run
 
@@ -27,9 +19,9 @@ Changed 2026-11-15 after you saw high local GPU use: the remote 9B and FLUX 3 Kl
 
 ### #18 `bakeoff-backend` · decision: Phase 1 pick: image backend for backgrounds (by gate scores)
 
-- **Default in use:** remote-flux2-klein-9b (2/56 results passed, mean score 0.762)
+- **Default in use:** remote-flux2-klein-9b (12/140 results passed, mean score 0.762)
 - **Options:** zimage-controlnet (0/21 passed, score 0.455)
-- Raised 2026-11-15, updated 2026-11-15
+- Raised 2026-11-15, updated 2026-11-16
 
 Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).
 
@@ -37,15 +29,15 @@ Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).
 
 - **Default in use:** {"levels": {"L0": {"steps": 8, "strength": 0.6}, "L1": {"steps": 8, "strength": 0.45}, "L2": {"steps": 8}}, "model": "flux2-klein-9b", "multi_image": true, "tool": "http"}; seed 7; ~1 MP generation; level instruction appended to the brief
 - **Options:** other strengths/levels from docs/bakeoff-results.md
-- Raised 2026-11-15, updated 2026-11-15
+- Raised 2026-11-15, updated 2026-11-16
 
 The 4x tiled detail pass is not part of the bake-off (Phase 2).
 
 ### #20 `bakeoff-room-levels` · decision: Phase 1 pick: freedom level per golden room
 
-- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: baseline; 2: baseline; 9: L2-fix-s11; 36: baseline
+- **Default in use:** 1: baseline; 26: baseline; 18: baseline; 4: L2-fix-s47; 2: baseline; 9: L2-fix-s47; 36: baseline
 - **Options:** set a room to L0 / L1 / L2 / baseline
-- Raised 2026-11-15, updated 2026-11-15
+- Raised 2026-11-15, updated 2026-11-16
 
 Most ambitious level whose result passed every known gate with the picked backend; 'baseline' = no level passed, the room keeps the ESRGAN baseline. Reasons per room in docs/bakeoff-results.md; overlays for L2 in work/bakeoff/contact.html (local).
 
@@ -53,7 +45,7 @@ Most ambitious level whose result passed every known gate with the picked backen
 
 - **Default in use:** sr-baseline
 - **Options:** identity-conditioned redraw with a named backend; sr-baseline until Phase 3
-- Raised 2026-11-15, updated 2026-11-15
+- Raised 2026-11-15, updated 2026-11-16
 
 no backend passed the flicker/drift/pose gates; characters stay on de-dithered SR (plan risk fallback) until Phase 3's research
 
@@ -105,7 +97,7 @@ Under the new light rule scene 4 L2-fix-s11/s23 fail only the obstacles gate: th
 
 The server API accepts only the FLUX klein models and rejects extra fields; its source is not in this repo and SSH is closed. On the server ControlNet would likely be several times faster than the 4-5 min per image here.
 
-## Decided or done (19)
+## Decided or done (20)
 
 ### #1 `download-flux2-klein-9b-q4` · download (9.5 GB): FLUX.2 klein 9B (4-bit) for edit / casting candidates
 
@@ -265,6 +257,15 @@ mflux weights in ~/.cache/huggingface/hub: FLUX.2 klein 9B q4 8.9 GB, Z-Image Co
 Not done yet: waiting for you to say which items to delete (asked 2026-11-14).
 
 Done 2026-11-14: `hf cache rm` removed mflux-community/qwen-image-2-1-mflux-q8, mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8 and alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 (fetched by the Z-Image smoke run): 40.5 GB freed in the cache (60.9 -> 20.4 GB). Free disk stayed ~25 GB, so something else used about as much at the same time; not identified. FLUX 3 Klein and FLUX.2 9B weights remain. The qwen21-edit and zimage-controlnet backends would re-download on next use.
+
+### #16 `download-detector-dino` · download (0.68 GB): Downloaded OWLv2 detector and DINOv2-small for the geometry and sprite gates
+
+- **Default in use:** Downloaded google/owlv2-base-patch16-ensemble (0.59 GB) and facebook/dinov2-small (0.08 GB) into the Hugging Face cache (proceeded)
+- **Options:** keep; swap the detector for Grounding DINO tiny (~0.7 GB)
+- **Status:** confirmed, decision: keep
+- Raised 2026-11-15, updated 2026-11-15
+
+Used by `geometry` (named-object anchors for the room warp) and `qa`/`sprite-test` (identity embeddings). The project gained a `bakeoff` extra: opencv-python-headless and transformers.
 
 ### #22 `bakeoff-l0l1-drift` · decision: L0/L1 (img2img at strength 0.6 / 0.45) move the room's geometry
 

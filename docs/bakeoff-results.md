@@ -108,6 +108,27 @@ the only room off the ESRGAN baseline.
   - `bakeoff-scene4-archway-lamp`
   - `image-server-controlnet-route`
 
+### Seed lottery (2026-11-16)
+
+The user approved a seed lottery: 9B at `L2-fix` (all three prompt extras) with 12 more seeds
+(3, 5, 13, 17, 19, 29, 31, 37, 41, 43, 47, 53), making 15 seeds per room with 11 and 23. Same gates as (a).
+
+| Scene | Seeds that pass | Most common failing gates |
+|------:|:---------------:|---------------------------|
+| 1  | 0/15 | objects, order, vlm |
+| 2  | 0/15 | obstacles, vlm, floor, objects |
+| 4  | 4/15 (19, 31, 41, 47) | obstacles (archway lamp) |
+| 9  | 8/15 | — |
+| 18 | 0/15 | vlm, floor, warp, obstacles |
+| 26 | 0/15 | vlm, floor (walk zone under the pool table), objects |
+| 36 | 0/15 | obstacles, vlm, objects |
+
+- **More seeds rescue rooms that are close, not rooms that fail systematically.** Scene 4 now passes
+  without the obstacles-gate change. Scenes 2, 18, 26 and 36 fail the same gates on every seed, so their
+  causes are the prompt, the model or the gate, not luck.
+- **Picks:** scenes 4 and 9 at `L2-fix-s47`; the other five keep the ESRGAN baseline.
+- **For iteration 1:** 4 seeds per room catches most of what 15 do (scene 4 passes at 4/15, scene 9 at 8/15).
+
 ## Phase 1b: fixes and re-run (2026-11-15)
 
 **Result: 0 of 7 golden rooms pass, down from 2 of 7. Every room stays on the

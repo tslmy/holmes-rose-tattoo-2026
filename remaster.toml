@@ -165,7 +165,9 @@ canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "
 # Phase 1 ran all three remote models at L0/L1/L2).
 backends = ["remote-flux2-klein-9b", "zimage-controlnet"]
 levels = ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90",
-          "ZC-65", "ZC-80", "ZC-95"]
+          "ZC-65", "ZC-80", "ZC-95",
+          # Seed lottery (2026-11-15): same fixes, more seeds; the gates pick.
+          "L2-fix-s3", "L2-fix-s5", "L2-fix-s13", "L2-fix-s17", "L2-fix-s19", "L2-fix-s29", "L2-fix-s31", "L2-fix-s37", "L2-fix-s41", "L2-fix-s43", "L2-fix-s47", "L2-fix-s53"]
 seed = 7
 megapixels = 1.0
 # ChatGPT reference images (outside the repo) for scenes that have a matching one.
@@ -177,6 +179,18 @@ references = { 4 = "ChatGPT Image Aug 5, 2026, 10_02_50 PM.png", 2 = "ChatGPT Im
 L2-fix = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"] }
 L2-fix-s11 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 11 }
 L2-fix-s23 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 23 }
+L2-fix-s3 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 3 }
+L2-fix-s5 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 5 }
+L2-fix-s13 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 13 }
+L2-fix-s17 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 17 }
+L2-fix-s19 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 19 }
+L2-fix-s29 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 29 }
+L2-fix-s31 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 31 }
+L2-fix-s37 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 37 }
+L2-fix-s41 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 41 }
+L2-fix-s43 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 43 }
+L2-fix-s47 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 47 }
+L2-fix-s53 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 53 }
 L2-mask = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["no_new_light", "framing"], mask_people = true }
 # Phase 1c: structure-conditioned redraws (Z-Image Turbo + ControlNet Union 2.1), text-to-image under depth
 # and HED outline maps of the original, so the layout is pinned; base level L1 = identity warp + offsets gate.

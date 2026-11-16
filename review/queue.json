@@ -277,12 +277,12 @@
         "keep",
         "swap the detector for Grounding DINO tiny (~0.7 GB)"
       ],
-      "status": "pending",
-      "decision": "",
+      "status": "confirmed",
+      "decision": "keep",
       "size_gb": 0.68,
       "images": [],
       "created": "2026-11-15T10:44:03-08:00",
-      "updated": "2026-11-15T10:44:03-08:00"
+      "updated": "2026-11-15T21:15:14-08:00"
     },
     {
       "id": "bakeoff-deleted-backends",
@@ -306,7 +306,7 @@
       "id": "bakeoff-backend",
       "kind": "decision",
       "title": "Phase 1 pick: image backend for backgrounds (by gate scores)",
-      "default": "remote-flux2-klein-9b (2/56 results passed, mean score 0.762)",
+      "default": "remote-flux2-klein-9b (12/140 results passed, mean score 0.762)",
       "detail": "Results: docs/bakeoff-results.md; images: work/bakeoff/contact.html (local).",
       "options": [
         "zimage-controlnet (0/21 passed, score 0.455)"
@@ -316,7 +316,7 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T21:09:31-08:00"
+      "updated": "2026-11-16T00:22:23-08:00"
     },
     {
       "id": "bakeoff-settings",
@@ -332,13 +332,13 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T21:09:31-08:00"
+      "updated": "2026-11-16T00:22:23-08:00"
     },
     {
       "id": "bakeoff-room-levels",
       "kind": "decision",
       "title": "Phase 1 pick: freedom level per golden room",
-      "default": "1: baseline; 26: baseline; 18: baseline; 4: baseline; 2: baseline; 9: L2-fix-s11; 36: baseline",
+      "default": "1: baseline; 26: baseline; 18: baseline; 4: L2-fix-s47; 2: baseline; 9: L2-fix-s47; 36: baseline",
       "detail": "Most ambitious level whose result passed every known gate with the picked backend; 'baseline' = no level passed, the room keeps the ESRGAN baseline. Reasons per room in docs/bakeoff-results.md; overlays for L2 in work/bakeoff/contact.html (local).",
       "options": [
         "set a room to L0 / L1 / L2 / baseline"
@@ -348,7 +348,7 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T21:09:31-08:00"
+      "updated": "2026-11-16T00:22:23-08:00"
     },
     {
       "id": "bakeoff-sprite-route",
@@ -365,7 +365,7 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-15T13:14:14-08:00",
-      "updated": "2026-11-15T21:09:31-08:00"
+      "updated": "2026-11-16T00:22:24-08:00"
     },
     {
       "id": "bakeoff-l0l1-drift",
