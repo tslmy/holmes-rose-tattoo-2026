@@ -163,11 +163,14 @@ canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "
 # queued for review instead of run (review item bakeoff-local-backends).
 # Phase 1b (2026-11-15): the Phase 1 pick only, with fixes as variants (results in docs/bakeoff-results.md;
 # Phase 1 ran all three remote models at L0/L1/L2).
-backends = ["remote-flux2-klein-9b", "zimage-controlnet"]
-levels = ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90",
-          "ZC-65", "ZC-80", "ZC-95",
-          # Seed lottery (2026-11-15): same fixes, more seeds; the gates pick.
-          "L2-fix-s3", "L2-fix-s5", "L2-fix-s13", "L2-fix-s17", "L2-fix-s19", "L2-fix-s29", "L2-fix-s31", "L2-fix-s37", "L2-fix-s41", "L2-fix-s43", "L2-fix-s47", "L2-fix-s53"]
+backends = ["remote-flux2-klein-9b"]
+# Iteration 1 (2026-11-16, user-approved full run to a playable build): every room, 9B L2-fix at the four
+# seeds that passed most in the seed lottery; rooms where none passes keep the ESRGAN baseline.
+# The golden-set bake-off list was:
+#   ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90", "ZC-65", "ZC-80",
+#    "ZC-95", "L2-fix-s3", "L2-fix-s5", "L2-fix-s13", "L2-fix-s17", "L2-fix-s19", "L2-fix-s29", "L2-fix-s31",
+#    "L2-fix-s37", "L2-fix-s41", "L2-fix-s43", "L2-fix-s47", "L2-fix-s53"]
+levels = ["L2-fix-s47", "L2-fix-s19", "L2-fix-s31", "L2-fix-s41"]
 seed = 7
 megapixels = 1.0
 # ChatGPT reference images (outside the repo) for scenes that have a matching one.

@@ -1,5 +1,32 @@
 # Phase 1 bake-off results
 
+## Iteration 1: every room, to a playable pack (2026-11-16)
+
+The user approved one full pass on sensible defaults, then playing it to find what to improve.
+
+- **Run:** all 80 rooms, 9B `L2-fix` at seeds 47, 19, 31 and 41, through geometry and the Phase 1c gates
+  (about 6 h unattended). New stage `assemble` (delegated; test `tools/tests/test_remaster_assemble.py`)
+  picks per room the most ambitious passing redraw (best score among equals), else the ESRGAN baseline,
+  and warps the redraw back onto the original layout so the unmodified engine's hotspots, walk zones
+  and animations still line up (valid fraction 0.97 to 1.0; the rest is filled from the baseline).
+- **Result:** 14/80 rooms redrawn (4, 6, 9, 10, 14, 48, 50, 51, 55, 57, 59, 60, 69, 80); 66 keep the
+  baseline. Gates that failed on at least one attempt in those 66: vlm 51, objects 51, floor 51,
+  obstacles 45, warp 14, order 6, text 3.
+- **Pack:** `generated/playable-overrides-2x-remaster-it1` (backgrounds from `work/assemble/backgrounds`,
+  sprites from `enhanced/sprites-temporal` as in v6). Audit: 80/80 backgrounds valid. Scene-start smoke:
+  80/80 render (18 needed retries for the known intermittent `SDL_BlitSurface` error).
+- **Seen by eye:** scene 6's redraw drops the fire damage (soot, broken window) that the story shows; no
+  gate asks about story state that the original shows. Scene 4's sign stays garbled in both.
+- **Seen in the running game** (every room captured after load; `work/assemble/play/`):
+  - **The pack ships `plate.png`, not the bare background.** The plate has the room's default-state
+    objects composited in (people, chairs, busts, fire). The engine draws those objects again as sprites.
+    In baseline rooms the copies line up, so this only shows when an object moves or is removed. In
+    redrawn rooms the copies differ: scenes 57 and 60 show extra walkers, and scene 9 shows a ghost head
+    behind the seated man.
+  - **Old object art over the new rooms.** Static room objects are engine sprites, so the 1996 art
+    (stove and bust in 59, window panes in 69, chairs and busts in 9) covers the redraw.
+  - **Characters are the SR sprites**, so their style differs from the redrawn rooms (Phase 3, as planned).
+
 ## Phase 1c: new lighting allowed, and structure-conditioned redraws (2026-11-15)
 
 The user approved two changes after Phase 1b: new lighting is allowed, and a
