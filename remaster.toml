@@ -114,6 +114,9 @@ text = 4
 sprites = 2
 
 [prepare]
+# Iteration 2 (2026-11-16): plates keep only single-frame ("static") room objects. Animated objects
+# (people, walkers, fire) are drawn by the engine; baked into the redraw they showed twice in game.
+plate_layers = "static"
 # De-dither: edge-preserving average over neighbours whose colour is within
 # `threshold` (RGB Euclidean, 0-441). Deterministic; see tools/remaster/dedither.py.
 dedither_radius = 1

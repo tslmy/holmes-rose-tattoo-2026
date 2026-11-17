@@ -87,8 +87,14 @@ class Layer:
 
 
 def plan_layers(metadata: dict, sprite_scene_dir: Path,
-                flags_on: frozenset[int] = frozenset()) -> tuple[list[Layer], list[dict]]:
-    """Return drawable layers in draw order, plus skipped objects with reasons."""
+                flags_on: frozenset[int] = frozenset(),
+                static_only: bool = False) -> tuple[list[Layer], list[dict]]:
+    """Return drawable layers in draw order, plus skipped objects with reasons.
+
+    With static_only, objects whose room image has more than one frame are
+    animated (people, walkers, fire) and are drawn by the engine over the
+    background; they are skipped rather than baked into the plate.
+    """
     entries = []
     skipped = []
     for order, obj in enumerate(metadata.get("objects", [])):
@@ -107,6 +113,9 @@ def plan_layers(metadata: dict, sprite_scene_dir: Path,
         frames = json.loads(meta_path.read_text(encoding="utf-8")).get("frames", [])
         if not frames or frames[0].get("invalid_placeholder"):
             skipped.append({"object_index": obj["index"], "name": name, "reason": "no valid frame 0"})
+            continue
+        if static_only and len(frames) > 1:
+            skipped.append({"object_index": obj["index"], "name": name, "reason": "animated"})
             continue
         frame = frames[0]
         scale = int(obj.get("scale_val", SCALE_THRESHOLD)) or SCALE_THRESHOLD

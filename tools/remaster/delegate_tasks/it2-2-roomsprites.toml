@@ -1,0 +1,29 @@
+# Delegated 2026-11-16 (iteration 2). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/assemble.py"]
+test = "python -m unittest tests.test_remaster_roomsprites tests.test_remaster_assemble"
+timeout_s = 2400
+prompt = """
+Add static room-object overrides to the `assemble` stage (Python, tools/remaster/stages/assemble.py). Read the
+acceptance test tools/tests/test_remaster_roomsprites.py first: it defines every name and signature; do not
+edit it, and keep tools/tests/test_remaster_assemble.py passing. Fixtures are non-square.
+
+Background: the game engine draws each room object over the background. For a static object (its room image
+has one frame) the engine loads a replacement frame from <pack>/scene_NNN/room_NNN/frame_000@2x.png (NNN of
+room_ = the layer's image_index). Cutting that frame out of the room's own 2x background, at the place the
+object is drawn, makes it pixel-identical to what is under it, so redrawn rooms stop showing 1996 object art.
+
+Add room_sprites(cfg, scene, background, out_dir) -> list[dict]:
+- Read prepare.out_root(cfg)/scene_NNN/plate.json; if it does not exist return [].
+- For each layer: the frame file is Path(layer["source"]) (relative paths are resolved against cfg.root);
+  its room metadata is <frame file's directory>/metadata.json. Skip the layer when that metadata's
+  frame_count (or len(frames)) is not 1, or when another layer in the same plate.json has the same
+  image_index (ambiguous).
+- Cut box in the 2x background: (2*x, 2*y, 2*(x+width), 2*(y+height)) from the layer's x, y, width, height.
+  Resize the cut (LANCZOS) to 2x the frame's own size (frame png width/height) when that differs. If
+  layer["flipped"], mirror it left-right so it is stored un-flipped. Alpha = the frame png's alpha channel
+  resized to the same size with NEAREST. Save RGBA to out_dir/room_NNN/frame_000@2x.png.
+- Return one {"name": layer["name"], "image_index": ..., "path": str(saved path)} per file written.
+In run_job, after the background image is decided, call room_sprites(cfg, scene, result, tmp) so the files
+land in backgrounds/scene_NNN/room_NNN/ next to background@2x.png, and add "room_sprites": [names] to the
+record and pick.json. Do this for baseline rooms too (the cut then comes from the ESRGAN plate).
+"""

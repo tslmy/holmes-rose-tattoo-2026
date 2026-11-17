@@ -8,6 +8,10 @@ Per scene, work/assemble/backgrounds/scene_NNN/:
                      baseline copied through unchanged (no candidate remaster).
   pick.json          the per-room choice (source, backend, level, score, why) plus
                      the job fingerprint and, for a redraw, the valid fraction
+  room_NNN/          static room objects (single-frame room images), NNN = the
+                    layer's image_index: frame_000@2x.png cut out of the room's own
+                    2x background at the place the object is drawn, so a redrawn
+                    room does not show 1996 object art under a 1996 object
 
 A room keeps the baseline unless some backend x level passes every QA gate AND
 actually changes the picture (bakeoff_min_change): a redraw that barely moves the
@@ -28,7 +32,7 @@ from .. import bakeoff
 from ..config import Config
 from ..jobs import JobSpec
 from ..warp import GridWarp
-from . import baseline, common, geometry, qa, redraw_bg
+from . import baseline, common, geometry, prepare, qa, redraw_bg
 
 NAME = "assemble"
 SUMMARY = "One 2x background per room for the playable pack (the best redraw, else the ESRGAN baseline)"
@@ -66,6 +70,57 @@ def pick_room(cfg: Config, scene: int) -> dict:
     return {"scene": scene, "source": "redraw", "backend": best["backend"], "level": best["level"],
             "score": best["score"],
             "why": f"most ambitious level that passed (change {best['change']}, score {best['score']})"}
+
+
+def room_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path) -> list[dict]:
+    """Cut each static room object out of the room's own 2x background.
+
+    The engine draws every room object over the background; for a static object
+    (its room image has one frame) the engine loads a replacement frame from
+    <pack>/scene_NNN/room_NNN/frame_000@2x.png, NNN the layer's image_index.
+    Cutting that frame out of the 2x background at the place the object is drawn
+    makes it pixel-identical to what is under it. Written into
+    out_dir/room_NNN/frame_000@2x.png; returns one record per file written.
+    """
+    plate = _read(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate.json")
+    layers = plate.get("layers") or []
+    counts: dict[int, int] = {}
+    for layer in layers:
+        try:
+            key = int(layer["image_index"])
+        except (TypeError, ValueError):
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    written: list[dict] = []
+    for layer in layers:
+        try:
+            index = int(layer["image_index"])
+        except (TypeError, ValueError):
+            continue
+        if counts[index] > 1:
+            continue  # two layers share this image_index: ambiguous which one is which
+        frame = Path(layer["source"]) if Path(layer["source"]).is_absolute() else cfg.root / layer["source"]
+        metadata = _read(frame.parent / "metadata.json")
+        frame_count = metadata.get("frame_count")
+        if frame_count is None:
+            frame_count = len(metadata.get("frames") or [])
+        if frame_count != 1 or not frame.is_file():
+            continue  # animated, or the frame file is gone: never cut
+        frame_img = Image.open(frame)
+        size = (2 * frame_img.width, 2 * frame_img.height)
+        x, y, w, h = (int(layer[k]) for k in ("x", "y", "width", "height"))
+        cut = background.crop((2 * x, 2 * y, 2 * (x + w), 2 * (y + h)))
+        if cut.size != size:
+            cut = cut.resize(size, Image.LANCZOS)
+        if layer.get("flipped"):
+            cut = cut.transpose(Image.FLIP_LEFT_RIGHT)  # store it un-flipped; the engine flips on draw
+        alpha = frame_img.getchannel("A").resize(size, Image.NEAREST)
+        out = Image.merge("RGBA", (*cut.convert("RGBA").split()[:3], alpha))
+        out_path = out_dir / f"room_{index:03d}" / "frame_000@2x.png"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out.save(out_path)
+        written.append({"name": layer["name"], "image_index": index, "path": str(out_path)})
+    return written
 
 
 def warp_back(picture: Image, warp: GridWarp, out_size: tuple[int, int], fill: Image) -> tuple[Image, np.ndarray]:
@@ -148,7 +203,10 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
         result = base_img
     tmp = common.scratch_dir(cfg, f"assemble-{scene}")
     result.save(tmp / "background@2x.png")
+    sprites = room_sprites(cfg, scene, result, tmp)
     record = {**pick, "fingerprint": fingerprint, **({"valid_fraction": valid_fraction} if valid_fraction is not None else {})}
+    if sprites:
+        record["room_sprites"] = [w["name"] for w in sprites]
     common.write_json(tmp / "pick.json", record)
     common.install_dir(tmp, target)
     return record

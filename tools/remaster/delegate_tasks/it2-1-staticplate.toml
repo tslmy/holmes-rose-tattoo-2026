@@ -1,0 +1,22 @@
+# Delegated 2026-11-16 (iteration 2). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/plates.py", "tools/remaster/stages/prepare.py"]
+test = "python -m unittest tests.test_remaster_staticplate"
+timeout_s = 2400
+prompt = """
+Let the remaster pipeline (Python, package tools/remaster) build plates without animated room objects. Read
+the acceptance test tools/tests/test_remaster_staticplate.py first: it defines every name and signature; do
+not edit it. Its fixture frames are non-square.
+
+1. tools/remaster/plates.py, plan_layers(metadata, sprite_scene_dir, flags_on=frozenset(), static_only=False):
+   when static_only is true, an object whose room image metadata lists more than one frame (len(frames) > 1)
+   is not a layer; append {"object_index": obj["index"], "name": name, "reason": "animated"} to skipped
+   instead (after the existing flag / image / frame-0 checks). Layer numbering stays 1.. in draw order over
+   the layers that remain. Default behaviour is unchanged.
+2. tools/remaster/stages/prepare.py:
+   - settings(cfg) gains "plate_layers": the [prepare] key plate_layers, default "all"; raise ValueError for
+     anything other than "all" or "static".
+   - prepare_scene passes static_only=(opts["plate_layers"] == "static") to plates.plan_layers, and records
+     "plate_layers": opts["plate_layers"] in plate.json (add the key to the record before it is written).
+   - settings already feed the job fingerprint; check that plate_layers is part of it so changing it re-runs.
+   - Update the module docstring line for plate.png to say which objects are composited.
+"""

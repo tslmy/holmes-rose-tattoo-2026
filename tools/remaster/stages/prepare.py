@@ -4,6 +4,8 @@ Per scene, into work/prepare/scene_NNN/:
   background.png            original background (copy)
   background_dedither.png   de-dithered background
   plate.png                 default-state room sprites composited on the background
+                            (all objects, or only single-frame "static" objects when
+                            [prepare] plate_layers = "static")
   plate_dedither.png        de-dithered plate (the redraw input)
   plate_layers.png          layer index (0 = background, n = layer n in plate.json)
   plate.json                layers, skipped objects, de-dither settings, dither gauge
@@ -35,8 +37,12 @@ CODE = [Path(dedither.__file__), Path(plates.__file__), Path(__file__)]
 
 def settings(cfg: Config) -> dict:
     section = cfg.section("prepare")
+    plate_layers = section.get("plate_layers", "all")
+    if plate_layers not in ("all", "static"):
+        raise ValueError(f"[prepare] plate_layers must be \"all\" or \"static\", got {plate_layers!r}")
     return {
         "radius": int(section.get("dedither_radius", 1)),
+        "plate_layers": plate_layers,
         "threshold": float(section.get("dedither_threshold", 48.0)),
         "iterations": int(section.get("dedither_iterations", 2)),
         "edge_low": float(section.get("edge_low", 40)),
@@ -106,7 +112,8 @@ def prepare_scene(cfg: Config, scene: int, fp: str) -> dict:
         bg_dd = dedither.dedither_image(background, **dd)
         bg_dd.save(tmp / "background_dedither.png")
 
-        layers, skipped = plates.plan_layers(metadata, sprites)
+        layers, skipped = plates.plan_layers(metadata, sprites,
+                                             static_only=(opts["plate_layers"] == "static"))
         plate, index = plates.build_plate(background, layers)
         plate.save(tmp / "plate.png")
         index.save(tmp / "plate_layers.png")
@@ -120,6 +127,7 @@ def prepare_scene(cfg: Config, scene: int, fp: str) -> dict:
         record.update({
             "scene": scene,
             "scene_name": metadata.get("scene_name", ""),
+            "plate_layers": opts["plate_layers"],
             "size": list(background.size),
             "dedither": dd,
             "dither_energy": {
