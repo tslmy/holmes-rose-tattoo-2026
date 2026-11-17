@@ -195,8 +195,8 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
         return json.loads((target / "record.json").read_text(encoding="utf-8"))
     size = size_for(cfg, scene)
     source = input_path(cfg, scene)
-    if not source.exists() or Image.open(source).size != size:
-        imagegen.resize_to(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png", source, size)
+    # Always rebuild: a cached input outlives a re-prepared plate (iteration 2 redrew stale plates with people).
+    imagegen.resize_to(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png", source, size)
     var = variant(cfg, level)
     prompt = prompt_for(cfg, scene, level)
     masked_pixels = 0

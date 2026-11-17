@@ -43,7 +43,8 @@ LEVEL_PROMPTS = {
 # (named by key under [bakeoff.variants.<name>].extras):
 PROMPT_EXTRAS = {
     "keep_figures": ("Keep exactly the people already in the picture, in the same places and poses; do not add "
-                     "any person, animal or crowd."),
+                     "any person, animal or crowd. The game adds its characters later, so empty seats, doorways, "
+                     "windows and streets stay empty."),
     "no_new_light": "Do not add any light source, fire, flame, candle or lit window that is not in the original.",
     "framing": "Keep the original framing edge to edge: do not zoom in, crop or widen the view.",
 }

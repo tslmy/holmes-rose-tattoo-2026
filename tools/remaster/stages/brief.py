@@ -33,7 +33,7 @@ CODE = [Path(__file__)]
 # a photograph of a physical, built set, keeping the original's vibrant palette.
 STYLE = ("A photograph of a physical, built Victorian film set in 1890s London, as if shot on location for "
          "a period drama: real materials (wood grain, brick, plaster, cloth, brass, glass), practical lighting "
-         "from the lamps and windows that are in the scene, real-looking people in period costume. "
+         "from the lamps and windows that are in the scene; any person shown looks real, in period costume. "
          "Keep the original picture's vibrant colour palette; do not desaturate or turn it brown.")
 
 WRITING_WORDS = ("sign", "poster", "handbill", "banner", "newspaper", "paper", "letter", "note", "book", "map",
