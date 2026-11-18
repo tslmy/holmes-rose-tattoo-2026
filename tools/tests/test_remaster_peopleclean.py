@@ -57,12 +57,13 @@ class PeopleCleanTest(unittest.TestCase):
         (out / "visual_brief.txt").write_text("BRIEF")
         self.size = redraw_bg.size_for(self.cfg, 12)
         self.calls = []
+        self.raw_calls = 1  # how many generations return the raw (person-bearing) colour
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def fake_generate(self, cfg, backend, *, prompt, images, size, seed, out, **kwargs):
-        first = not self.calls
+        first = len(self.calls) < self.raw_calls
         self.calls.append({"prompt": prompt, "image": np.asarray(Image.open(images[0]).convert("RGB")),
                            "seed": seed, "settings": kwargs.get("settings")})
         Image.new("RGB", size, RAW if first else CLEAN).save(out)
@@ -72,8 +73,12 @@ class PeopleCleanTest(unittest.TestCase):
         w, h = self.size
 
         def fake_detect(image, queries, threshold=0.05):
-            colours = {tuple(image.convert("RGB").getpixel((w // 2, h // 2)))}
-            boxes = input_people if colours == {(90, 90, 90)} else (redraw_people if colours == {RAW} else [])
+            img = image.convert("RGB")
+            if img.getpixel((w // 2, h // 2)) == (90, 90, 90):
+                boxes = input_people
+            else:  # a person is "seen" while the pixel at its box centre is still the raw redraw
+                boxes = [(b, sc) for b, sc in redraw_people
+                         if img.getpixel((int(b[0] + b[2] / 2), int(b[1] + b[3] / 2))) == RAW]
             return [{"query": 0, "score": score, "box": list(box)} for box, score in boxes]
 
         with mock.patch.object(imagegen, "generate", side_effect=self.fake_generate), \
@@ -99,9 +104,25 @@ class PeopleCleanTest(unittest.TestCase):
         self.assertEqual(record["people_removed"], 1)
         self.assertIn("cleanup", record)
 
+    def test_second_pass_when_the_first_cleanup_leaves_the_person(self):
+        self.raw_calls = 2
+        target, out = self.run_job("L2-clean", [((60, 10, 14, 30), 0.6)])
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(self.calls[2]["seed"], 6)
+        np.testing.assert_array_equal(out[25, 67], CLEAN)
+        import json
+        record = json.loads((target / "record.json").read_text())
+        self.assertEqual((record["people_removed"], record["people_left"], len(record["cleanup"])), (2, 0, 2))
+
     def test_person_already_in_the_input_is_kept(self):
         box = (20, 12, 12, 30)
         _, out = self.run_job("L2-clean", [(box, 0.7)], input_people=[((22, 14, 11, 28), 0.5)])
+        self.assertEqual(len(self.calls), 1)
+        np.testing.assert_array_equal(out[27, 26], RAW)
+
+    def test_overlapping_input_person_is_kept_by_iou(self):
+        # the input box misses the redraw box's centre but overlaps it heavily (IoU > 0.3)
+        _, out = self.run_job("L2-clean", [((20, 12, 12, 30), 0.7)], input_people=[((20, 0, 12, 26), 0.5)])
         self.assertEqual(len(self.calls), 1)
         np.testing.assert_array_equal(out[27, 26], RAW)
 

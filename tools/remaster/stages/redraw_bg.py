@@ -185,6 +185,7 @@ def strip_people(text: str) -> str:
 
 
 PERSON_QUERIES = ["a person", "a man", "a woman"]
+CLEANUP_PASSES = 2  # at most this many remove-people edits per redraw
 
 
 def _iou(box_a: list[float], box_b: list[float]) -> float:
@@ -196,7 +197,7 @@ def _iou(box_a: list[float], box_b: list[float]) -> float:
 
 
 def added_people(input_img: Image.Image, redraw_img: Image.Image,
-                 threshold: float = 0.3, input_threshold: float = 0.2) -> list[list[float]]:
+                 threshold: float = 0.2, input_threshold: float = 0.12) -> list[list[float]]:
     """Boxes [x, y, w, h] of people the redraw added: confident detections in the redraw that no
     confident detection in the input matches (the input box contains the redraw box's centre, or the
     two boxes' IoU is > 0.3). Both images are the same size."""
@@ -208,7 +209,7 @@ def added_people(input_img: Image.Image, redraw_img: Image.Image,
     for d in red:
         x, y, w, h = d["box"]
         cx, cy = x + w / 2, y + h / 2
-        if any(ix <= cx <= ix + iw and iy <= cy <= iy + ih or _iou(d["box"], ib) > 0.3
+        if any(ix <= cx <= ix + iw and iy <= cy <= iy + ih or _iou(d["box"], [ix, iy, iw, ih]) > 0.3
                for ix, iy, iw, ih in (e["box"] for e in inp)):
             continue
         added.append([x, y, w, h])
@@ -285,32 +286,42 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
         if var["mask_people"]:
             record["masked_pixels"] = masked_pixels
         if var["remove_people"]:
-            # People the redraw added (not in the input) get painted out with one more edit of the redraw.
-            boxes = added_people(Image.open(source).convert("RGB"), Image.open(tmp / "redraw.png").convert("RGB"))
-            if boxes:
-                import numpy as np
+            # People the redraw added (not in the input) get painted out with more edits of the redraw: up to
+            # CLEANUP_PASSES, re-detecting after each, since one edit often leaves a figure in place.
+            import numpy as np
 
+            input_img = Image.open(source).convert("RGB")
+            record["people_removed"], record["people_boxes"], record["cleanup"] = 0, [], []
+            for attempt in range(CLEANUP_PASSES):
+                boxes = added_people(input_img, Image.open(tmp / "redraw.png").convert("RGB"))
+                if not boxes:
+                    break
                 raw_path = tmp / "redraw_raw.png"
-                os.replace(tmp / "redraw.png", raw_path)
+                if not attempt:
+                    os.replace(tmp / "redraw.png", raw_path)
+                    current = raw_path
+                else:
+                    current = tmp / f"redraw_pass{attempt}.png"
+                    os.replace(tmp / "redraw.png", current)
                 cleanup = imagegen.generate(cfg, backend, prompt=imagegen.REMOVE_PEOPLE_PROMPT,
-                                            images=[raw_path], size=size, seed=int(params.get("seed", 7)),
+                                            images=[current], size=size, seed=int(params.get("seed", 7)) + attempt,
                                             out=tmp / "cleaned.png", level=level,
                                             settings=request_settings(cfg, imagegen.backend(cfg, backend), level),
                                             log_dir=tmp)
-                raw_img = Image.open(raw_path).convert("RGB")
-                alpha = cleanup_alpha(boxes, raw_img.size)[:, :, None]  # boxes are in raw-redraw pixels
-                raw = np.asarray(raw_img, dtype=np.float32)
+                cur_img = Image.open(current).convert("RGB")
+                alpha = cleanup_alpha(boxes, cur_img.size)[:, :, None]  # boxes are in redraw pixels
+                cur = np.asarray(cur_img, dtype=np.float32)
                 cleaned_img = Image.open(tmp / "cleaned.png").convert("RGB")
-                if cleaned_img.size != raw_img.size:  # the server may round the size differently
-                    cleaned_img = cleaned_img.resize(raw_img.size, Image.LANCZOS)
+                if cleaned_img.size != cur_img.size:  # the server may round the size differently
+                    cleaned_img = cleaned_img.resize(cur_img.size, Image.LANCZOS)
                 cleaned = np.asarray(cleaned_img, dtype=np.float32)
-                redraw = (raw * (1 - alpha) + cleaned * alpha).round().astype(np.uint8)
+                redraw = (cur * (1 - alpha) + cleaned * alpha).round().astype(np.uint8)
                 Image.fromarray(redraw).save(tmp / "redraw.png")
-                record["people_removed"] = len(boxes)
-                record["people_boxes"] = boxes
-                record["cleanup"] = cleanup
-            else:
-                record["people_removed"] = 0
+                record["people_removed"] += len(boxes)
+                record["people_boxes"] += boxes
+                record["cleanup"].append(cleanup)
+            if record["people_removed"]:
+                record["people_left"] = len(added_people(input_img, Image.open(tmp / "redraw.png").convert("RGB")))
         record["status"] = "ok"
     except imagegen.Unavailable as err:
         record = {"backend": backend, "level": level, "status": "unavailable", "reason": str(err)}
