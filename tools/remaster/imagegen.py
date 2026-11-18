@@ -49,6 +49,13 @@ PROMPT_EXTRAS = {
     "framing": "Keep the original framing edge to edge: do not zoom in, crop or widen the view.",
 }
 
+# The people-cleanup pass (redraw_bg, `remove_people` variants) edits the redraw itself to remove
+# people the first pass added, then composites the cleaned pixels back only around those people.
+REMOVE_PEOPLE_PROMPT = ("Remove every person from this photograph and fill the space with what is behind "
+                        "them: the same floor, wall, street or furniture, with matching materials and "
+                        "lighting. Change nothing else: keep the camera, framing, every object and all "
+                        "writing.")
+
 # Optional request fields of the remote image server, sent from a backend's `levels` table:
 #   strength  float 0..1, edit requests only: how much of the input image is KEPT (mflux semantics,
 #             as in `mflux-generate-flux2 --image PATH STRENGTH`): 0 = ignore the input, 1 = return it.

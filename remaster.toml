@@ -173,7 +173,9 @@ backends = ["remote-flux2-klein-9b"]
 #   ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90", "ZC-65", "ZC-80",
 #    "ZC-95", "L2-fix-s3", "L2-fix-s5", "L2-fix-s13", "L2-fix-s17", "L2-fix-s19", "L2-fix-s29", "L2-fix-s31",
 #    "L2-fix-s37", "L2-fix-s41", "L2-fix-s43", "L2-fix-s47", "L2-fix-s53"]
-levels = ["L2-fix-s47", "L2-fix-s19", "L2-fix-s31", "L2-fix-s41"]
+# Iteration 2 used the same four seeds as plain L2-fix-sNN. Iteration 3 (2026-11-18) adds the people
+# cleanup pass (remove_people) under new names, so iteration 2's redraws stay on disk.
+levels = ["L2-clean-s47", "L2-clean-s19", "L2-clean-s31", "L2-clean-s41"]
 seed = 7
 megapixels = 1.0
 # ChatGPT reference images (outside the repo) for scenes that have a matching one.
@@ -197,6 +199,10 @@ L2-fix-s41 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["ke
 L2-fix-s43 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 43 }
 L2-fix-s47 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 47 }
 L2-fix-s53 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 53 }
+L2-clean-s47 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 47, remove_people = true }
+L2-clean-s19 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 19, remove_people = true }
+L2-clean-s31 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 31, remove_people = true }
+L2-clean-s41 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 41, remove_people = true }
 L2-mask = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["no_new_light", "framing"], mask_people = true }
 # Phase 1c: structure-conditioned redraws (Z-Image Turbo + ControlNet Union 2.1), text-to-image under depth
 # and HED outline maps of the original, so the layout is pinned; base level L1 = identity warp + offsets gate.

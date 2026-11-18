@@ -1,0 +1,38 @@
+# Delegated 2026-11-18 (iteration 3). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/redraw_bg.py", "tools/remaster/imagegen.py"]
+test = "python -m unittest tests.test_remaster_peopleclean tests.test_remaster_redraw_input"
+timeout_s = 2400
+prompt = """
+Add a people-cleanup pass to the `redraw-bg` stage (Python, tools/remaster/stages/redraw_bg.py). Read the
+acceptance test tools/tests/test_remaster_peopleclean.py first: it defines every name and behaviour; do not
+edit it, and keep tools/tests/test_remaster_redraw_input.py passing. Fixtures are non-square.
+
+Background: the image model adds people to empty rooms however the prompt is worded. A level variant with
+`remove_people = true` finds people in the redraw that are not in the input and paints them out with a second
+edit of the redraw, pasting the cleaned pixels back only around those people.
+
+1. variant(): read `remove_people` (bool, default False) from the variant table into the returned dict
+   (plain levels L0/L1/L2: False). It is part of `var`, so it already enters the plan fingerprint.
+2. imagegen.py: add REMOVE_PEOPLE_PROMPT = "Remove every person from this photograph and fill the space with
+   what is behind them: the same floor, wall, street or furniture, with matching materials and lighting.
+   Change nothing else: keep the camera, framing, every object and all writing."
+3. redraw_bg.py: PERSON_QUERIES = ["a person", "a man", "a woman"]. Add
+   added_people(input_img, redraw_img, threshold=0.3, input_threshold=0.2) -> list of [x, y, w, h] boxes:
+   call `detect.detect(image, PERSON_QUERIES)` (import it as `from .. import detect` and call it through the
+   module, detect.detect, so tests can patch it) on both images (same size); keep redraw detections with
+   score >= threshold that no input detection with score >= input_threshold matches, where "matches" means
+   the input box contains the redraw box's centre or their IoU is > 0.3. Import detect lazily inside the
+   function body if it pulls in torch at import time.
+   Add cleanup_alpha(boxes, size, grow=0.15, feather=8) -> float32 array (height, width) in [0, 1]: each box is
+   grown by `grow` times its width/height on each side; alpha = 1 inside any grown box and falls off linearly
+   to 0 over `feather` pixels outside it (alpha = clip(1 - d / feather, 0, 1), d the distance to the nearest
+   grown box; the maximum over boxes). Inside a grown box it is exactly 1.0.
+4. In run_job, after the first imagegen.generate succeeded and only when var["remove_people"]: boxes =
+   added_people(input image actually sent, redraw). If boxes is non-empty: move tmp/redraw.png to
+   tmp/redraw_raw.png; call imagegen.generate once more with images=[redraw_raw.png],
+   prompt=imagegen.REMOVE_PEOPLE_PROMPT, the same size, seed and settings, out=tmp/cleaned.png; composite
+   redraw = raw * (1 - alpha) + cleaned * alpha (alpha from cleanup_alpha at the generation size, rounded to
+   uint8) and save it as tmp/redraw.png; set record["people_removed"] = len(boxes),
+   record["people_boxes"] = boxes and record["cleanup"] = the second call's record. One cleanup pass only.
+   With no boxes, record["people_removed"] = 0 and nothing else changes. Update the module docstring.
+"""

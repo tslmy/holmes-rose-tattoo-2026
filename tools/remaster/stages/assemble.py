@@ -12,6 +12,10 @@ Per scene, work/assemble/backgrounds/scene_NNN/:
                     layer's image_index: frame_000@2x.png cut out of the room's own
                     2x background at the place the object is drawn, so a redrawn
                     room does not show 1996 object art under a 1996 object
+  room_NNN/          animated room objects (multi-frame room images) whose art mostly
+                    copies the background: each frame re-based on the 2x redraw, so a
+                    redrawn room does not show 1996 object art; objects that are not
+                    mostly background (a walker, a person) are left to the engine
 
 A room keeps the baseline unless some backend x level passes every QA gate AND
 actually changes the picture (bakeoff_min_change): a redraw that barely moves the
@@ -28,11 +32,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .. import bakeoff
+from .. import bakeoff, plates
 from ..config import Config
 from ..jobs import JobSpec
 from ..warp import GridWarp
-from . import baseline, common, geometry, prepare, qa, redraw_bg
+from . import baseline, common, extract, geometry, prepare, qa, redraw_bg
 
 NAME = "assemble"
 SUMMARY = "One 2x background per room for the playable pack (the best redraw, else the ESRGAN baseline)"
@@ -123,6 +127,153 @@ def room_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path
     return written
 
 
+def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Cosine similarity of the per-pixel RGB vectors a and b (both (h, w, 3) int/float).
+
+    +1 is added to both to avoid zero vectors; the result is (h, w).
+    """
+    a = a.astype(np.float64) + 1.0
+    b = b.astype(np.float64) + 1.0
+    dot = np.sum(a * b, axis=-1)
+    return dot / (np.linalg.norm(a, axis=-1) * np.linalg.norm(b, axis=-1) + 1e-12)
+
+
+def _frame_masks(fr: np.ndarray, ref: np.ndarray, alpha: np.ndarray, tolerance: int):
+    """Classify a 1x frame's pixels as background-copy (`same`) or a brightness-only
+    change (`tint`) relative to the plate under it; everything else keeps old art."""
+    a = alpha > 0
+    fr = fr.astype(int)
+    ref = ref.astype(int)
+    same = a & (np.max(np.abs(fr - ref), axis=-1) <= tolerance)
+    lum = (fr.sum(axis=-1) + 3) / (ref.sum(axis=-1) + 3)
+    tint = a & ~same & (_cosine(fr, ref) >= 0.98) & (lum >= 0.2) & (lum <= 5.0)
+    return same, tint
+
+
+def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path, *,
+                     tolerance: int = 8, min_bg_fraction: float = 0.2) -> list[dict]:
+    """Re-base each animated room object's frames on the room's own 2x background.
+
+    The engine draws animated room objects (lights, steam, dials, shadows, fans)
+    from 1996 frames that mostly copy the background under them; on a redrawn room
+    they show as old-art rectangles. For each frame the pixels that match the
+    original plate take the redraw, the pixels that only change brightness (a
+    glow, a shadow) take the redraw scaled by the same per-channel ratio, and the
+    rest keep the old art, upscaled. Objects that are not mostly background (a
+    walker, a person) are left to the engine. Written into
+    out_dir/room_NNN/frame_iii@2x.png; returns one record per object written.
+    """
+    plate_path = prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate.png"
+    meta_path = extract.scene_dir(cfg, "rooms", scene) / "metadata.json"
+    if not meta_path.is_file():
+        return []
+    metadata = _read(meta_path)
+    objects = metadata.get("objects") or []
+    sprite_root = extract.scene_dir(cfg, "room-sprites", scene)
+    plate = np.asarray(Image.open(plate_path).convert("RGB"), dtype=np.int32)
+    plate_h, plate_w = plate.shape[:2]
+
+    def frame_boxes(obj: dict, frames: list[dict]) -> list[tuple[int, int, int, int] | None] | None:
+        """(x0, y0, w, h) per frame, aligned with `frames` (None for an invalid placeholder);
+        None overall if a valid frame's box leaves the plate or no frame is valid."""
+        pos = obj.get("position") or {}
+        boxes = []
+        for f in frames:
+            if f.get("invalid_placeholder"):
+                boxes.append(None)
+                continue
+            x0 = int(pos.get("x", 0)) + int(f.get("offset_x", 0))
+            y0 = int(pos.get("y", 0)) + int(f.get("offset_y", 0))
+            w, h = int(f.get("width", 0)), int(f.get("height", 0))
+            if w <= 0 or h <= 0 or x0 < 0 or y0 < 0 or x0 + w > plate_w or y0 + h > plate_h:
+                return None
+            boxes.append((x0, y0, w, h))
+        return boxes if any(b is not None for b in boxes) else None
+
+    def eligible(obj: dict) -> int | None:
+        """The object's image_index if it is a candidate animated room object, else None."""
+        if obj.get("sprite_type") != "active_bg_shape" or not plates.flags_pass(obj):
+            return None
+        if int(obj.get("scale_val", plates.SCALE_THRESHOLD) or plates.SCALE_THRESHOLD) != plates.SCALE_THRESHOLD:
+            return None
+        try:
+            return int(obj.get("image_index", 0))
+        except (TypeError, ValueError):
+            return None
+
+    written: list[dict] = []
+    used: dict[int, int] = {}
+    for obj in objects:
+        index = eligible(obj)
+        if index is not None:
+            used[index] = used.get(index, 0) + 1
+    for obj in objects:
+        index = eligible(obj)
+        if index is None:
+            continue
+        if used.get(index, 0) > 1:
+            continue  # two objects share this image_index: ambiguous which one is which
+        room_dir = sprite_root / f"room_{index:03d}"
+        frames = _read(room_dir / "metadata.json").get("frames") or []
+        if len(frames) <= 1:
+            continue  # static (room_sprites' job) or missing: not an animated room object
+        boxes = frame_boxes(obj, frames)
+        if not boxes:
+            continue
+
+        # Pass 1, at 1x: classify each valid frame and count the background fraction.
+        analysis = []
+        total_same = total_opaque = 0
+        for i, (f, box) in enumerate(zip(frames, boxes)):
+            if box is None:
+                analysis.append(None)
+                continue
+            x0, y0, w, h = box
+            frame_path = room_dir / (f.get("file") or f"frame_{i:03d}.png")
+            if not frame_path.is_file():
+                analysis.append(None)
+                continue
+            img = Image.open(frame_path).convert("RGBA")
+            arr = np.asarray(img)
+            fr = arr[..., :3].astype(np.int32)
+            alpha = arr[..., 3]
+            ref = plate[y0:y0 + h, x0:x0 + w]
+            same, tint = _frame_masks(fr, ref, alpha, tolerance)
+            total_same += int(same.sum())
+            total_opaque += int((alpha > 0).sum())
+            analysis.append((fr, alpha, ref, same, tint))
+        if total_opaque == 0 or total_same / total_opaque < min_bg_fraction:
+            continue  # mostly its own art (a walker or person): leave it to the engine
+
+        # Pass 2, at 2x: rebuild each frame on the redraw and save it.
+        out_dir_room = out_dir / f"room_{index:03d}"
+        out_dir_room.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for i, (f, item) in enumerate(zip(frames, analysis)):
+            if item is None:
+                continue
+            fr, alpha, ref, same, tint = item
+            x0, y0, w, h = boxes[i]
+            same2 = np.asarray(Image.fromarray(same.astype(np.uint8) * 255).resize((2 * w, 2 * h), Image.NEAREST),
+                              dtype=bool)
+            tint2 = np.asarray(Image.fromarray(tint.astype(np.uint8) * 255).resize((2 * w, 2 * h), Image.NEAREST),
+                              dtype=bool)
+            ratio = (fr.astype(np.float64) + 1.0) / (ref.astype(np.float64) + 1.0)
+            ratio2 = ratio.repeat(2, axis=0).repeat(2, axis=1)
+            R = np.asarray(background.convert("RGB").crop((2 * x0, 2 * y0, 2 * x0 + 2 * w, 2 * y0 + 2 * h)))
+            old = np.asarray(Image.fromarray(fr.astype(np.uint8)).resize((2 * w, 2 * h), Image.LANCZOS)).astype(float)
+            rgb = np.where(same2[..., None], R, old)
+            rgb = np.where(tint2[..., None], np.clip(R.astype(float) * ratio2, 0, 255), rgb)
+            alpha2 = np.asarray(Image.fromarray(alpha).resize((2 * w, 2 * h), Image.NEAREST))
+            out = np.dstack([rgb.clip(0, 255).astype(np.uint8), alpha2])
+            Image.fromarray(out, "RGBA").save(out_dir_room / f"frame_{i:03d}@2x.png")
+            count += 1
+        if count:
+            written.append({"name": obj.get("name", ""), "image_index": index, "frames": count,
+                            "bg_fraction": round(total_same / total_opaque, 3), "dir": str(out_dir_room)})
+    return written
+
+
 def warp_back(picture: Image, warp: GridWarp, out_size: tuple[int, int], fill: Image) -> tuple[Image, np.ndarray]:
     """Pull the redraw back to the original layout at `out_size`.
 
@@ -204,9 +355,12 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
     tmp = common.scratch_dir(cfg, f"assemble-{scene}")
     result.save(tmp / "background@2x.png")
     sprites = room_sprites(cfg, scene, result, tmp)
+    ambience = ambience_sprites(cfg, scene, result, tmp)
     record = {**pick, "fingerprint": fingerprint, **({"valid_fraction": valid_fraction} if valid_fraction is not None else {})}
     if sprites:
         record["room_sprites"] = [w["name"] for w in sprites]
+    if ambience:
+        record["ambience_sprites"] = [w["name"] for w in ambience]
     common.write_json(tmp / "pick.json", record)
     common.install_dir(tmp, target)
     return record

@@ -1,0 +1,40 @@
+# Delegated 2026-11-18 (iteration 3). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/assemble.py"]
+test = "python -m unittest tests.test_remaster_ambience tests.test_remaster_roomsprites tests.test_remaster_assemble"
+timeout_s = 2400
+prompt = """
+Add animated room-object overrides to the `assemble` stage (Python, tools/remaster/stages/assemble.py). Read the
+acceptance test tools/tests/test_remaster_ambience.py first: it defines every name and signature; do not edit
+it, and keep tools/tests/test_remaster_roomsprites.py and test_remaster_assemble.py passing. Fixtures are
+non-square. Follow the style of the existing room_sprites() in the same file.
+
+Background: the engine draws animated room objects (lights, steam, dials, shadows, fans) from 1996 frames that
+mostly copy the background under them, so on a redrawn room they show as old-art rectangles. The engine loads a
+replacement for frame i of room image NNN from <pack>/scene_NNN/room_NNN/frame_iii@2x.png (2x the frame's size).
+
+Add ambience_sprites(cfg, scene, background, out_dir, *, tolerance=8, min_bg_fraction=0.2) -> list[dict]:
+- Inputs: the room objects in extract.scene_dir(cfg, "rooms", scene)/metadata.json ("objects"; return [] if the
+  file does not exist); the 1x reference picture prepare.out_root(cfg)/scene_NNN/plate.png (RGB); the frames in
+  extract.scene_dir(cfg, "room-sprites", scene)/room_NNN/ (NNN = image_index, 3 digits), whose metadata.json
+  has "frames": [{"file", "width", "height", "offset_x", "offset_y", "invalid_placeholder"}].
+- Consider only objects with sprite_type "active_bg_shape" that pass plates.flags_pass(obj) (import
+  remaster.plates), have scale_val 256, a room image with MORE than one frame, and an image_index used by no
+  other active_bg_shape object in the metadata. Skip the whole object if any valid frame's box
+  (x0 = position.x + offset_x, y0 = position.y + offset_y, frame width, height) leaves the plate.
+  Frames with invalid_placeholder are skipped (not written).
+- Per frame, at 1x: fr = frame RGB (int), a = frame alpha, ref = plate[y0:y0+h, x0:x0+w].
+  same = (a > 0) & (max over channels of |fr - ref| <= tolerance).
+  tint = (a > 0) & ~same & (cosine similarity of the RGB vectors fr and ref >= 0.98, using +1 on both to avoid
+  zero vectors) & (luminance ratio (sum(fr)+3)/(sum(ref)+3) between 0.2 and 5).
+  bg_fraction of the object = total `same` pixels / total opaque pixels over all its valid frames. Skip the
+  object when bg_fraction < min_bg_fraction (a walker or person: the engine's own art stays).
+- Per frame, at 2x (size 2w x 2h): R = background (the 2x redraw, RGB) cropped at (2x0, 2y0, 2x0+2w, 2y0+2h);
+  old = the frame RGB upscaled with LANCZOS; masks and the per-channel ratio (fr+1)/(ref+1) upscaled with
+  NEAREST. Output RGB = R where same; clip(R * ratio, 0, 255) where tint; old elsewhere. Output alpha = frame
+  alpha upscaled NEAREST. Save RGBA as out_dir/room_NNN/frame_iii@2x.png (iii = frame index, 3 digits).
+- Return one {"name", "image_index", "frames": number written, "bg_fraction": rounded to 3, "dir": str} per
+  object written.
+In run_job, call ambience_sprites(cfg, scene, result, tmp) right after room_sprites (same background, baseline
+rooms too) and add "ambience_sprites": [names] to the record and pick.json, like "room_sprites". Update the
+module docstring's file list.
+"""

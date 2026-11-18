@@ -11,6 +11,11 @@ Backends that cannot run here (weights deleted, no API key, server down) finish
 with `status: unavailable` and the reason; their fingerprint includes that
 reason, so they re-queue on the next `remaster redraw-bg` once it changes.
 
+Variants with `remove_people = true` get a people-cleanup pass: the redraw is checked for people that
+are not in the input (remaster.detect, PERSON_QUERIES), and when found the redraw is edited once more
+with imagegen.REMOVE_PEOPLE_PROMPT, the cleaned pixels pasted back only around those people
+(cleanup_alpha), and the untouched first pass kept as redraw_raw.png.
+
 The 4x tiled detail pass is Phase 2 work and is not run here.
 """
 
@@ -18,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -70,6 +76,7 @@ def variant(cfg: Config, name: str) -> dict:
     return {"name": name, "level": base, "seed": int(table_name.get("seed", bakeoff(cfg).get("seed", 7))),
             "strength": table_name.get("strength"), "extras": extras,
             "mask_people": bool(table_name.get("mask_people", False)),
+            "remove_people": bool(table_name.get("remove_people", False)),
             "backends": list(table_name.get("backends") or []) if named else None,
             "controls": [list(c) for c in table_name.get("controls") or []] if named else None}
 
@@ -177,6 +184,60 @@ def strip_people(text: str) -> str:
     return head + "\n\n" + "".join(kept)
 
 
+PERSON_QUERIES = ["a person", "a man", "a woman"]
+
+
+def _iou(box_a: list[float], box_b: list[float]) -> float:
+    ix = max(0.0, min(box_a[0] + box_a[2], box_b[0] + box_b[2]) - max(box_a[0], box_b[0]))
+    iy = max(0.0, min(box_a[1] + box_a[3], box_b[1] + box_b[3]) - max(box_a[1], box_b[1]))
+    inter = ix * iy
+    union = box_a[2] * box_a[3] + box_b[2] * box_b[3] - inter
+    return inter / union if union > 0 else 0.0
+
+
+def added_people(input_img: Image.Image, redraw_img: Image.Image,
+                 threshold: float = 0.3, input_threshold: float = 0.2) -> list[list[float]]:
+    """Boxes [x, y, w, h] of people the redraw added: confident detections in the redraw that no
+    confident detection in the input matches (the input box contains the redraw box's centre, or the
+    two boxes' IoU is > 0.3). Both images are the same size."""
+    from .. import detect
+
+    red = [d for d in detect.detect(redraw_img, PERSON_QUERIES) if d["score"] >= threshold]
+    inp = [d for d in detect.detect(input_img, PERSON_QUERIES) if d["score"] >= input_threshold]
+    added: list[list[float]] = []
+    for d in red:
+        x, y, w, h = d["box"]
+        cx, cy = x + w / 2, y + h / 2
+        if any(ix <= cx <= ix + iw and iy <= cy <= iy + ih or _iou(d["box"], ib) > 0.3
+               for ix, iy, iw, ih in (e["box"] for e in inp)):
+            continue
+        added.append([x, y, w, h])
+    return added
+
+
+def cleanup_alpha(boxes: list[list[float]], size: tuple[int, int], grow: float = 0.15,
+                  feather: int = 8) -> "np.ndarray":
+    """Alpha (float32, shape (height, width), [0, 1]) for compositing the cleaned redraw back: 1
+    inside each box grown by `grow` times its width/height on each side, falling off linearly to 0
+    over `feather` pixels outside it (alpha = clip(1 - d / feather, 0, 1), the maximum over boxes)."""
+    import numpy as np
+
+    width, height = size
+    ys, xs = np.mgrid[0:height, 0:width]
+    alpha = np.zeros((height, width), dtype=np.float32)
+    for x, y, w, h in boxes:
+        x0 = max(0.0, x - grow * w)
+        y0 = max(0.0, y - grow * h)
+        x1 = min(width, x + w + grow * w)
+        y1 = min(height, y + h + grow * h)
+        # distance from each pixel to the grown box: 0 inside, else the distance to its border
+        dx = np.maximum(x0 - xs, np.maximum(0.0, xs - (x1 - 1)))
+        dy = np.maximum(y0 - ys, np.maximum(0.0, ys - (y1 - 1)))
+        d = np.hypot(dx, dy)
+        alpha = np.maximum(alpha, np.clip(1.0 - d / feather, 0.0, 1.0))
+    return alpha
+
+
 def prompt_for(cfg: Config, scene: int, name: str) -> str:
     """The scene's visual brief, the base level's instruction, then each of the variant's extra
     sentences, in order."""
@@ -223,6 +284,33 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
         record["mask_people"] = var["mask_people"]
         if var["mask_people"]:
             record["masked_pixels"] = masked_pixels
+        if var["remove_people"]:
+            # People the redraw added (not in the input) get painted out with one more edit of the redraw.
+            boxes = added_people(Image.open(source).convert("RGB"), Image.open(tmp / "redraw.png").convert("RGB"))
+            if boxes:
+                import numpy as np
+
+                raw_path = tmp / "redraw_raw.png"
+                os.replace(tmp / "redraw.png", raw_path)
+                cleanup = imagegen.generate(cfg, backend, prompt=imagegen.REMOVE_PEOPLE_PROMPT,
+                                            images=[raw_path], size=size, seed=int(params.get("seed", 7)),
+                                            out=tmp / "cleaned.png", level=level,
+                                            settings=request_settings(cfg, imagegen.backend(cfg, backend), level),
+                                            log_dir=tmp)
+                raw_img = Image.open(raw_path).convert("RGB")
+                alpha = cleanup_alpha(boxes, raw_img.size)[:, :, None]  # boxes are in raw-redraw pixels
+                raw = np.asarray(raw_img, dtype=np.float32)
+                cleaned_img = Image.open(tmp / "cleaned.png").convert("RGB")
+                if cleaned_img.size != raw_img.size:  # the server may round the size differently
+                    cleaned_img = cleaned_img.resize(raw_img.size, Image.LANCZOS)
+                cleaned = np.asarray(cleaned_img, dtype=np.float32)
+                redraw = (raw * (1 - alpha) + cleaned * alpha).round().astype(np.uint8)
+                Image.fromarray(redraw).save(tmp / "redraw.png")
+                record["people_removed"] = len(boxes)
+                record["people_boxes"] = boxes
+                record["cleanup"] = cleanup
+            else:
+                record["people_removed"] = 0
         record["status"] = "ok"
     except imagegen.Unavailable as err:
         record = {"backend": backend, "level": level, "status": "unavailable", "reason": str(err)}
