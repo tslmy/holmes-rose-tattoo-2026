@@ -539,6 +539,23 @@
       "images": [],
       "created": "2026-11-15T21:09:42-08:00",
       "updated": "2026-11-15T21:09:42-08:00"
+    },
+    {
+      "id": "disk-purgeable",
+      "kind": "disk",
+      "title": "Free disk 12.0 GB is below 15.0 GB, but 7.4 GB is purgeable (Time Machine local snapshots)",
+      "default": "Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted",
+      "detail": "free 12.0 GB, purgeable 7.4 GB, 2 local snapshot(s) at 2026-11-17 20:10. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.",
+      "options": [
+        "delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`",
+        "lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml"
+      ],
+      "status": "done",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-16T16:54:03-08:00",
+      "updated": "2026-11-17T20:10:23-08:00"
     }
   ]
 }

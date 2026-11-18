@@ -1,5 +1,39 @@
 # Phase 1 bake-off results
 
+## Iteration 2: static-only plates and room-object overrides (2026-11-17)
+
+Approved by the user after iteration 1's in-game findings, with the request that testing stop popping up
+the game window.
+
+- **Changes:** `[prepare] plate_layers = "static"` leaves animated room objects (people, walkers, fire)
+  out of the plate that is redrawn, so the engine no longer draws them twice. `assemble` cuts a 2x
+  replacement for every unambiguous single-frame room object from the room's own 2x background (726
+  objects in 78 rooms), so the 1996 static art no longer sits on top of a redraw. Both delegated
+  (`test_remaster_staticplate.py`, `test_remaster_roomsprites.py`).
+- **Bug found and fixed:** `redraw_bg` reused a cached `input.png` whenever its size matched, so the
+  first iteration-2 run redrew the old plate with its people while QA compared against the new empty
+  plate: 1/80 passed, 71 rooms failed the VLM gate for "added" people. The input is now rebuilt every
+  time (`test_remaster_redraw_input.py`). The style brief also stopped asking for "real-looking people",
+  and the keep-figures instruction says the game adds its characters, so empty places stay empty.
+- **Planner gotcha, hit again:** QA for the five trial scenes (4, 9, 57, 60, 69) was planned as up to
+  date before their new redraws existed. Re-planning QA and assemble after redraw-bg fixed it.
+- **Result:** 14/80 rooms redrawn (10, 31, 35, 43, 44, 46, 47, 51, 55, 58, 59, 73, 77, 81), a mostly new
+  set; 66 keep the ESRGAN baseline. Failed gates over 320 candidates: VLM 218, floor 211, objects 160,
+  obstacles 145, warp 27, order 18, text 12.
+- **The model adds people on its own:** with a verified empty input and the explicit prompt, FLUX.2
+  Klein 9B still puts people into 347 of the candidates (scene 4: a couple on the pavement in front
+  of the police station). Prompting does not stop it; the next lever is detect-and-inpaint or masking.
+- **Pack:** `generated/playable-overrides-2x-remaster-it2` (ignored): backgrounds, 726 room-object
+  overrides, temporal sprites. Smoke test: 80/80 scenes render (`--sdl-retries 6` for the known SDL
+  blit error).
+- **In game** (all 80 rooms captured with the window in the background: `SDL_MAC_BACKGROUND_APP=1`, so
+  no focus steal and no Dock icon). Doubled walkers (57, 60) and the ghost head (9) are gone, and the
+  static objects blend into redraws. Remaining:
+  - Animated ambience objects (lights 35LITE01-03, fan 44FAN, glows 44HLGHT, shadow 44SHADW) still draw
+    1996 frames as visible rectangles over a redraw. Next fix: build their overrides from each frame's
+    difference to the original background, applied to the redraw.
+  - Characters are still the SR sprites, and the redrawn rooms are photographic while they are not.
+
 ## Iteration 1: every room, to a playable pack (2026-11-16)
 
 The user approved one full pass on sensible defaults, then playing it to find what to improve.

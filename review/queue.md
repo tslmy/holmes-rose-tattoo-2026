@@ -97,7 +97,7 @@ Under the new light rule scene 4 L2-fix-s11/s23 fail only the obstacles gate: th
 
 The server API accepts only the FLUX klein models and rejects extra fields; its source is not in this repo and SSH is closed. On the server ControlNet would likely be several times faster than the 4-5 min per image here.
 
-## Decided or done (20)
+## Decided or done (21)
 
 ### #1 `download-flux2-klein-9b-q4` · download (9.5 GB): FLUX.2 klein 9B (4-bit) for edit / casting candidates
 
@@ -310,3 +310,12 @@ Phase 1b: scene 4 now fails the new light gate (lit doorway, lamp) and stays on 
 Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other gates.
 
 Phase 1c: settled by the user ("Yes, to both."): new lighting is score-only; a narrow fire gate fails only story fire (burning buildings, flames from windows).
+
+### #32 `disk-purgeable` · disk: Free disk 12.0 GB is below 15.0 GB, but 7.4 GB is purgeable (Time Machine local snapshots)
+
+- **Default in use:** Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted
+- **Options:** delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`; lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml
+- **Status:** done
+- Raised 2026-11-16, updated 2026-11-17
+
+free 12.0 GB, purgeable 7.4 GB, 2 local snapshot(s) at 2026-11-17 20:10. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
