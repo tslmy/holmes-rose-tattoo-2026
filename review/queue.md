@@ -97,13 +97,13 @@ Under the new light rule scene 4 L2-fix-s11/s23 fail only the obstacles gate: th
 
 The server API accepts only the FLUX klein models and rejects extra fields; its source is not in this repo and SSH is closed. On the server ControlNet would likely be several times faster than the 4-5 min per image here.
 
-### #33 `disk-low` · disk: Disk short: free 6.3 GB, purgeable 8.6 GB, 2 local snapshot(s); runner needs 15.0 GB and paused
+### #33 `disk-low` · disk: Disk short: free 7.9 GB, purgeable 6.4 GB, 1 local snapshot(s); runner needs 15.0 GB and paused
 
 - **Default in use:** Runner stops before the next job; nothing is deleted. Old pilot trees stay.
 - **Options:** free space yourself, then `uv run remaster run`; lower thresholds.min_free_disk_gb in remaster.toml; approve deleting a named pilot tree (see docs/pilot-lessons.md)
-- Raised 2026-11-17
+- Raised 2026-11-17, updated 2026-11-18
 
-Work dir: /Users/lmy/Projects/shcrt/work. Checked 2026-11-17 23:56.
+Work dir: /Users/lmy/Projects/shcrt/work. Checked 2026-11-18 10:20.
 
 ## Decided or done (21)
 
@@ -319,11 +319,11 @@ Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other
 
 Phase 1c: settled by the user ("Yes, to both."): new lighting is score-only; a narrow fire gate fails only story fire (burning buildings, flames from windows).
 
-### #32 `disk-purgeable` · disk: Free disk 14.8 GB is below 15.0 GB, but 6.0 GB is purgeable (Time Machine local snapshots)
+### #32 `disk-purgeable` · disk: Free disk 14.6 GB is below 15.0 GB, but 9.4 GB is purgeable (Time Machine local snapshots)
 
 - **Default in use:** Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted
 - **Options:** delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`; lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml
 - **Status:** done
-- Raised 2026-11-16, updated 2026-11-17
+- Raised 2026-11-16, updated 2026-11-18
 
-free 14.8 GB, purgeable 6.0 GB, 1 local snapshot(s) at 2026-11-17 22:01. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
+free 14.6 GB, purgeable 9.4 GB, 5 local snapshot(s) at 2026-11-18 18:09. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.

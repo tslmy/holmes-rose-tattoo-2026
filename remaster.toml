@@ -126,7 +126,7 @@ edge_low = 40
 edge_high = 120
 
 [thresholds]
-min_free_disk_gb = 15          # the runner pauses and queues a request below this
+min_free_disk_gb = 15         # the runner pauses and queues a request below this
 job_max_attempts = 3
 # QA gates (used from Phase 1)
 max_warp_stretch = 1.6

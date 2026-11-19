@@ -1,5 +1,34 @@
 # Phase 1 bake-off results
 
+## Iteration 3: animated-object frames and people cleanup (2026-11-18)
+
+Approved by the user after iteration 2, which still showed 1996-art rectangles around animated room
+objects and many candidates rejected for added people.
+
+- **Changes:** `assemble.ambience_sprites` rebuilds every frame of background-like animated room objects
+  (lights, shadows, fans) at 2x from the chosen background: pixels equal to the plate take the redraw,
+  brightness-only changes scale the redraw by the same ratio, other pixels keep the upscaled old art
+  (302 objects written). Redraw variants `L2-clean-s47/s19/s31/s41` set `remove_people`: people the
+  redraw added (detected with no counterpart in the input) are painted out by a second edit of the
+  redraw, pasted back only inside their feathered boxes. Both delegated
+  (`test_remaster_ambience.py`, `test_remaster_peopleclean.py`); review fixed a frame/box misalignment
+  for placeholder frames and a cleaned-size mismatch.
+- **First run, fixed and re-run:** the input-match check crashed whenever the input had a person
+  detection (15 rooms), and the 0.3 detection cutoff missed most figures (they score 0.2-0.3); one
+  cleanup edit also often left the figure. The cutoff is now 0.2 with up to two re-detected passes
+  (`people_left` recorded). All 320 redraws re-ran.
+- **Results:** 141 of about 240 checked redraws had added people; cleanup cleared them in 112 (36 in
+  one pass, the rest in two). QA passed 37 of 320 candidates; the VLM gate failed
+  100 (iteration 2: 218), floor 176, objects 132, obstacles 110, warp 15, text 10, order 8. **22 of 80
+  rooms** now use a redraw (iteration 2: 14): 6, 9, 10, 13, 17, 31, 35, 43, 44, 46, 47, 48, 51, 55, 57,
+  58, 59, 60, 69, 73, 74, 77; the other 58 keep the ESRGAN baseline.
+- **Pack:** `generated/playable-overrides-2x-remaster-it3` (80 backgrounds, room and ambience
+  overrides). Headless smoke test: 80/80 rooms render. In-game capture failed (screen locked), so the
+  review used offline original-vs-redraw sheets; no added people are visible in the 22 picks.
+- **Ops:** free disk ran under the 15 GB floor (mostly purgeable space and local snapshots); the run
+  used a temporary 8 GB floor, restored afterwards. An app crash interrupted the run once; the runner
+  recovered the job left running.
+
 ## Iteration 2: static-only plates and room-object overrides (2026-11-17)
 
 Approved by the user after iteration 1's in-game findings, with the request that testing stop popping up
