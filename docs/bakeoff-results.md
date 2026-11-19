@@ -23,8 +23,12 @@ objects and many candidates rejected for added people.
   rooms** now use a redraw (iteration 2: 14): 6, 9, 10, 13, 17, 31, 35, 43, 44, 46, 47, 48, 51, 55, 57,
   58, 59, 60, 69, 73, 74, 77; the other 58 keep the ESRGAN baseline.
 - **Pack:** `generated/playable-overrides-2x-remaster-it3` (80 backgrounds, room and ambience
-  overrides). Headless smoke test: 80/80 rooms render. In-game capture failed (screen locked), so the
-  review used offline original-vs-redraw sheets; no added people are visible in the 22 picks.
+  overrides). Headless smoke test: 80/80 rooms render. In-game capture (background mode, no focus
+  steal): 80/80. No added people and no doubled characters in the 22 redrawn rooms.
+- **Left for iteration 4 (in-game):** old-art patches remain where an animated object's frames
+  differ from the plate (scene 35 pools, scene 74 shed lettering, scene 59 block left of the stove),
+  a rectangle seam in scene 69's left window, low-res patches in scenes 6 (rubble) and 60 (window),
+  and an odd ceiling shape in scene 43.
 - **Ops:** free disk ran under the 15 GB floor (mostly purgeable space and local snapshots); the run
   used a temporary 8 GB floor, restored afterwards. An app crash interrupted the run once; the runner
   recovered the job left running.
