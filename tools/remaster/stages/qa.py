@@ -5,7 +5,9 @@ One job per (scene, backend, level) -> work/qa/scene_NNN/<backend>/<level>/qa.js
 Deterministic gates, from the geometry sidecar and detections:
   objects    every named object the detector finds confidently in the original
              (score >= thresholds.qa_confident_score) is found again in the redraw where
-             the shipped warp puts it (IoU >= 0.3); weaker ones count towards the score only
+             the shipped warp puts it (IoU >= 0.3); weaker ones count towards the score only.
+             One missed label is tolerated when the found ratio is >= qa_object_miss_ratio
+             (default 0.85) and the VLM diff does not report it removed
   order      found objects keep their left-right and front-back (bottom edge) order
   warp       invertible, stretch bounded, inverse round-trips; L0/L1 drift within limits
   offsets    L1 only: re-segmented static layers move <= max_sprite_offset_px
@@ -37,7 +39,7 @@ from ..config import Config
 from ..jobs import JobSpec
 from ..llm import ChatClient
 from ..warp import GridWarp
-from . import brief, common, geometry, prepare, redraw_bg
+from . import baseline, brief, common, geometry, prepare, redraw_bg
 
 NAME = "qa"
 SUMMARY = "Background gates (objects, order, warp, offsets, protected text), VLM review, palette score"
@@ -70,8 +72,12 @@ Transcribe the signs and printed text exactly as written (empty list when none i
  "remaster_text": [the same for image 2]}"""
 
 
+def out_root(cfg: Config) -> Path:
+    return cfg.work / "qa"
+
+
 def job_dir(cfg: Config, scene: int, backend: str, level: str) -> Path:
-    return cfg.work / "qa" / f"scene_{scene:03d}" / backend / level
+    return out_root(cfg) / f"scene_{scene:03d}" / backend / level
 
 
 def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
@@ -219,6 +225,45 @@ def parse_json(text: str) -> dict:
     return json.loads(match.group(0))
 
 
+def floor_gate(redraw_floor: dict | None, original_floor: dict | None) -> bool | None:
+    """The floor check only fails the redraw when the original passes the same check.
+
+    The 1996 walk zones routinely overlap furniture, so the untinted baseline fails
+    the check in most rooms: a redraw failure then says nothing about the remaster."""
+    if redraw_floor is None:
+        return None
+    if redraw_floor.get("floor"):
+        return True
+    return bool(isinstance(original_floor, dict) and original_floor.get("floor") is False)
+
+
+def objects_gate(objs: dict, removed: list, min_ratio: float = 0.85) -> tuple[bool, str | None]:
+    """One missed label is tolerated when nearly all objects were found and the VLM
+    diff does not report it removed (vague labels like "Pictures" are often missed)."""
+    if objs["objects_ok"]:
+        return True, None
+    missing = objs["missing_confident"]
+    ratio = objs["found_ratio"]
+    if len(missing) != 1 or ratio is None or ratio < min_ratio:
+        return False, None
+    label = missing[0]
+    if reported_removed(label, removed):
+        return False, None
+    return True, label
+
+
+def reported_removed(label: str, removed: list) -> bool:
+    """Some word of the label (letters only, >= 4 letters) is a whole word of a removed entry."""
+    words = [w for w in re.findall(r"[a-z]+", label.lower()) if len(w) >= 4]
+    if not words:
+        return False
+    for entry in removed:
+        words_in = set(re.findall(r"[a-z]+", str(entry).lower()))
+        if any(w in words_in for w in words):
+            return True
+    return False
+
+
 def side_by_side(original: Image.Image, result: Image.Image, path: Path, height: int = 640) -> Path:
     a = original.convert("RGB").resize((int(original.width * height / original.height), height), Image.LANCZOS)
     b = result.convert("RGB").resize((int(result.width * height / result.height), height), Image.LANCZOS)
@@ -240,7 +285,35 @@ def walk_tint(result: Image.Image, polys: list, path: Path) -> Path:
     return path
 
 
-def vlm_review(cfg: Config, original: Image.Image, result: Image.Image, sidecar: dict, out: Path) -> dict:
+def original_floor(cfg: Config, scene: int, client, polys: list, size: tuple[int, int]) -> dict | None:
+    """VLM floor verdict on the de-dithered original (tinted the same way as the redraw).
+
+    Cached per scene; the key covers the zones, the size and the model. None when the
+    baseline plate is missing or the chat call fails (failures are not cached)."""
+    plate = baseline.out_root(cfg) / f"scene_{scene:03d}" / "plate_esrgan.png"
+    if not plate.is_file():
+        return None
+    scene_dir = out_root(cfg) / f"scene_{scene:03d}"
+    cache = scene_dir / "floor_original.json"
+    key = common.fingerprint(polys, list(size), client.model, VLM_FLOOR)
+    if cache.is_file():
+        try:
+            hit = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            hit = None
+        if hit is not None and hit.get("key") == key:
+            return {"key": key, "floor": hit.get("floor")}
+    image = Image.open(plate).convert("RGB").resize(size, Image.LANCZOS)
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    tinted = walk_tint(image, polys, scene_dir / "floor_original.jpg")
+    reply = client.chat(VLM_SYSTEM, VLM_FLOOR, images=[tinted], max_tokens=400)
+    verdict = bool(parse_json(reply.text).get("floor"))
+    common.write_json(cache, {"key": key, "floor": verdict})
+    return {"key": key, "floor": verdict}
+
+
+def vlm_review(cfg: Config, scene: int, original: Image.Image, result: Image.Image,
+               sidecar: dict, out: Path) -> dict:
     review: dict = {"errors": []}
     try:
         client = ChatClient.from_config(cfg.section("llm"), "vision")
@@ -270,6 +343,12 @@ def vlm_review(cfg: Config, original: Image.Image, result: Image.Image, sidecar:
             review["floor_seconds"] = reply.seconds
         except Exception as err:  # noqa: BLE001
             review["errors"].append(f"floor: {type(err).__name__}: {str(err)[:300]}")
+        if "floor" in review and not review["floor"].get("floor"):
+            # the original may fail the same check (walk zones over furniture); ask it
+            try:
+                review["floor_original"] = original_floor(cfg, scene, client, polys, result.size)
+            except Exception as err:  # noqa: BLE001
+                review["errors"].append(f"floor_original: {type(err).__name__}: {str(err)[:300]}")
     return review
 
 
@@ -303,13 +382,13 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
     geo = sidecar["summary"]
     gates: dict = {"warp": geo["warp_ok"]}
     objs = object_gates(sidecar, confident)
-    gates["objects"], gates["order"] = objs["objects_ok"], objs["order_ok"]
+    gates["order"] = objs["order_ok"]
     if redraw_bg.base_level(cfg, level) == "L1":
         gates["offsets"] = geo.get("layers_offset_ok", True)
     regions = sidecar.get("protected_regions", [])
     # every region is either warped in from the baseline or explicitly left (too large, with a reason)
     gates["protected"] = all(r.get("pasted") or r.get("reason") for r in regions)
-    review = vlm_review(cfg, original, result, sidecar, out)
+    review = vlm_review(cfg, scene, original, result, sidecar, out)
     new_objs, blocked = [], []
     try:
         from .. import detect as remaster_detect
@@ -324,19 +403,23 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
         gates["obstacles"] = None
         review.setdefault("errors", []).append(f"obstacles: {type(err).__name__}: {str(err)[:300]}")
     diff = review.get("diff") or {}
+    removed = list(diff.get("removed") or []) if "diff" in review else []
     new_light = list(diff.get("new_light_sources") or []) if "diff" in review else None
+    # one missed label is tolerated unless the VLM diff reports it removed
+    gates["objects"], tolerated = objects_gate(objs, removed, cfg.threshold("qa_object_miss_ratio", 0.85))
+    gates["order"] = objs["order_ok"]
     if "diff" in review:
-        removed, added = list(diff.get("removed") or []), list(diff.get("added") or [])
+        added = list(diff.get("added") or [])
         # Removing anything, or adding a figure (an extra character misleads the player), fails;
         # other additions (furniture glimpsed through a door) only lower the score.
         added_people = [a for a in added if PEOPLE.search(str(a))]
         gates["vlm"] = not removed and not added_people
     else:
-        removed = added = []
+        added = []
         gates["vlm"] = None
     gates["fire"] = fire_gate(diff if "diff" in review else None)
     if "floor" in review:
-        gates["floor"] = bool(review["floor"].get("floor"))
+        gates["floor"] = floor_gate(review["floor"], review.get("floor_original"))
     elif sidecar.get("walk_zones_picture"):
         gates["floor"] = None
     if "text" in review:
@@ -357,6 +440,8 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
     summary = {"status": "ok", "level": level, "pass": passed, "gates": gates,
                "gates_passed": sum(1 for v in known if v), "gates_known": len(known),
                "found_ratio": objs["found_ratio"], "missing": objs["missing_confident"],
+               "objects_tolerated": tolerated,
+               "floor_original": (review.get("floor_original") or {}).get("floor"),
                "inversions": len(objs["order_inversions"]), "removed": removed, "added": added,
                "new_objects": new_objs, "blocking_objects": blocked,
                "new_light_sources": list(new_light) if new_light is not None else None,
