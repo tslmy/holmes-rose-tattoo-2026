@@ -88,21 +88,26 @@ def room_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path
     """
     plate = _read(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate.json")
     layers = plate.get("layers") or []
-    counts: dict[int, int] = {}
+    boxes: dict[int, set] = {}
     for layer in layers:
         try:
             key = int(layer["image_index"])
         except (TypeError, ValueError):
             continue
-        counts[key] = counts.get(key, 0) + 1
+        box = tuple(layer.get(k) for k in ("x", "y", "width", "height")) + (bool(layer.get("flipped")),)
+        boxes.setdefault(key, set()).add(box)
+    seen: set[int] = set()
     written: list[dict] = []
     for layer in layers:
         try:
             index = int(layer["image_index"])
         except (TypeError, ValueError):
             continue
-        if counts[index] > 1:
-            continue  # two layers share this image_index: ambiguous which one is which
+        if len(boxes[index]) > 1:
+            continue  # layers share this image_index at different places: one frame cannot fit both
+        if index in seen:
+            continue  # the same image at the same place (e.g. a sound trigger twice): cut once
+        seen.add(index)
         frame = Path(layer["source"]) if Path(layer["source"]).is_absolute() else cfg.root / layer["source"]
         metadata = _read(frame.parent / "metadata.json")
         frame_count = metadata.get("frame_count")
@@ -127,6 +132,19 @@ def room_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path
     return written
 
 
+def scaled_offset(offset: int, scale: int) -> int:
+    """The engine's ImageFrame::sDrawXOffset for a frame offset at a given scale (256 = unscaled).
+
+    scale 0 counts as 1; at 256 the offset passes through unchanged.
+    """
+    if scale == 256:
+        return offset
+    scale = scale or 1
+    value = offset - 1 if scale >= 256 else offset
+    result = value * 256 // scale
+    return result + 1 if scale > 256 else result
+
+
 def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Cosine similarity of the per-pixel RGB vectors a and b (both (h, w, 3) int/float).
 
@@ -138,30 +156,44 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return dot / (np.linalg.norm(a, axis=-1) * np.linalg.norm(b, axis=-1) + 1e-12)
 
 
-def _frame_masks(fr: np.ndarray, ref: np.ndarray, alpha: np.ndarray, tolerance: int):
-    """Classify a 1x frame's pixels as background-copy (`same`) or a brightness-only
-    change (`tint`) relative to the plate under it; everything else keeps old art."""
+def _frame_masks(fr: np.ndarray, ref: np.ndarray, alpha: np.ndarray, tolerance: int,
+                 shift_tolerance: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Classify a 1x frame's pixels as background-copy (`same`), a brightness-only
+    change (`tint`) or a small-delta change (`shift`) relative to the plate under it;
+    everything else keeps old art. `shift` pixels differ by at most `shift_tolerance`
+    per channel but are neither a copy nor a brightness change; they do not count
+    towards the background fraction."""
     a = alpha > 0
     fr = fr.astype(int)
     ref = ref.astype(int)
-    same = a & (np.max(np.abs(fr - ref), axis=-1) <= tolerance)
+    maxdiff = np.max(np.abs(fr - ref), axis=-1)
+    same = a & (maxdiff <= tolerance)
     lum = (fr.sum(axis=-1) + 3) / (ref.sum(axis=-1) + 3)
     tint = a & ~same & (_cosine(fr, ref) >= 0.98) & (lum >= 0.2) & (lum <= 5.0)
-    return same, tint
+    shift = a & ~same & ~tint & (maxdiff <= shift_tolerance)
+    return same, tint, shift
 
 
 def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path, *,
-                     tolerance: int = 8, min_bg_fraction: float = 0.2) -> list[dict]:
+                     tolerance: int = 8, min_bg_fraction: float = 0.2,
+                     shift_tolerance: int = 24) -> list[dict]:
     """Re-base each animated room object's frames on the room's own 2x background.
 
     The engine draws animated room objects (lights, steam, dials, shadows, fans)
     from 1996 frames that mostly copy the background under them; on a redrawn room
     they show as old-art rectangles. For each frame the pixels that match the
     original plate take the redraw, the pixels that only change brightness (a
-    glow, a shadow) take the redraw scaled by the same per-channel ratio, and the
-    rest keep the old art, upscaled. Objects that are not mostly background (a
-    walker, a person) are left to the engine. Written into
-    out_dir/room_NNN/frame_iii@2x.png; returns one record per object written.
+    glow, a shadow) take the redraw scaled by the same per-channel ratio, the
+    pixels that differ only a little (a water shimmer, a hue nudge within
+    `shift_tolerance`) take the redraw plus their per-channel delta, and the rest
+    keep the old art, upscaled. Objects drawn scaled (scale_val != 256, e.g. a
+    doorman) are handled too: the engine draws a frame of size (sw, sh) at
+    position + (scaled_offset, scaled_offset) with size (sw * 256 // s,
+    sh * 256 // s), so the redraw region is cut out of that box and resampled to
+    the frame's 2x size. Objects that are not mostly background (a walker, a
+    person; small-delta pixels do not count as background) are left to the
+    engine. Written into out_dir/room_NNN/frame_iii@2x.png; returns one record
+    per object written, including its scale.
     """
     plate_path = prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate.png"
     meta_path = extract.scene_dir(cfg, "rooms", scene) / "metadata.json"
@@ -173,19 +205,30 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
     plate = np.asarray(Image.open(plate_path).convert("RGB"), dtype=np.int32)
     plate_h, plate_w = plate.shape[:2]
 
+    def object_scale(obj: dict) -> int:
+        """The object's draw scale (256 = unscaled); missing or 0 means 256."""
+        return int(obj.get("scale_val", plates.SCALE_THRESHOLD) or plates.SCALE_THRESHOLD)
+
     def frame_boxes(obj: dict, frames: list[dict]) -> list[tuple[int, int, int, int] | None] | None:
-        """(x0, y0, w, h) per frame, aligned with `frames` (None for an invalid placeholder);
-        None overall if a valid frame's box leaves the plate or no frame is valid."""
+        """(x0, y0, w, h) per frame at the frame's own resolution, aligned with `frames`
+        (None for an invalid placeholder); None overall if a valid frame's drawn box
+        leaves the plate or no frame is valid. For a scaled object (s != 256) the box
+        is the drawn size (sw * 256 // s, sh * 256 // s) at position + scaled_offset,
+        as the engine draws it."""
         pos = obj.get("position") or {}
+        scale = object_scale(obj)
         boxes = []
         for f in frames:
             if f.get("invalid_placeholder"):
                 boxes.append(None)
                 continue
-            x0 = int(pos.get("x", 0)) + int(f.get("offset_x", 0))
-            y0 = int(pos.get("y", 0)) + int(f.get("offset_y", 0))
-            w, h = int(f.get("width", 0)), int(f.get("height", 0))
-            if w <= 0 or h <= 0 or x0 < 0 or y0 < 0 or x0 + w > plate_w or y0 + h > plate_h:
+            sw, sh = int(f.get("width", 0)), int(f.get("height", 0))
+            if sw <= 0 or sh <= 0:
+                return None
+            w, h = sw * 256 // scale, sh * 256 // scale
+            x0 = int(pos.get("x", 0)) + scaled_offset(int(f.get("offset_x", 0)), scale)
+            y0 = int(pos.get("y", 0)) + scaled_offset(int(f.get("offset_y", 0)), scale)
+            if x0 < 0 or y0 < 0 or x0 + w > plate_w or y0 + h > plate_h:
                 return None
             boxes.append((x0, y0, w, h))
         return boxes if any(b is not None for b in boxes) else None
@@ -194,7 +237,7 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
         """The object's image_index if it is a candidate animated room object, else None."""
         if obj.get("sprite_type") != "active_bg_shape" or not plates.flags_pass(obj):
             return None
-        if int(obj.get("scale_val", plates.SCALE_THRESHOLD) or plates.SCALE_THRESHOLD) != plates.SCALE_THRESHOLD:
+        if object_scale(obj) <= 0:
             return None
         try:
             return int(obj.get("image_index", 0))
@@ -220,8 +263,11 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
         boxes = frame_boxes(obj, frames)
         if not boxes:
             continue
+        scale = object_scale(obj)
 
-        # Pass 1, at 1x: classify each valid frame and count the background fraction.
+        # Pass 1, at the frame's own resolution: classify each valid frame against the
+        # plate under its drawn box (plate sampled nearest at the frame's resolution)
+        # and count the background fraction (copies plus brightness-only changes).
         analysis = []
         total_same = total_opaque = 0
         for i, (f, box) in enumerate(zip(frames, boxes)):
@@ -229,6 +275,7 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
                 analysis.append(None)
                 continue
             x0, y0, w, h = box
+            sw, sh = int(f.get("width", 0)), int(f.get("height", 0))
             frame_path = room_dir / (f.get("file") or f"frame_{i:03d}.png")
             if not frame_path.is_file():
                 analysis.append(None)
@@ -237,11 +284,11 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
             arr = np.asarray(img)
             fr = arr[..., :3].astype(np.int32)
             alpha = arr[..., 3]
-            ref = plate[y0:y0 + h, x0:x0 + w]
-            same, tint = _frame_masks(fr, ref, alpha, tolerance)
+            ref = plate[np.ix_(y0 + np.arange(sh) * h // sh, x0 + np.arange(sw) * w // sw)]
+            same, tint, shift = _frame_masks(fr, ref, alpha, tolerance, shift_tolerance)
             total_same += int(same.sum())
             total_opaque += int((alpha > 0).sum())
-            analysis.append((fr, alpha, ref, same, tint))
+            analysis.append((fr, alpha, ref, same, tint, shift))
         if total_opaque == 0 or total_same / total_opaque < min_bg_fraction:
             continue  # mostly its own art (a walker or person): leave it to the engine
 
@@ -252,24 +299,38 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
         for i, (f, item) in enumerate(zip(frames, analysis)):
             if item is None:
                 continue
-            fr, alpha, ref, same, tint = item
+            fr, alpha, ref, same, tint, shift = item
             x0, y0, w, h = boxes[i]
-            same2 = np.asarray(Image.fromarray(same.astype(np.uint8) * 255).resize((2 * w, 2 * h), Image.NEAREST),
-                              dtype=bool)
-            tint2 = np.asarray(Image.fromarray(tint.astype(np.uint8) * 255).resize((2 * w, 2 * h), Image.NEAREST),
-                              dtype=bool)
-            ratio = (fr.astype(np.float64) + 1.0) / (ref.astype(np.float64) + 1.0)
-            ratio2 = ratio.repeat(2, axis=0).repeat(2, axis=1)
+            sw, sh = int(f.get("width", 0)), int(f.get("height", 0))
             R = np.asarray(background.convert("RGB").crop((2 * x0, 2 * y0, 2 * x0 + 2 * w, 2 * y0 + 2 * h)))
-            old = np.asarray(Image.fromarray(fr.astype(np.uint8)).resize((2 * w, 2 * h), Image.LANCZOS)).astype(float)
-            rgb = np.where(same2[..., None], R, old)
-            rgb = np.where(tint2[..., None], np.clip(R.astype(float) * ratio2, 0, 255), rgb)
-            alpha2 = np.asarray(Image.fromarray(alpha).resize((2 * w, 2 * h), Image.NEAREST))
+            if (w, h) != (sw, sh):  # scaled: resample the drawn box to the frame's 2x size
+                R = np.asarray(Image.fromarray(R).resize((2 * sw, 2 * sh), Image.LANCZOS))
+            R = R.astype(float)
+            # old art is the default; each pixel class overrides its own region.
+            rgb = np.asarray(Image.fromarray(fr.astype(np.uint8)).resize((2 * sw, 2 * sh), Image.LANCZOS)).astype(float)
+            if same.any():
+                same2 = np.asarray(Image.fromarray(same.astype(np.uint8) * 255).resize((2 * sw, 2 * sh),
+                                   Image.NEAREST), dtype=bool)
+                rgb = np.where(same2[..., None], R, rgb)
+            if tint.any():
+                tint2 = np.asarray(Image.fromarray(tint.astype(np.uint8) * 255).resize((2 * sw, 2 * sh),
+                                    Image.NEAREST), dtype=bool)
+                ratio = (fr.astype(np.float64) + 1.0) / (ref.astype(np.float64) + 1.0)
+                ratio2 = ratio.repeat(2, axis=0).repeat(2, axis=1)
+                rgb = np.where(tint2[..., None], np.clip(R * ratio2, 0, 255), rgb)
+            if shift.any():
+                shift2 = np.asarray(Image.fromarray(shift.astype(np.uint8) * 255).resize((2 * sw, 2 * sh),
+                                     Image.NEAREST), dtype=bool)
+                # the frame's delta as an int, upscaled NEAREST per channel (offset to stay unsigned)
+                delta2 = np.asarray(Image.fromarray((128 + (fr - ref).astype(np.int32)).astype(np.uint8))
+                                    .resize((2 * sw, 2 * sh), Image.NEAREST)).astype(np.int32) - 128
+                rgb = np.where(shift2[..., None], np.clip(R + delta2, 0, 255), rgb)
+            alpha2 = np.asarray(Image.fromarray(alpha).resize((2 * sw, 2 * sh), Image.NEAREST))
             out = np.dstack([rgb.clip(0, 255).astype(np.uint8), alpha2])
             Image.fromarray(out, "RGBA").save(out_dir_room / f"frame_{i:03d}@2x.png")
             count += 1
         if count:
-            written.append({"name": obj.get("name", ""), "image_index": index, "frames": count,
+            written.append({"name": obj.get("name", ""), "image_index": index, "scale": scale, "frames": count,
                             "bg_fraction": round(total_same / total_opaque, 3), "dir": str(out_dir_room)})
     return written
 

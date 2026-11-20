@@ -64,6 +64,7 @@ class RoomSpritesTest(unittest.TestCase):
         walker = frame(sprites, 3, [(6, 10), (6, 10)])
         shared = frame(sprites, 4, [(4, 4)])
         scaled = frame(sprites, 5, [(10, 8)])
+        twice = frame(sprites, 6, [(5, 3)])
         layers = [
             layer(1, "CHAIR", 1, 5, 6, 12, 7, chair[0]),
             layer(2, "FLIP", 2, 30, 2, 9, 5, flip[0], flipped=True),
@@ -71,6 +72,8 @@ class RoomSpritesTest(unittest.TestCase):
             layer(4, "BUSTL", 4, 2, 30, 4, 4, shared[0]),           # one image used twice: ambiguous, skip
             layer(5, "BUSTR", 4, 50, 30, 4, 4, shared[0]),
             layer(6, "BIG", 5, 20, 20, 20, 16, scaled[0], scale=128),  # drawn at 2x its frame size
+            layer(7, "SND", 6, 8, 24, 5, 3, twice[0]),               # one image twice at the same place: cut once
+            layer(8, "SND2", 6, 8, 24, 5, 3, twice[0]),
         ]
         prep = prepare.out_root(self.cfg) / "scene_012"
         prep.mkdir(parents=True)
@@ -84,13 +87,15 @@ class RoomSpritesTest(unittest.TestCase):
     def test_writes_one_override_per_unambiguous_static_object(self):
         written = assemble.room_sprites(self.cfg, 12, self.bg, self.out)
         names = sorted(w["name"] for w in written)
-        self.assertEqual(names, ["BIG", "CHAIR", "FLIP"])
+        self.assertEqual(names, ["BIG", "CHAIR", "FLIP", "SND"])
         for item in written:
             self.assertIn("path", item)
             self.assertTrue(Path(item["path"]).is_file())
         self.assertTrue((self.out / "room_001" / "frame_000@2x.png").is_file())
         self.assertFalse((self.out / "room_003").exists())
         self.assertFalse((self.out / "room_004").exists())
+        snd = np.asarray(Image.open(self.out / "room_006" / "frame_000@2x.png"))
+        np.testing.assert_array_equal(snd[1:, :, :3], np.asarray(self.bg)[49:54, 16:26])
 
     def test_cut_matches_the_background_under_the_object(self):
         assemble.room_sprites(self.cfg, 12, self.bg, self.out)

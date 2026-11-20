@@ -74,16 +74,15 @@ class AmbienceTest(unittest.TestCase):
         fan = p[10:22, 30:38].copy()
         fan[:, 4:] = (255, 0, 0)
         self.write_room(3, [(fan, np.full((12, 8), 255), 0, 0)] * 2)
-        # SHARED (room_004, two objects), SCALED (room_005), FLAGGED (room_006), OUT (room_007, off the edge),
+        # SHARED (room_004, two objects), FLAGGED (room_006), OUT (room_007, off the edge),
         # STATIC (room_008, one frame: room_sprites' job, not this one).
         bgcopy = lambda x, y, w, h: (p[y:y + h, x:x + w].copy(), np.full((h, w), 255), 0, 0)
         self.write_room(4, [bgcopy(40, 2, 4, 4)] * 2)
-        self.write_room(5, [bgcopy(45, 25, 6, 5)] * 2)
         self.write_room(6, [bgcopy(2, 30, 5, 5)] * 2)
         self.write_room(7, [bgcopy(50, 30, 10, 10)] * 2)
         self.write_room(8, [bgcopy(20, 30, 5, 4)])
         objects = [obj(0, "LAMP", 1, 5, 4), obj(1, "WALKER", 2, 20, 20), obj(2, "FAN", 3, 30, 10),
-                   obj(3, "BUSTL", 4, 40, 2), obj(4, "BUSTR", 4, 40, 2), obj(5, "BIG", 5, 45, 25, scale=128),
+                   obj(3, "BUSTL", 4, 40, 2), obj(4, "BUSTR", 4, 40, 2),
                    obj(6, "HIDDEN", 6, 2, 30, required=[5]), obj(7, "EDGE", 7, 55, 35),
                    obj(8, "CHAIR", 8, 20, 30), obj(9, "PERSON", 1, 5, 4, kind="person")]
         (rooms / "metadata.json").write_text(json.dumps({"objects": objects}))
@@ -117,7 +116,7 @@ class AmbienceTest(unittest.TestCase):
         lamp = next(w for w in written if w["name"] == "LAMP")
         self.assertEqual((lamp["image_index"], lamp["frames"]), (1, 2))
         self.assertGreater(lamp["bg_fraction"], 0.8)
-        for index in (2, 4, 5, 6, 7, 8):
+        for index in (2, 4, 6, 7, 8):
             self.assertFalse((self.out / f"room_{index:03d}").exists(), index)
 
     def test_background_pixels_take_the_redraw(self):
