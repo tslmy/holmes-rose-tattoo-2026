@@ -7,7 +7,7 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (12)
+## Pending (13)
 
 ### #17 `bakeoff-deleted-backends` · decision (40.5 GB): Bake-off is remote-only: local mflux candidates were not run
 
@@ -104,6 +104,14 @@ The server API accepts only the FLUX klein models and rejects extra fields; its 
 - Raised 2026-11-17, updated 2026-11-18
 
 Work dir: /Users/lmy/Projects/shcrt/work. Checked 2026-11-18 10:20.
+
+### #34 `image-server-down` · decision: Image server at 10.0.0.26:8000 refuses connections; iteration 4 extra seeds are recorded unavailable
+
+- **Default in use:** The 31 rooms with no passing redraw keep the ESRGAN baseline. Everything else proceeds.
+- **Options:** start the mflux server on the second laptop, then: `uv run remaster redraw-bg geometry qa assemble --scenes 2 3 4 5 8 15 16 18 20 21 22 23 24 25 27 28 29 33 36 39 41 42 49 50 54 61 68 71 81 91 92` and `uv run remaster run`; leave those rooms on the baseline
+- Raised 2026-11-19
+
+Checked 2026-11-19 16:31: the second laptop answers ping and the VLM (port 1234) is up, but port 8000 refuses. 124 redraw jobs (seeds 53, 11, 23, 29 for 31 rooms) wrote status unavailable; their fingerprint includes availability, so they re-run when planned again.
 
 ## Decided or done (21)
 
@@ -319,11 +327,13 @@ Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other
 
 Phase 1c: settled by the user ("Yes, to both."): new lighting is score-only; a narrow fire gate fails only story fire (burning buildings, flames from windows).
 
-### #32 `disk-purgeable` · disk: Free disk 14.6 GB is below 15.0 GB, but 9.4 GB is purgeable (Time Machine local snapshots)
+### #32 `disk-purgeable` · disk: Free disk 14.6 GB is below 15.0 GB, but 7.2 GB is purgeable (Time Machine local snapshots)
 
 - **Default in use:** Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted
 - **Options:** delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`; lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml
 - **Status:** done
-- Raised 2026-11-16, updated 2026-11-18
+- Raised 2026-11-16, updated 2026-11-19
 
-free 14.6 GB, purgeable 9.4 GB, 5 local snapshot(s) at 2026-11-18 18:09. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
+free 14.6 GB, purgeable 7.2 GB, 2 local snapshot(s) at 2026-11-19 11:29. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
+
+Space came back at 2026-11-19 15:29: free 16.1 GB, purgeable 5.8 GB, 1 local snapshot(s).

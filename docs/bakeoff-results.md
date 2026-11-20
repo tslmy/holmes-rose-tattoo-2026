@@ -1,5 +1,29 @@
 # Phase 1 bake-off results
 
+## Iteration 4: relative QA gates, ambience v2, extra seeds (2026-11-19)
+
+- **Floor gate made relative.** Calibration on iteration 3: the VLM floor check ("is every cyan walk zone on
+  ground?") failed the untouched 1996 original in 18 of 23 rooms, because walk zones overlap furniture. A
+  failed floor check now counts only when the same check passes on the original (cached per room in
+  `work/qa/scene_NNN/floor_original.json`). The objects gate tolerates one confident miss when at least 85%
+  of objects are found and the VLM diff does not report that object removed. Re-running QA on the existing
+  redraws (no new images) took redrawn rooms from **22 to 49 of 80**.
+- **Checked by eye:** the 27 newly passing rooms (1, 7, 11, 12, 14, 19, 26, 30, 32, 34, 37, 38, 40, 45, 52,
+  53, 56, 67, 80, 82, 83, 93-98) keep layout, furniture and floor; no missing or invented objects. Minor: a
+  darker rectangle near the scissors in 93 and 94, and the paper props on the chemistry table change look.
+- **Ambience v2 (delegated):** scaled animated objects are cut at their drawn box, and small-delta pixels
+  (water shimmer, scene 35) ride on the redraw as a delta. Finding: the scaled objects in redrawn rooms (the
+  scene 60 doorman, figures) are real cut-out sprites (background fraction 6-16%), not old-room patches, so
+  they correctly stay old art; the dark doorway in 60 is the door-opening animation.
+- **Shared static images:** a room image used by two layers at the same box (a sound trigger listed twice,
+  e.g. `60SND`) was skipped as ambiguous and showed as an old-art square; it is now cut once (11 objects in
+  8 rooms).
+- **Extra seeds** (`L2-clean-s53/s11/s23/s29`) are planned only for the 31 rooms with no passing redraw.
+  The first run found the image server (10.0.0.26:8000) down: all 124 jobs recorded `unavailable` and re-run
+  once it is back (review item `image-server-down`).
+- In-game capture needs an unlocked screen; the smoke test (all 80 scenes load) passed with the
+  `playable-overrides-2x-remaster-it4` pack.
+
 ## Iteration 3: animated-object frames and people cleanup (2026-11-18)
 
 Approved by the user after iteration 2, which still showed 1996-art rectangles around animated room
