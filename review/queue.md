@@ -105,13 +105,13 @@ The server API accepts only the FLUX klein models and rejects extra fields; its 
 
 Work dir: /Users/lmy/Projects/shcrt/work. Checked 2026-11-18 10:20.
 
-### #34 `image-server-down` · decision: Image server at 10.0.0.26:8000 refuses connections; iteration 4 extra seeds are recorded unavailable
+### #34 `image-server-down` · decision: Image server at 10.0.0.26:8000 is back but rejects the API key (401); iteration 4 extra seeds wait
 
 - **Default in use:** The 31 rooms with no passing redraw keep the ESRGAN baseline. Everything else proceeds.
-- **Options:** start the mflux server on the second laptop, then: `uv run remaster redraw-bg geometry qa assemble --scenes 2 3 4 5 8 15 16 18 20 21 22 23 24 25 27 28 29 33 36 39 41 42 49 50 54 61 68 71 81 91 92` and `uv run remaster run`; leave those rooms on the baseline
-- Raised 2026-11-19
+- **Options:** put the server's current key in ~/.config/shcrt/image_api_key, then re-plan: `uv run remaster redraw-bg geometry qa --scenes 2 3 4 5 8 15 16 18 20 21 22 23 24 25 27 28 29 33 36 39 41 42 49 50 54 61 68 71 81 91 92 --enqueue-only` and `uv run remaster run`; leave those rooms on the baseline
+- Raised 2026-11-19, updated 2026-11-19
 
-Checked 2026-11-19 16:31: the second laptop answers ping and the VLM (port 1234) is up, but port 8000 refuses. 124 redraw jobs (seeds 53, 11, 23, 29 for 31 rooms) wrote status unavailable; their fingerprint includes availability, so they re-run when planned again.
+16:31 the server refused connections; by the next check it answered but /healthz returns 401 Invalid bearer token with the key in ~/.config/shcrt/image_api_key (written 2026-11-15), so the server probably restarted with a new key. 124 redraw jobs (seeds 53, 11, 23, 29 for 31 rooms) are recorded unavailable and re-run when planned again.
 
 ## Decided or done (21)
 
