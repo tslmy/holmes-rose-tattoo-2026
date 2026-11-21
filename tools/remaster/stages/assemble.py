@@ -16,6 +16,10 @@ Per scene, work/assemble/backgrounds/scene_NNN/:
                     copies the background: each frame re-based on the 2x redraw, so a
                     redrawn room does not show 1996 object art; objects that are not
                     mostly background (a walker, a person) are left to the engine
+  canim_NNN/         cutscene animations (cAnim NNN, zero-based): every frame re-based on the
+                    2x background, the figure from the upscaled cAnim frames ([assemble]
+                    canim_upscaled) or LANCZOS; stored unmirrored. The pack serves them as
+                    sprites/scene_NNN/canim_NNN/frame_iii@2x.png
 
 A room keeps the baseline unless some backend x level passes every QA gate AND
 actually changes the picture (bakeoff_min_change): a redraw that barely moves the
@@ -30,7 +34,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 from .. import bakeoff, plates
 from ..config import Config
@@ -184,6 +188,39 @@ def _frame_masks(fr: np.ndarray, ref: np.ndarray, alpha: np.ndarray, tolerance: 
     return same, tint, shift
 
 
+def _rebuild_frame(fr: np.ndarray, alpha: np.ndarray, ref: np.ndarray, same: np.ndarray, tint: np.ndarray,
+                   shift: np.ndarray, R: np.ndarray, old2x: np.ndarray | None = None) -> np.ndarray:
+    """One frame at 2x (RGBA uint8, 2*sh x 2*sw) rebuilt on the redraw region R (2*sh x 2*sw x 3).
+
+    Old art (pixels in no class) is old2x when given, else the 1x frame upscaled LANCZOS; `same` pixels take
+    R, `tint` pixels take R times the frame/plate ratio, `shift` pixels take R plus the frame-plate delta.
+    Masks, the delta and alpha are upscaled NEAREST."""
+    sh, sw = fr.shape[:2]
+    size = (2 * sw, 2 * sh)
+    R = R.astype(float)
+
+    def up_mask(m: np.ndarray) -> np.ndarray:
+        return np.asarray(Image.fromarray(m.astype(np.uint8) * 255).resize(size, Image.NEAREST), dtype=bool)
+
+    if old2x is not None:
+        rgb = old2x[..., :3].astype(float)
+    else:
+        rgb = np.asarray(Image.fromarray(fr.astype(np.uint8)).resize(size, Image.LANCZOS)).astype(float)
+    if same.any():
+        rgb = np.where(up_mask(same)[..., None], R, rgb)
+    if tint.any():
+        ratio = (fr.astype(np.float64) + 1.0) / (ref.astype(np.float64) + 1.0)
+        ratio2 = ratio.repeat(2, axis=0).repeat(2, axis=1)
+        rgb = np.where(up_mask(tint)[..., None], np.clip(R * ratio2, 0, 255), rgb)
+    if shift.any():
+        # the frame's delta as an int, upscaled NEAREST per channel (offset to stay unsigned)
+        delta2 = np.asarray(Image.fromarray(np.clip(128 + (fr - ref).astype(np.int32), 0, 255).astype(np.uint8))
+                            .resize(size, Image.NEAREST)).astype(np.int32) - 128
+        rgb = np.where(up_mask(shift)[..., None], np.clip(R + delta2, 0, 255), rgb)
+    alpha2 = np.asarray(Image.fromarray(alpha).resize(size, Image.NEAREST))
+    return np.dstack([rgb.clip(0, 255).astype(np.uint8), alpha2])
+
+
 def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path, *,
                      tolerance: int = 8, min_bg_fraction: float = 0.2,
                      shift_tolerance: int = 24) -> list[dict]:
@@ -315,33 +352,112 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
             R = np.asarray(background.convert("RGB").crop((2 * x0, 2 * y0, 2 * x0 + 2 * w, 2 * y0 + 2 * h)))
             if (w, h) != (sw, sh):  # scaled: resample the drawn box to the frame's 2x size
                 R = np.asarray(Image.fromarray(R).resize((2 * sw, 2 * sh), Image.LANCZOS))
-            R = R.astype(float)
-            # old art is the default; each pixel class overrides its own region.
-            rgb = np.asarray(Image.fromarray(fr.astype(np.uint8)).resize((2 * sw, 2 * sh), Image.LANCZOS)).astype(float)
-            if same.any():
-                same2 = np.asarray(Image.fromarray(same.astype(np.uint8) * 255).resize((2 * sw, 2 * sh),
-                                   Image.NEAREST), dtype=bool)
-                rgb = np.where(same2[..., None], R, rgb)
-            if tint.any():
-                tint2 = np.asarray(Image.fromarray(tint.astype(np.uint8) * 255).resize((2 * sw, 2 * sh),
-                                    Image.NEAREST), dtype=bool)
-                ratio = (fr.astype(np.float64) + 1.0) / (ref.astype(np.float64) + 1.0)
-                ratio2 = ratio.repeat(2, axis=0).repeat(2, axis=1)
-                rgb = np.where(tint2[..., None], np.clip(R * ratio2, 0, 255), rgb)
-            if shift.any():
-                shift2 = np.asarray(Image.fromarray(shift.astype(np.uint8) * 255).resize((2 * sw, 2 * sh),
-                                     Image.NEAREST), dtype=bool)
-                # the frame's delta as an int, upscaled NEAREST per channel (offset to stay unsigned)
-                delta2 = np.asarray(Image.fromarray((128 + (fr - ref).astype(np.int32)).astype(np.uint8))
-                                    .resize((2 * sw, 2 * sh), Image.NEAREST)).astype(np.int32) - 128
-                rgb = np.where(shift2[..., None], np.clip(R + delta2, 0, 255), rgb)
-            alpha2 = np.asarray(Image.fromarray(alpha).resize((2 * sw, 2 * sh), Image.NEAREST))
-            out = np.dstack([rgb.clip(0, 255).astype(np.uint8), alpha2])
+            out = _rebuild_frame(fr, alpha, ref, same, tint, shift, R)
             Image.fromarray(out, "RGBA").save(out_dir_room / f"frame_{i:03d}@2x.png")
             count += 1
         if count:
             written.append({"name": obj.get("name", ""), "image_index": index, "scale": scale, "frames": count,
                             "bg_fraction": round(total_same / total_opaque, 3), "dir": str(out_dir_room)})
+    return written
+
+
+def _open3(mask: np.ndarray) -> np.ndarray:
+    """Morphological opening of a boolean mask with a 3x3 square (outside the frame counts as set, so
+    regions touching the frame edge are not eroded from that side)."""
+    m = Image.fromarray(np.pad(mask, 1, constant_values=True).astype(np.uint8) * 255)
+    m = m.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+    return (np.asarray(m) > 0)[1:-1, 1:-1] & mask
+
+
+def canim_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: Path, *,
+                  tolerance: int = 8, shift_tolerance: int = 24) -> list[dict]:
+    """Re-base each cutscene animation (cAnim) frame on the room's own 2x background.
+
+    cAnims (Holmes picking something up, a door opening) are drawn at the cAnim's position + each frame's
+    offset (scaled like room objects) and copy much of the 1996 room behind the figure; without an
+    override they show old-art rectangles on a redrawn room. Each valid frame is rebuilt like an animated
+    room object (see _rebuild_frame), with two differences: brightness-only (tint)
+    matches are old art, and background pixels must form regions at least 3 px wide (_open3). Background
+    pixels take the redraw, the figure keeps old art, taken
+    from the upscaled cAnim frames under [assemble] canim_upscaled when one exists at the frame's 2x size.
+    Pixels drawn outside the plate are old art. The engine mirrors a cAnim whose flags & 4 on draw, so its
+    reference and redraw region are mirrored and the output is stored unmirrored. Every valid frame is
+    written (no background-fraction gate: the engine has no other override for cAnims), to
+    out_dir/canim_NNN/frame_iii@2x.png; returns one record per cAnim written.
+    """
+    canim_root = extract.scene_dir(cfg, "canimations", scene)
+    if not canim_root.is_dir():
+        return []
+    plate = np.asarray(Image.open(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate.png").convert("RGB"),
+                       dtype=np.int32)
+    plate_h, plate_w = plate.shape[:2]
+    bg = background.convert("RGB")
+    upscaled = cfg.raw.get("assemble", {}).get("canim_upscaled")
+    up_root = None
+    if upscaled:
+        up_root = Path(upscaled) if Path(upscaled).is_absolute() else cfg.root / upscaled
+        up_root = up_root / f"scene_{scene:03d}"
+    written: list[dict] = []
+    for cdir in sorted(canim_root.glob("canim_*")):
+        try:
+            number = int(cdir.name.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+        meta = _read(cdir / "metadata.json")
+        anim = meta.get("animation") or {}
+        pos = anim.get("position") or {}
+        scale = int(anim.get("scale_val", plates.SCALE_THRESHOLD) or plates.SCALE_THRESHOLD)
+        flipped = bool(int(anim.get("flags", 0) or 0) & 4)
+        out_sub = out_dir / f"canim_{number:03d}"
+        count = total_bg = total_opaque = 0
+        for i, f in enumerate(meta.get("frames") or []):
+            if f.get("invalid_placeholder"):
+                continue
+            sw, sh = int(f.get("width", 0)), int(f.get("height", 0))
+            frame_path = cdir / (f.get("file") or f"frame_{i:03d}.png")
+            if sw <= 0 or sh <= 0 or not frame_path.is_file():
+                continue
+            arr = np.asarray(Image.open(frame_path).convert("RGBA"))
+            fr = arr[..., :3].astype(np.int32)
+            alpha = arr[..., 3]
+            w, h = sw * 256 // scale, sh * 256 // scale
+            x0 = int(pos.get("x", 0)) + scaled_offset(int(f.get("offset_x", 0)), scale)
+            y0 = int(pos.get("y", 0)) + scaled_offset(int(f.get("offset_y", 0)), scale)
+            ys = y0 + np.arange(sh) * h // sh
+            xs = x0 + np.arange(sw) * w // sw
+            if flipped:
+                xs = xs[::-1]
+            inside = ((ys >= 0) & (ys < plate_h))[:, None] & ((xs >= 0) & (xs < plate_w))[None, :]
+            ref = plate[np.ix_(np.clip(ys, 0, plate_h - 1), np.clip(xs, 0, plate_w - 1))]
+            same, tint, shift = _frame_masks(fr, ref, alpha, tolerance, shift_tolerance)
+            # A cAnim figure moves over the room (a coat, a swinging door): a brightness-only match is more
+            # often a changed object than a glow, and single figure pixels can match the plate by chance.
+            # Keep only exact/small-delta background in regions at least 3 px wide; the rest is old art.
+            keep = _open3((same | shift) & inside)
+            same, shift = same & keep, shift & keep
+            tint = np.zeros_like(same)
+            R = np.asarray(bg.crop((2 * x0, 2 * y0, 2 * (x0 + w), 2 * (y0 + h))))
+            if (w, h) != (sw, sh):
+                R = np.asarray(Image.fromarray(R).resize((2 * sw, 2 * sh), Image.LANCZOS))
+            if flipped:
+                R = R[:, ::-1]
+            old2x = None
+            if up_root is not None:
+                up_path = up_root / cdir.name / f"frame_{i:03d}@2x.png"
+                if up_path.is_file():
+                    up = Image.open(up_path)
+                    if up.size == (2 * sw, 2 * sh):
+                        old2x = np.asarray(up.convert("RGB"))
+            out = _rebuild_frame(fr, alpha, ref, same, tint, shift, R, old2x)
+            out_sub.mkdir(parents=True, exist_ok=True)
+            Image.fromarray(out, "RGBA").save(out_sub / f"frame_{i:03d}@2x.png")
+            count += 1
+            total_bg += int((same | tint).sum())
+            total_opaque += int((alpha > 0).sum())
+        if count:
+            written.append({"name": anim.get("name", ""), "canim": number, "frames": count, "flipped": flipped,
+                            "scale": scale,
+                            "bg_fraction": round(total_bg / total_opaque, 3) if total_opaque else 0.0})
     return written
 
 
@@ -427,11 +543,14 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
     result.save(tmp / "background@2x.png")
     sprites = room_sprites(cfg, scene, result, tmp)
     ambience = ambience_sprites(cfg, scene, result, tmp)
+    canims = canim_sprites(cfg, scene, result, tmp)
     record = {**pick, "fingerprint": fingerprint, **({"valid_fraction": valid_fraction} if valid_fraction is not None else {})}
     if sprites:
         record["room_sprites"] = [w["name"] for w in sprites]
     if ambience:
         record["ambience_sprites"] = [w["name"] for w in ambience]
+    if canims:
+        record["canims"] = [w["name"] for w in canims]
     common.write_json(tmp / "pick.json", record)
     common.install_dir(tmp, target)
     return record

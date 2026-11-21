@@ -126,7 +126,7 @@ edge_low = 40
 edge_high = 120
 
 [thresholds]
-min_free_disk_gb = 15         # the runner pauses and queues a request below this
+min_free_disk_gb = 15        # the runner pauses and queues a request below this
 job_max_attempts = 3
 # QA gates (used from Phase 1)
 max_warp_stretch = 1.6
@@ -144,6 +144,11 @@ sprite_min_flicker_ratio = 0.6 # sprite test: less motion than this vs the basel
 sprite_max_flicker_ratio = 1.5 # sprite test: frame-to-frame change vs the ESRGAN baseline
 sprite_max_drift_excess = 0.1  # DINOv2 drift beyond the baseline's own pose variation
 sprite_min_pose_iou = 0.7
+
+[assemble]
+# Upscaled cAnim frames (2x RGBA, October iteration-1 pilot; read-only): figure pixels of each cutscene
+# animation frame come from here when the file matches the frame's 2x size, background pixels from the room.
+canim_upscaled = "enhanced/canimations-remaster-20261031"
 
 [golden]
 # About six scenes (plus 36, added by decision #5): street, interior, haze room, a clue with writing,

@@ -7,7 +7,7 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (12)
+## Pending (13)
 
 ### #17 `bakeoff-deleted-backends` · decision (40.5 GB): Bake-off is remote-only: local mflux candidates were not run
 
@@ -104,6 +104,14 @@ The server API accepts only the FLUX klein models and rejects extra fields; its 
 - Raised 2026-11-17, updated 2026-11-18
 
 Work dir: /Users/lmy/Projects/shcrt/work. Checked 2026-11-18 10:20.
+
+### #35 `gpu-host-down-it5` · info: 10.0.0.26 is unreachable (LM Studio :1234 and image server :8000); it5 canim code written by Opus, not delegated
+
+- **Default in use:** Opus wrote canim_sprites against the acceptance test (tools/tests/test_remaster_canims.py, all passing). No image or VLM jobs can run until the host is back.
+- **Options:** keep the Opus implementation; re-run the delegate task when the host is back
+- Raised 2026-11-21
+
+2026-11-21 10:55: the OpenCode delegate job it5-1-canims lost its model connection after 15 min (ConnectionRefused) and changed nothing; both ports on 10.0.0.26 refuse connections. The job was cancelled. If you want the delegation-first rule kept strictly, the change can be re-done by OpenCode from tools/remaster/delegate_tasks/it5-1-canims.toml once the host is up.
 
 ## Decided or done (22)
 
@@ -319,16 +327,14 @@ Scenes 1, 4, 36. No room result depends on it in Phase 1b: each also fails other
 
 Phase 1c: settled by the user ("Yes, to both."): new lighting is score-only; a narrow fire gate fails only story fire (burning buildings, flames from windows).
 
-### #32 `disk-purgeable` · disk: Free disk 14.6 GB is below 15.0 GB, but 7.2 GB is purgeable (Time Machine local snapshots)
+### #32 `disk-purgeable` · disk: Free disk 11.8 GB is below 15.0 GB, but 24.1 GB is purgeable (Time Machine local snapshots)
 
 - **Default in use:** Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted
 - **Options:** delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`; lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml
 - **Status:** done
-- Raised 2026-11-16, updated 2026-11-19
+- Raised 2026-11-16, updated 2026-11-21
 
-free 14.6 GB, purgeable 7.2 GB, 2 local snapshot(s) at 2026-11-19 11:29. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
-
-Space came back at 2026-11-19 15:29: free 16.1 GB, purgeable 5.8 GB, 1 local snapshot(s).
+free 11.8 GB, purgeable 24.1 GB, 22 local snapshot(s) at 2026-11-21 10:38. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
 
 ### #34 `image-server-down` · decision: Image server at 10.0.0.26:8000 is back but rejects the API key (401); iteration 4 extra seeds wait
 

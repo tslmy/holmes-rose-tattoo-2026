@@ -543,9 +543,9 @@
     {
       "id": "disk-purgeable",
       "kind": "disk",
-      "title": "Free disk 14.6 GB is below 15.0 GB, but 7.2 GB is purgeable (Time Machine local snapshots)",
+      "title": "Free disk 11.8 GB is below 15.0 GB, but 24.1 GB is purgeable (Time Machine local snapshots)",
       "default": "Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted",
-      "detail": "free 14.6 GB, purgeable 7.2 GB, 2 local snapshot(s) at 2026-11-19 11:29. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.\n\nSpace came back at 2026-11-19 15:29: free 16.1 GB, purgeable 5.8 GB, 1 local snapshot(s).",
+      "detail": "free 11.8 GB, purgeable 24.1 GB, 22 local snapshot(s) at 2026-11-21 10:38. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.",
       "options": [
         "delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`",
         "lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml"
@@ -555,7 +555,7 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-16T16:54:03-08:00",
-      "updated": "2026-11-19T15:29:35-08:00"
+      "updated": "2026-11-21T10:38:59-08:00"
     },
     {
       "id": "disk-low",
@@ -591,6 +591,23 @@
       "images": [],
       "created": "2026-11-19T16:32:20-08:00",
       "updated": "2026-11-20T09:38:19-08:00"
+    },
+    {
+      "id": "gpu-host-down-it5",
+      "kind": "info",
+      "title": "10.0.0.26 is unreachable (LM Studio :1234 and image server :8000); it5 canim code written by Opus, not delegated",
+      "default": "Opus wrote canim_sprites against the acceptance test (tools/tests/test_remaster_canims.py, all passing). No image or VLM jobs can run until the host is back.",
+      "detail": "2026-11-21 10:55: the OpenCode delegate job it5-1-canims lost its model connection after 15 min (ConnectionRefused) and changed nothing; both ports on 10.0.0.26 refuse connections. The job was cancelled. If you want the delegation-first rule kept strictly, the change can be re-done by OpenCode from tools/remaster/delegate_tasks/it5-1-canims.toml once the host is up.",
+      "options": [
+        "keep the Opus implementation",
+        "re-run the delegate task when the host is back"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-21T11:04:41-08:00",
+      "updated": "2026-11-21T11:04:41-08:00"
     }
   ]
 }
