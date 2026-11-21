@@ -48,9 +48,19 @@ def out_root(cfg: Config) -> Path:
     return cfg.work / "assemble"
 
 
+# Rooms the engine draws with palette haze (fog, smoke): the hires compositor cannot
+# reproduce the original lookup table, so wherever the haze mask applies it shows the
+# native 1996 pixels (scummvm-src engines/sherlock/README-haze-reference.md). Over a
+# redraw those show as old-art streaks; over the ESRGAN baseline they blend in.
+HAZE_ROOMS = frozenset({7, 8, 18, 53, 68})
+
+
 def pick_room(cfg: Config, scene: int) -> dict:
     """Choose the room's source: the most ambitious QA-passing redraw that changes the
-    picture, or the ESRGAN baseline when none qualifies."""
+    picture, or the ESRGAN baseline when none qualifies or the room is a haze room."""
+    if scene in HAZE_ROOMS:
+        return {"scene": scene, "source": "baseline", "backend": None, "level": None, "score": None,
+                "why": "haze room: the engine shows native 1996 pixels under the haze; keep the ESRGAN baseline"}
     min_change = cfg.threshold("bakeoff_min_change", 20.0)
     candidates = []
     for backend in redraw_bg.backends(cfg):

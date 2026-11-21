@@ -25,9 +25,14 @@
   s23). 22 rooms keep the ESRGAN baseline. Checked by eye: all 9 backgrounds are faithful; minor changes are
   the painted Laocoön now white marble (28), the blue curtains grey (50) and the window in 49 now a street.
 - **In-game** (pack `playable-overrides-2x-remaster-it4`, all 80 scenes load): 8 of the 9 new rooms look
-  right. **Room 18 does not:** the 1996 water and foam animation frames (`18WTR*`, `18FOAM*`) are drawn as
-  old art over large parts of the new walls and steps. Large ambience frames over redrawn art are the next
-  thing to fix. The morgue sheet in 15 is a 1996 cut-out sprite and shows its dither.
+  right. **Room 18 did not:** old-art streaks covered the new walls and steps. The cause is not its sprites
+  (the capture was the same with every room override removed) but the engine's haze: in rooms 7, 8, 18, 53
+  and 68 the original fogs the screen through a palette lookup the hires compositor cannot reproduce, so it
+  shows the native 1996 pixels wherever the haze applies (`scummvm-src/engines/sherlock/README-haze-reference.md`).
+  `assemble` now keeps the ESRGAN baseline for these five rooms (`HAZE_ROOMS`), where those pixels blend in;
+  18 now looks coherent, and 7 and 53 (redrawn since iteration 2, with the same ghosting) look much the
+  same either way, as the haze covers most of them. **55 of 80 rooms are redrawn.** The morgue sheet in 15
+  is a 1996 cut-out sprite and shows its dither.
 
 ## Iteration 3: animated-object frames and people cleanup (2026-11-18)
 

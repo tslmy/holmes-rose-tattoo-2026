@@ -129,6 +129,17 @@ class PickTest(unittest.TestCase):
                 self.assertEqual(assemble.pick_room(cfg, 77)["source"], "baseline")
 
 
+    def test_haze_rooms_keep_the_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_cfg(tmp)
+            write_room(cfg, 18, "web", "L2-fix-s47", passed=True, score=0.95)
+            with mock.patch.object(bakeoff, "change_from_original", return_value=40.0):
+                pick = assemble.pick_room(cfg, 18)
+            self.assertEqual((pick["source"], pick["level"]), ("baseline", None))
+            self.assertIn("haze", pick["why"])
+            self.assertEqual(assemble.HAZE_ROOMS, {7, 8, 18, 53, 68})
+
+
 class WarpBackTest(unittest.TestCase):
     def test_warp_back_restores_original_layout(self):
         warp = shifted_warp()
