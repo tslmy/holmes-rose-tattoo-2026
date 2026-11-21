@@ -116,3 +116,19 @@ playing. `menu_mode` is the engine's `MenuMode` value (0 standard, 3 talk,
 * The dumps do not include the cursor.
 * The dummy backend's intermittent `SDL_BlitSurface` startup error still
   occurs. The runner retries it.
+
+## cAnim suite
+
+`tools/playtest_canim_suite.py` runs one generated script per reachable cAnim trigger and compares packs:
+
+```sh
+uv run python tools/playtest_canim_suite.py --scummvm scummvm-src/scummvm --data-dir scummvm \
+  --save validation/saves/rosetattoo.000 --survey-dir work/playtest/survey \
+  --pack before=generated/playable-overrides-2x-remaster-it4 \
+  --pack after=generated/playable-overrides-2x-remaster-it5 --output-dir work/playtest/canims-it5
+```
+
+It needs a survey run per room first (`waitidle`, `objects`, `quit`) under `<survey-dir>/room<N>/`. A
+trigger is an object `uses` entry with a verb, no inventory target and a cAnim number (1-based in the room
+file); hotspots off screen in scrolling rooms are skipped. Results: `results.json` (which cAnim actually
+played per pack) and `sheet-NN.jpg` pages.

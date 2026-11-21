@@ -27,6 +27,22 @@
   `scummvm-src`) with `tools/playtest_rosetattoo.py` opens the wardrobe in room 3 through the verb menu.
   During `03WARD` the it4 pack shows the 1996 wardrobe rectangle and the it5 pack the redrawn wardrobe
   (`work/playtest/wardrobe-it4-vs-it5.jpg`). About 15 s per run, no window.
+- **cAnim play-test suite** (`tools/playtest_canim_suite.py`): survey each room's visible hotspots from the
+  save, then for every hotspot whose verb plays a cAnim directly, right-click, pick the verb, dump the cAnim,
+  on both packs. From `validation/saves/rosetattoo.000`, 53 triggers are visible; 24 play (the others are
+  not yet offered by the story state: the verb is missing from the menu). In all 24, it4 shows old-art
+  patches during the animation and it5 does not (`work/playtest/canims-it5/sheet-*.jpg`). Note: the room
+  file's cAnim number in an object's uses is 1-based; the engine's and the override's are 0-based.
+- From the second save (`validation/contour-slot1-playtest/rosetattoo.001`, a later story state) 34 play,
+  14 of them new: **38 distinct cAnims verified in-game**, every one clean on it5 and patched on it4
+  (`work/playtest/canims-it5-slot1/new-cAnims.jpg`).
+- **Found by the play-test:** static objects that only appear in other story states have no override,
+  because `room_sprites` follows the plate's layers (one flag state). 535 such objects sit in 48 redrawn
+  rooms; most are props (banners, a newspaper, pebbles), which are old art by design like the characters.
+  The visible case is the wall cover `01WLLCVR` in room 1, a 1996 patch of wall over the new window.
+- **Found by the play-test:** the ceiling fan in room 44 (`44FAN`, an animated room object since iteration 4)
+  shows 1996 wallpaper between its blades in a box around the fan, because the redraw draws its own fan in
+  another pose and has no wall behind it. Needs a redraw without the fan, or the fan's region filled.
 
 ## Iteration 4: relative QA gates, ambience v2, extra seeds (2026-11-19)
 
