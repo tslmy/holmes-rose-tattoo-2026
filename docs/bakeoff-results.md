@@ -19,10 +19,15 @@
   e.g. `60SND`) was skipped as ambiguous and showed as an old-art square; it is now cut once (11 objects in
   8 rooms).
 - **Extra seeds** (`L2-clean-s53/s11/s23/s29`) are planned only for the 31 rooms with no passing redraw.
-  The first run found the image server (10.0.0.26:8000) down: all 124 jobs recorded `unavailable` and re-run
-  once it is back (review item `image-server-down`).
-- In-game capture needs an unlocked screen; the smoke test (all 80 scenes load) passed with the
-  `playable-overrides-2x-remaster-it4` pack.
+  The first run found the image server (10.0.0.26:8000) down, and a run during the outage overwrote the
+  original four seeds of those rooms with `unavailable` records, so all 8 seeds were redrawn (248 jobs, 9.5 h).
+  **9 more rooms pass: 58 of 80 are redrawn** (3, 15, 23, 42, 50 on s53; 18, 28 on s29; 27 on s11; 49 on
+  s23). 22 rooms keep the ESRGAN baseline. Checked by eye: all 9 backgrounds are faithful; minor changes are
+  the painted Laocoön now white marble (28), the blue curtains grey (50) and the window in 49 now a street.
+- **In-game** (pack `playable-overrides-2x-remaster-it4`, all 80 scenes load): 8 of the 9 new rooms look
+  right. **Room 18 does not:** the 1996 water and foam animation frames (`18WTR*`, `18FOAM*`) are drawn as
+  old art over large parts of the new walls and steps. Large ambience frames over redrawn art are the next
+  thing to fix. The morgue sheet in 15 is a 1996 cut-out sprite and shows its dither.
 
 ## Iteration 3: animated-object frames and people cleanup (2026-11-18)
 

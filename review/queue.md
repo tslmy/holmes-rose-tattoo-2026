@@ -7,7 +7,7 @@ or its id, e.g. `uv run remaster review decide 5 keep` or `... decide golden-set
 **default in use** until you decide; overturning a default re-queues the jobs tagged with it.
 Thumbnails are in `review/sheet.html` (local only, not in git).
 
-## Pending (13)
+## Pending (12)
 
 ### #17 `bakeoff-deleted-backends` · decision (40.5 GB): Bake-off is remote-only: local mflux candidates were not run
 
@@ -105,15 +105,7 @@ The server API accepts only the FLUX klein models and rejects extra fields; its 
 
 Work dir: /Users/lmy/Projects/shcrt/work. Checked 2026-11-18 10:20.
 
-### #34 `image-server-down` · decision: Image server at 10.0.0.26:8000 is back but rejects the API key (401); iteration 4 extra seeds wait
-
-- **Default in use:** The 31 rooms with no passing redraw keep the ESRGAN baseline. Everything else proceeds.
-- **Options:** put the server's current key in ~/.config/shcrt/image_api_key, then re-plan: `uv run remaster redraw-bg geometry qa --scenes 2 3 4 5 8 15 16 18 20 21 22 23 24 25 27 28 29 33 36 39 41 42 49 50 54 61 68 71 81 91 92 --enqueue-only` and `uv run remaster run`; leave those rooms on the baseline
-- Raised 2026-11-19, updated 2026-11-19
-
-16:31 the server refused connections; by the next check it answered but /healthz returns 401 Invalid bearer token with the key in ~/.config/shcrt/image_api_key (written 2026-11-15), so the server probably restarted with a new key. 124 redraw jobs (seeds 53, 11, 23, 29 for 31 rooms) are recorded unavailable and re-run when planned again.
-
-## Decided or done (21)
+## Decided or done (22)
 
 ### #1 `download-flux2-klein-9b-q4` · download (9.5 GB): FLUX.2 klein 9B (4-bit) for edit / casting candidates
 
@@ -337,3 +329,14 @@ Phase 1c: settled by the user ("Yes, to both."): new lighting is score-only; a n
 free 14.6 GB, purgeable 7.2 GB, 2 local snapshot(s) at 2026-11-19 11:29. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.
 
 Space came back at 2026-11-19 15:29: free 16.1 GB, purgeable 5.8 GB, 1 local snapshot(s).
+
+### #34 `image-server-down` · decision: Image server at 10.0.0.26:8000 is back but rejects the API key (401); iteration 4 extra seeds wait
+
+- **Default in use:** The 31 rooms with no passing redraw keep the ESRGAN baseline. Everything else proceeds.
+- **Options:** put the server's current key in ~/.config/shcrt/image_api_key, then re-plan: `uv run remaster redraw-bg geometry qa --scenes 2 3 4 5 8 15 16 18 20 21 22 23 24 25 27 28 29 33 36 39 41 42 49 50 54 61 68 71 81 91 92 --enqueue-only` and `uv run remaster run`; leave those rooms on the baseline
+- **Status:** done
+- Raised 2026-11-19, updated 2026-11-20
+
+16:31 the server refused connections; by the next check it answered but /healthz returns 401 Invalid bearer token with the key in ~/.config/shcrt/image_api_key (written 2026-11-15), so the server probably restarted with a new key. 124 redraw jobs (seeds 53, 11, 23, 29 for 31 rooms) are recorded unavailable and re-run when planned again.
+
+2026-11-20 09:37: the server accepts the key again; the 31 rooms are re-running (8 seeds each, since the 401 run had also overwritten their first four).
