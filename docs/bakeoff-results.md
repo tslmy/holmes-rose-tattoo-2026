@@ -1,5 +1,33 @@
 # Phase 1 bake-off results
 
+## Iteration 5: cutscene animations, play-test tooling (2026-11-21)
+
+- **Cutscene animations (cAnims) had no overrides.** The 767 cAnims (Holmes picking something up, a door
+  opening, a fire) copy the 1996 room behind the figure. 498 are in redrawn rooms, and in 47 of the 55
+  redrawn rooms at least one would flash an old-art rectangle (up to ~200x200 px: rooms 93, 94, 74, 45).
+  The per-room captures never showed this because nothing triggers a cAnim at room start
+  (`work/assemble/canim-audit.json`).
+- **Fix:** `assemble.canim_sprites` re-bases every cAnim frame like an animated room object. Background
+  pixels take the room's 2x background; figure pixels come from the October iteration-1 upscales
+  (`[assemble] canim_upscaled`, `enhanced/canimations-remaster-20261031`, read-only); mirrored cAnims are
+  stored unmirrored. Two cAnim-only rules: brightness-only matches stay old art (a swinging door is not a
+  glow), and background must form regions at least 3 px wide (no speckle on moving coats). The pack serves
+  33,189 frames as `sprites/scene_NNN/canim_NNN/frame_iii@2x.png`, cloned from `work/assemble` (APFS
+  clones, no extra disk). Pack: `generated/playable-overrides-2x-remaster-it5`; all 80 scenes load (smoke test).
+- **cAnim figures are still the October upscales** of the 1996 art; redrawing them is Phase 3/5. Where a
+  cAnim moves part of the room (the 221B door in `01WOUT`) that part is old art over the new room.
+- Written by Opus, not delegated: the model host 10.0.0.26 went down mid-task (review item
+  `gpu-host-down-it5`).
+- **Play-test:** computer use drives a local wrapper app (`ShcrtPlaytest.app` around the patched binary) in
+  the background: screenshots and left clicks work, Holmes walks and looks. The verb menu (Open, Use) is a
+  right click, which needs full-screen control, so cAnims and most exits cannot be triggered in the
+  background. A scripted-input and frame-dump hook in the engine is proposed as its own task. Checked
+  offline instead: frames composited over the room (`work/assemble/it5-canims.jpg`).
+- **Verified in-game, headless:** the engine hook from `claude/sherlock-playtest-input` (now applied in
+  `scummvm-src`) with `tools/playtest_rosetattoo.py` opens the wardrobe in room 3 through the verb menu.
+  During `03WARD` the it4 pack shows the 1996 wardrobe rectangle and the it5 pack the redrawn wardrobe
+  (`work/playtest/wardrobe-it4-vs-it5.jpg`). About 15 s per run, no window.
+
 ## Iteration 4: relative QA gates, ambience v2, extra seeds (2026-11-19)
 
 - **Floor gate made relative.** Calibration on iteration 3: the VLM floor check ("is every cyan walk zone on
