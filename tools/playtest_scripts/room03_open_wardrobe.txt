@@ -1,0 +1,28 @@
+# Room 3 (Holmes's bedroom): open the wardrobe through the verb menu.
+# Opening it plays cAnim 03WARD (canim_005). Run with --scene 3, e.g.
+#   python3 tools/playtest_rosetattoo.py ... --scene 3 \
+#     --script tools/playtest_scripts/room03_open_wardrobe.txt
+# Coordinates are native 640x480 screen coordinates.
+
+waitscene 3
+waitidle
+objects                  # log hotspot names and screen rectangles
+dump 01_room
+
+rclick 240 220           # right-click the wardrobe: opens the verb menu
+waitframes 6
+dump 02_verb_menu
+
+verb Open                # click "Open" in the menu; Holmes walks over first
+waitcanim 20000          # until 03WARD starts
+waitframes 12
+dump 03_wardrobe_opening
+waitframes 12
+dump 04_wardrobe_opening_later
+
+waitframes 60            # after the animation Holmes describes the interior
+dump 05_description
+click 320 470            # dismiss the text window
+waitidle 30000
+dump 06_after
+quit
