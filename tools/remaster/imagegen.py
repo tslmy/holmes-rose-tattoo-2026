@@ -56,6 +56,17 @@ REMOVE_PEOPLE_PROMPT = ("Remove every person from this photograph and fill the s
                         "lighting. Change nothing else: keep the camera, framing, every object and all "
                         "writing.")
 
+# The repair pass (redraw_bg, `repair` variants) fixes the room's best near-miss redraw instead of
+# redrawing it: it removes the specific objects QA found blocking (and any added people), then puts
+# back the small object(s) QA found missing by pasting the original plate's pixels and harmonising.
+REMOVE_OBJECTS_PROMPT = ("Remove the {items} from this photograph and fill the space with what is behind "
+                         "them: the same floor, wall, street or furniture, with matching materials and "
+                         "lighting. Change nothing else: keep the camera, framing, every other object and "
+                         "all writing.")
+HARMONISE_PROMPT = ("Blend the {items} into this photograph: give {them} the same lighting, materials "
+                    "and photographic detail as the rest of the room, at exactly the same place, size and "
+                    "shape. Change nothing else.")
+
 # Optional request fields of the remote image server, sent from a backend's `levels` table:
 #   strength  float 0..1, edit requests only: how much of the input image is KEPT (mflux semantics,
 #             as in `mflux-generate-flux2 --image PATH STRENGTH`): 0 = ignore the input, 1 = return it.

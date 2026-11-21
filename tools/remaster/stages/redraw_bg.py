@@ -16,6 +16,16 @@ are not in the input (remaster.detect, PERSON_QUERIES), and when found the redra
 with imagegen.REMOVE_PEOPLE_PROMPT, the cleaned pixels pasted back only around those people
 (cleanup_alpha), and the untouched first pass kept as redraw_raw.png.
 
+Variants with `repair = true` do not redraw the room at all: they take the room's best near-miss redraw
+(the non-repair level whose QA summary is `status ok`, not passing, and fails at most two gates; fewest
+failing gates, then highest score, see `repair_source`) and fix what QA found. The blocking objects it
+added on the walkable floor (the summary's `blocking_objects` boxes, plus any people the redraw added)
+are removed with one edit of that redraw (imagegen.REMOVE_OBJECTS_PROMPT) pasted back only around those
+boxes; then each missing object the summary names is restored from the input plate's pixels, warped to
+the redraw by the source's geometry warp and pasted at its anchor box, harmonised by a second edit
+(imagegen.HARMONISE_PROMPT), and pasted back only around those boxes. The source redraw is kept as
+redraw_raw.png. When no near-miss redraw exists the job finishes `unavailable` without any generation.
+
 The 4x tiled detail pass is Phase 2 work and is not run here.
 """
 
@@ -77,7 +87,8 @@ def variant(cfg: Config, name: str) -> dict:
             "strength": table_name.get("strength"), "extras": extras,
             "mask_people": bool(table_name.get("mask_people", False)),
             "remove_people": bool(table_name.get("remove_people", False)),
-            "backends": list(table_name.get("backends") or []) if named else None,
+            "repair": bool(table_name.get("repair", False)),
+            "backends": (list(table_name["backends"]) if "backends" in table_name else None) if named else None,
             "controls": [list(c) for c in table_name.get("controls") or []] if named else None}
 
 
@@ -115,6 +126,40 @@ def key(scene: int, backend: str, level: str) -> str:
     return f"scene/{scene:03d}/{backend}/{level}"
 
 
+def repair_source(cfg: Config, scene: int, backend: str) -> str | None:
+    """The non-repair level whose redraw is the best near-miss to repair, or None.
+
+    A candidate's QA summary (qa.job_dir/qa.json) must be `status ok`, not passing, and fail at most
+    two gates (a gate that is `None` is unknown, not failed). The best candidate has the fewest False
+    gates, ties broken by the higher `score`. When any redraw already passes there is nothing to
+    repair. `qa` is imported lazily: it imports this module, so a module-level import would be
+    circular."""
+    from . import qa  # noqa: PLC0415 - circular: qa imports redraw_bg
+
+    best: tuple[int, float, str] | None = None
+    for level in levels(cfg):
+        if variant(cfg, level)["repair"]:
+            continue
+        path = qa.job_dir(cfg, scene, backend, level) / "qa.json"
+        if not path.is_file():
+            continue
+        try:
+            summary = json.loads(path.read_text(encoding="utf-8")).get("summary") or {}
+        except (OSError, ValueError):
+            continue
+        if summary.get("pass") is True:
+            return None  # the room already has a passing redraw
+        if summary.get("status") != "ok":
+            continue
+        false_gates = sum(1 for value in (summary.get("gates") or {}).values() if value is False)
+        if false_gates > 2:
+            continue
+        score = float(summary.get("score") or 0.0)
+        if best is None or false_gates < best[0] or (false_gates == best[0] and score > best[1]):
+            best = (false_gates, score, level)
+    return best[2] if best else None
+
+
 def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
     specs = []
     seed = int(bakeoff(cfg).get("seed", 7))
@@ -128,14 +173,32 @@ def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
                 var = variant(cfg, level)
                 if var["backends"] is not None and backend not in var["backends"]:
                     continue  # the variant names the backends it runs on; this one is not one of them
+                extra_parts: list[str] = []
+                extra_after: list[str] = []
+                if var["repair"]:
+                    # The repair job edits the best near-miss redraw, so it must re-run when any
+                    # non-repair level's QA verdict changes. qa shares this stage's job key, so its
+                    # ids are `qa:<this key>` (see qa.plan, which reuses the geometry/redraw key).
+                    from . import qa  # noqa: PLC0415 - circular: qa imports redraw_bg
+
+                    for other in levels(cfg):
+                        if variant(cfg, other)["repair"]:
+                            continue
+                        other_qa = qa.job_dir(cfg, scene, backend, other) / "qa.json"
+                        try:
+                            extra_parts.append(other_qa.read_text(encoding="utf-8"))
+                        except (OSError, ValueError):
+                            extra_parts.append("")
+                        extra_after.append(f"qa:{key(scene, backend, other)}")
                 fp = common.fingerprint(brief_fp, prep_fp, bk, imagegen.level_prompt(var["level"]),
                                         var, var["extras"], var["seed"],
-                                        f"unavailable:{reason}" if reason else "available", *CODE)
+                                        f"unavailable:{reason}" if reason else "available",
+                                        *extra_parts, *CODE)
                 tags = ["image-backend-provisional", "bakeoff-backend"]
                 specs.append(JobSpec(NAME, key(scene, backend, level),
                                      {"scene": scene, "backend": backend, "level": level, "seed": var["seed"]},
                                      fp,
-                                     after=[f"brief:scene/{scene:03d}", f"prepare:scene/{scene:03d}"],
+                                     after=[f"brief:scene/{scene:03d}", f"prepare:scene/{scene:03d}", *extra_after],
                                      tags=tags))
     return specs
 
@@ -239,6 +302,17 @@ def cleanup_alpha(boxes: list[list[float]], size: tuple[int, int], grow: float =
     return alpha
 
 
+def _picture_box(warp: "GridWarp", box: list[float]) -> list[float]:
+    """An original-pixel [x, y, w, h] mapped through the warp to a picture-pixel bounding box."""
+    import numpy as np
+
+    x, y, w, h = box
+    pts = warp.forward(np.array([[x, y], [x + w, y], [x, y + h], [x + w, y + h]], float)).reshape(-1, 2)
+    x0, y0 = float(pts[:, 0].min()), float(pts[:, 1].min())
+    x1, y1 = float(pts[:, 0].max()), float(pts[:, 1].max())
+    return [x0, y0, max(1.0, x1 - x0), max(1.0, y1 - y0)]
+
+
 def prompt_for(cfg: Config, scene: int, name: str) -> str:
     """The scene's visual brief, the base level's instruction, then each of the variant's extra
     sentences, in order."""
@@ -260,6 +334,10 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
     # Always rebuild: a cached input outlives a re-prepared plate (iteration 2 redrew stale plates with people).
     imagegen.resize_to(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png", source, size)
     var = variant(cfg, level)
+    if var["repair"]:
+        tmp = common.scratch_dir(cfg, f"redraw-{scene}-{backend}-{level}")
+        return _run_repair(cfg, scene, backend, level, int(params.get("seed", 7)), size, source, tmp,
+                           fingerprint)
     prompt = prompt_for(cfg, scene, level)
     masked_pixels = 0
     if var["mask_people"]:
@@ -329,6 +407,124 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
     record.update({"scene": scene, "prompt": prompt})
+    common.write_json(tmp / "record.json", record)
+    common.write_stamp(tmp, fingerprint, scene=scene, backend=backend, level=level)
+    common.install_dir(tmp, target)
+    return {k: record.get(k) for k in ("status", "reason", "seconds", "peak_memory_gb", "where", "output_size")}
+
+
+def _run_repair(cfg: Config, scene: int, backend: str, level: str, seed: int,
+                size: tuple[int, int], source: Path, tmp: Path, fingerprint: str) -> dict:
+    """Repair variant: fix the room's best near-miss redraw instead of redrawing the room.
+
+    `source` is the resized input (the plate at `size`), `tmp` the scratch dir, `size` the redraw
+    size. Removes what QA flagged as blocking, restores what QA flagged as missing, then saves
+    redraw.png (the source redraw kept as redraw_raw.png)."""
+    from . import geometry, qa  # noqa: PLC0415 - circular: both import redraw_bg
+
+    target = job_dir(cfg, scene, backend, level)
+    src = repair_source(cfg, scene, backend)
+    if src is None:
+        record = {"scene": scene, "backend": backend, "level": level, "status": "unavailable",
+                  "reason": "no near-miss redraw to repair"}
+        common.write_json(tmp / "record.json", record)
+        common.write_stamp(tmp, fingerprint, scene=scene, backend=backend, level=level)
+        common.install_dir(tmp, target)
+        return {k: record.get(k) for k in ("status", "reason", "seconds", "peak_memory_gb", "where", "output_size")}
+
+    summary = (json.loads((qa.job_dir(cfg, scene, backend, src) / "qa.json").read_text(encoding="utf-8"))
+               .get("summary") or {})
+    blocking = [b for b in (summary.get("blocking_objects") or []) if b.get("box")]
+    missing = [str(label) for label in (summary.get("missing") or []) if str(label).strip()]
+    # Start from a copy of the source redraw's pixels (the picture); keep it as the raw pass.
+    src_redraw = job_dir(cfg, scene, backend, src) / "redraw.png"
+    current = tmp / "redraw.png"
+    shutil.copyfile(src_redraw, current)
+    shutil.copyfile(src_redraw, tmp / "redraw_raw.png")
+    input_img = Image.open(source).convert("RGB")
+    edits: list[dict] = []
+
+    def generate(prompt: str, image_path: Path, out_name: str, gen_seed: int) -> Path:
+        out = tmp / out_name
+        rec = imagegen.generate(cfg, backend, prompt=prompt, images=[image_path], size=size,
+                                seed=gen_seed, out=out, level=level,
+                                settings=request_settings(cfg, imagegen.backend(cfg, backend), level),
+                                log_dir=tmp)
+        edits.append(rec)
+        return out
+
+    # -- Remove: blocking objects QA added on the walkable floor, plus people the redraw added. --
+    removed = [{"label": b.get("label"), "box": list(b["box"])} for b in blocking]
+    remove_boxes = [list(b["box"]) for b in blocking]
+    with Image.open(current) as cur:
+        current_size = cur.size
+        if input_img.size != current_size:
+            input_img = input_img.resize(current_size, Image.LANCZOS)
+        for box in added_people(input_img, cur.convert("RGB")):
+            remove_boxes.append(list(box))
+            removed.append({"label": "person", "box": list(box)})
+    if remove_boxes:
+        items = ", ".join(dict.fromkeys(b.get("label") for b in blocking if b.get("label"))) or "the objects"
+        out = generate(imagegen.REMOVE_OBJECTS_PROMPT.format(items=items), current, "removed.png", seed)
+        with Image.open(out) as cleaned_f, Image.open(current) as base_f:
+            cleaned = cleaned_f.convert("RGB")
+            base = base_f.convert("RGB")
+            if cleaned.size != base.size:
+                cleaned = cleaned.resize(base.size, Image.LANCZOS)
+            import numpy as np
+
+            alpha = cleanup_alpha(remove_boxes, base.size)[:, :, None]
+            blended = (np.asarray(base, np.float32) * (1 - alpha)
+                       + np.asarray(cleaned, np.float32) * alpha).round().astype(np.uint8)
+            Image.fromarray(blended).save(current)
+    # -- Restore: missing objects, from the input plate's pixels warped to the redraw, then harmonised. --
+    restored: list[dict] = []
+    restore_boxes: list[list[float]] = []
+    if missing:
+        sidecar = json.loads((geometry.job_dir(cfg, scene, backend, src) / "geometry.json").read_text(encoding="utf-8"))
+        from ..warp import GridWarp
+
+        warp = GridWarp.from_json(sidecar["warp"])
+        for anchor in sidecar.get("anchors", []):
+            if not anchor.get("detectable"):
+                continue
+            label = str(anchor.get("label") or "")
+            if label not in missing:
+                continue
+            box = anchor.get("orig_det") or anchor.get("box")
+            if not box:
+                continue
+            restore_boxes.append(_picture_box(warp, box))
+            restored.append({"label": label, "box": None})
+    if restore_boxes:
+        import numpy as np
+
+        with Image.open(current) as cur:
+            current_size = cur.size
+            if input_img.size != current_size:
+                input_img = input_img.resize(current_size, Image.LANCZOS)
+            cur_arr = np.asarray(cur.convert("RGB"), np.float32)
+        in_arr = np.asarray(input_img, np.float32)
+        alpha = cleanup_alpha(restore_boxes, current_size)[:, :, None]
+        pasted = (cur_arr * (1 - alpha) + in_arr * alpha).round().astype(np.uint8)  # plate pixels in place
+        Image.fromarray(pasted).save(current)
+        labels = [r["label"] for r in restored]
+        out = generate(imagegen.HARMONISE_PROMPT.format(items=", ".join(labels),
+                                                        them="them" if len(labels) > 1 else "it"),
+                       current, "harmonised.png", seed + 1)
+        with Image.open(out) as harmonised_f, Image.open(current) as base_f:
+            harmonised = harmonised_f.convert("RGB")
+            base = base_f.convert("RGB")
+            if harmonised.size != base.size:
+                harmonised = harmonised.resize(base.size, Image.LANCZOS)
+            alpha2 = cleanup_alpha(restore_boxes, base.size)[:, :, None]
+            blended = (np.asarray(base, np.float32) * (1 - alpha2)
+                       + np.asarray(harmonised, np.float32) * alpha2).round().astype(np.uint8)
+            Image.fromarray(blended).save(current)
+    for entry, box in zip(restored, restore_boxes):
+        entry["box"] = list(box)
+    record = {"scene": scene, "backend": backend, "level": level, "status": "ok", "source": src,
+              "removed": removed, "restored": restored, "edits": edits}
     common.write_json(tmp / "record.json", record)
     common.write_stamp(tmp, fingerprint, scene=scene, backend=backend, level=level)
     common.install_dir(tmp, target)
