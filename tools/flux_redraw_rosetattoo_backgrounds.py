@@ -14,12 +14,32 @@ are loaded at full fp16 precision from a non-gated mirror of the official
 those components are comparatively small and quantizing them would degrade
 prompt fidelity (T5) or color accuracy (VAE) disproportionately.
 
-FLUX.1-schnell is a distilled, CFG-free, few-step (1-4) model, so this tool
-runs img2img (`FluxImg2ImgPipeline`), using the upscaled original background
-as the init image and a low `--strength` to keep geometry, walk zones, and
-puzzle-relevant object silhouettes - and small embedded text like signage -
-intact while adding photoreal material/lighting detail. No ControlNet or
-edge-map preprocessing is needed to hold structure at this low strength.
+FLUX.1-schnell is a distilled, CFG-free, few-step (1-4) model, but this tool
+overrides that with a higher `--strength`/`--steps` (0.85 / 24 by default,
+picked via a visual strength sweep) so FLUX has real artistic freedom to
+reimagine materials, decor, and lighting as rich cinematic concept art.
+
+However, high-strength img2img alone gives *no actual geometric guarantee* -
+it's just hoping the model stays close to the original layout. This game
+must remain playable, so instead this tool leans on a real structural
+constraint: `tools/extract_rosetattoo_assets.py` already emits a per-scene
+`protect_mask.png`, a solid-filled union of the room's walk-zone and hotspot
+rectangles (the exact regions ScummVM's coordinate-based pathfinding/click
+metadata cares about). This tool uses `FluxInpaintPipeline` instead of plain
+img2img, passing the *inverse* of that mask as `mask_image` (white = free to
+redraw, black = keep pixel-faithful to the original), so walkable floor and
+hotspot bounds stay identical to the source room layout while everything
+else is free to be fully reimagined. Unlike alpha-compositing two
+independently-generated images after the fact (which produces a visible
+"ghosting" seam where two different lighting styles collide), inpainting
+conditions the diffusion itself on the surrounding kept pixels at every
+step, so the redrawn region blends its lighting/style into the boundary
+naturally. This is the FLUX equivalent of an SD ControlNet/inpaint-mask
+pass, using ground-truth room metadata instead of an inferred edge/depth
+map (and needing no extra model download or the non-commercial FLUX.1-dev
+license that FLUX's official ControlNet checkpoints require). The init
+image also gets a light Gaussian pre-blur (`--denoise-radius`) to strip the
+original 256-color art's palette dithering before FLUX repaints it.
 
 Usage:
     python3 tools/flux_redraw_rosetattoo_backgrounds.py --scenes 1 18 36 --scale 2
@@ -40,19 +60,23 @@ import time
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 DEFAULT_MODEL_DIR = Path("models/flux-schnell")
 DEFAULT_GGUF = Path("models/flux-schnell-gguf/flux1-schnell-Q4_K_S.gguf")
 
 STYLE_PROMPT = (
-    "Faithful high-resolution photographic restoration of a 1996 hand-painted "
-    "point-and-click adventure game background. Preserve the exact composition, "
-    "camera angle, geometry, walkable paths, doorways, props, and every "
-    "puzzle-relevant object and silhouette. Add realistic material texture, "
-    "grime, period-accurate Victorian lighting, and true photographic tonal "
-    "depth. Do not invent new readable text, signage, people, doors, exits, "
-    "or clues; do not change architecture or object placement."
+    "Cinematic photograph of an ultra-detailed Victorian-era movie set diorama, "
+    "the kind of richly art-directed still used in a big-budget period drama. "
+    "Warm dramatic lighting from practical sources like chandeliers, gas lamps, "
+    "or a fireplace; deep saturated colors, rich wood grain, brass, marble, "
+    "damask fabric, and polished period detail. Keep the overall room layout, "
+    "camera angle, walkable floor area, doorway positions, and the general "
+    "silhouette/location of puzzle-relevant objects and furniture so they "
+    "still line up with the original scene, but feel entirely free to "
+    "reimagine materials, decor, props, and lighting mood with full artistic "
+    "license for a much richer, more atmospheric, movie-quality result. "
+    "Do not add readable text, signage, or people."
 )
 
 
@@ -97,10 +121,40 @@ def round_to_multiple(value: int, multiple: int = 16) -> int:
     return max(multiple, int(round(value / multiple)) * multiple)
 
 
-def build_init_image(background: Image.Image, scale: float) -> Image.Image:
+def build_init_image(background: Image.Image, scale: float, denoise_radius: float = 1.0) -> Image.Image:
     width = round_to_multiple(int(background.width * scale))
     height = round_to_multiple(int(background.height * scale))
-    return background.convert("RGB").resize((width, height), Image.LANCZOS)
+    source = background.convert("RGB")
+    if denoise_radius > 0:
+        # The original 256-color game art uses ordered dithering to fake
+        # smooth gradients (e.g. ceilings, skies). At the low img2img
+        # strength we need to preserve geometry/text, FLUX just paints on
+        # top of that dithering noise instead of erasing it. A small
+        # gaussian blur pre-pass removes the per-pixel noise while leaving
+        # real edges (furniture, brick lines) intact enough for FLUX to
+        # redraw from, so the diffused result doesn't inherit the banding.
+        source = source.filter(ImageFilter.GaussianBlur(radius=denoise_radius))
+    return source.resize((width, height), Image.LANCZOS)
+
+
+def load_freedom_mask(scene_dir: Path, target_size: tuple[int, int], feather: float) -> Image.Image | None:
+    """Load protect_mask.png (walk-zones + hotspots union, white=protect) and
+    invert/scale/feather it into a FluxInpaintPipeline-style mask, where
+    white = free to redraw and black = keep pixel-faithful to the original.
+
+    Returns None if the scene has no protect mask.
+    """
+    mask_path = scene_dir / "protect_mask.png"
+    if not mask_path.exists():
+        return None
+    protect = Image.open(mask_path).convert("L")
+    # NEAREST keeps the rectangle edges crisp before feathering (LANCZOS
+    # would already soften/ring them in an uncontrolled way).
+    protect = protect.resize(target_size, Image.NEAREST)
+    freedom = ImageOps.invert(protect)
+    if feather > 0:
+        freedom = freedom.filter(ImageFilter.GaussianBlur(radius=feather))
+    return freedom
 
 
 def load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -155,7 +209,7 @@ def build_contact_sheet(pairs: list[tuple[int, Image.Image, Image.Image]], outpu
 
 def load_pipeline(model_dir: Path, gguf_path: Path, device: str):
     import torch
-    from diffusers import FluxImg2ImgPipeline, FluxTransformer2DModel, GGUFQuantizationConfig
+    from diffusers import FluxInpaintPipeline, FluxTransformer2DModel, GGUFQuantizationConfig
 
     print(f"Loading GGUF-quantized transformer from {gguf_path} ...")
     transformer_config_dir = model_dir / "transformer"
@@ -167,14 +221,67 @@ def load_pipeline(model_dir: Path, gguf_path: Path, device: str):
     )
 
     print(f"Loading text encoders / VAE / tokenizers from {model_dir} ...")
-    pipe = FluxImg2ImgPipeline.from_pretrained(
+    # FluxInpaintPipeline (not the plain img2img pipeline) so a mask_image can
+    # protect walk-zone/hotspot regions: it conditions the diffusion itself on
+    # the surrounding kept pixels at each step, so the generated area blends
+    # naturally with the preserved region instead of the visible seam you get
+    # from alpha-compositing two independently-generated images after the
+    # fact. Passing an all-white mask (the default when a scene has no
+    # protect_mask.png) makes it behave like plain img2img.
+    pipe = FluxInpaintPipeline.from_pretrained(
         str(model_dir),
         transformer=transformer,
         torch_dtype=torch.bfloat16,
     )
-    pipe.to(device)
+    if device.startswith("cuda"):
+        # Apple's `mps` backend uses unified memory, so pipe.to(device) fits
+        # everything comfortably. Discrete CUDA cards (e.g. a 12GB RTX 4070
+        # Ti) can't hold the transformer + full fp16 T5 text encoder + VAE
+        # all at once; without offloading, PyTorch silently spills into slow
+        # shared/system memory instead of erroring, which looks like it's
+        # "working" but runs 2x+ slower than plain CPU-only unified memory.
+        # enable_model_cpu_offload() keeps only the actively-running
+        # submodule resident on the GPU, moving the rest to host RAM.
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe.to(device)
     pipe.enable_attention_slicing()
     return pipe
+
+
+def _run_flux_pass(
+    pipe,
+    prompt: str,
+    init_image: Image.Image,
+    mask_image: Image.Image,
+    strength: float,
+    steps: int,
+    seed: int,
+) -> Image.Image:
+    import torch
+
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    result = pipe(
+        prompt=prompt,
+        image=init_image,
+        mask_image=mask_image,
+        height=init_image.height,
+        width=init_image.width,
+        strength=strength,
+        num_inference_steps=steps,
+        guidance_scale=0.0,  # FLUX.1-schnell is a CFG-free distilled model.
+        generator=generator,
+    )
+    image = result.images[0]
+    if image.size != init_image.size:
+        # Defensive safety net: FluxImg2ImgPipeline silently defaults height/
+        # width to 1024x1024 (its default_sample_size * vae_scale_factor)
+        # whenever they're omitted, ignoring the init image's own size - we
+        # pass them explicitly above, but resize here too in case a future
+        # diffusers version reintroduces its own internal rounding/cropping,
+        # so ScummVM never sees an override with unexpected dimensions.
+        image = image.resize(init_image.size, Image.LANCZOS)
+    return image
 
 
 def process_scene(
@@ -187,9 +294,10 @@ def process_scene(
     seed: int,
     prompt_brief_dir: Path | None,
     skip_existing: bool,
+    denoise_radius: float = 1.0,
+    protect: bool = True,
+    protect_feather: float = 8.0,
 ) -> tuple[Image.Image, Image.Image] | None:
-    import torch
-
     scene_id = scene_id_from_dir(scene_dir)
     background_path = scene_dir / "background.png"
     if not background_path.exists():
@@ -205,39 +313,27 @@ def process_scene(
         return original, redraw
 
     original = Image.open(background_path).convert("RGB")
-    init_image = build_init_image(original, scale)
+    init_image = build_init_image(original, scale, denoise_radius)
 
     scene_prompt = load_scene_prompt_text(scene_dir, prompt_brief_dir, scene_id)
     prompt = make_prompt(scene_prompt)
 
-    generator = torch.Generator(device="cpu").manual_seed(seed)
-
-    print(f"  scene {scene_id}: generating at {init_image.width}x{init_image.height} "
-          f"(strength={strength}, steps={steps}) ...")
+    freedom_mask = load_freedom_mask(scene_dir, init_image.size, protect_feather) if protect else None
+    if freedom_mask is not None:
+        print(f"  scene {scene_id}: generating at {init_image.width}x{init_image.height} "
+              f"(strength={strength}, steps={steps}), walk-zone/hotspot bounds protected ...")
+    else:
+        if protect:
+            print(f"  scene {scene_id}: no protect_mask.png found, generating unprotected")
+        else:
+            print(f"  scene {scene_id}: generating at {init_image.width}x{init_image.height} "
+                  f"(strength={strength}, steps={steps}), protection disabled (--no-protect) ...")
+        # An all-white mask makes FluxInpaintPipeline behave like plain img2img.
+        freedom_mask = Image.new("L", init_image.size, 255)
     started = time.monotonic()
-    result = pipe(
-        prompt=prompt,
-        image=init_image,
-        height=init_image.height,
-        width=init_image.width,
-        strength=strength,
-        num_inference_steps=steps,
-        guidance_scale=0.0,  # FLUX.1-schnell is a CFG-free distilled model.
-        generator=generator,
-    )
-    redraw = result.images[0]
+    redraw = _run_flux_pass(pipe, prompt, init_image, freedom_mask, strength, steps, seed)
     elapsed = time.monotonic() - started
     print(f"  scene {scene_id}: done in {elapsed:.1f}s")
-    if redraw.size != init_image.size:
-        # Defensive safety net: FluxImg2ImgPipeline silently defaults height/
-        # width to 1024x1024 (its default_sample_size * vae_scale_factor)
-        # whenever they're omitted, ignoring the init image's own size - we
-        # pass them explicitly above, but resize here too in case a future
-        # diffusers version reintroduces its own internal rounding/cropping,
-        # so ScummVM never sees an override with unexpected dimensions.
-        print(f"  scene {scene_id}: resizing {redraw.size} -> {init_image.size} "
-              f"to match the requested init size")
-        redraw = redraw.resize(init_image.size, Image.LANCZOS)
 
     scene_output_dir.mkdir(parents=True, exist_ok=True)
     redraw.save(output_path)
@@ -246,6 +342,7 @@ def process_scene(
     if (scene_dir / "metadata.json").exists():
         shutil.copy2(scene_dir / "metadata.json", scene_output_dir / "metadata.json")
     (scene_output_dir / "flux_prompt_used.txt").write_text(prompt, encoding="utf-8")
+    protected = protect and (scene_dir / "protect_mask.png").exists()
     (scene_output_dir / "flux_generation.json").write_text(
         json.dumps(
             {
@@ -254,6 +351,9 @@ def process_scene(
                 "strength": strength,
                 "steps": steps,
                 "seed": seed,
+                "denoise_radius": denoise_radius,
+                "protected": protected,
+                "protect_feather": protect_feather if protected else None,
                 "guidance_scale": 0.0,
                 "init_size": [init_image.width, init_image.height],
                 "elapsed_seconds": round(elapsed, 1),
@@ -286,9 +386,29 @@ def main() -> None:
     parser.add_argument("--prompt-brief-dir", type=Path, default=Path("profiles/neural/prompt-briefs"))
     parser.add_argument("--scenes", type=int, nargs="*", default=None)
     parser.add_argument("--scale", type=float, default=2.0)
-    parser.add_argument("--strength", type=float, default=0.45,
-                         help="img2img denoise strength; lower preserves more of the original geometry.")
-    parser.add_argument("--steps", type=int, default=4, help="FLUX.1-schnell is trained for 1-4 steps.")
+    parser.add_argument("--strength", type=float, default=0.85,
+                         help="img2img denoise strength; lower preserves more of the original geometry. "
+                              "0.85 gives FLUX substantial artistic freedom - only the overall room "
+                              "layout/walkable floor area/doorway positions need to survive, not exact "
+                              "text or decor fidelity.")
+    parser.add_argument("--steps", type=int, default=24,
+                         help="FLUX.1-schnell is trained for 1-4 steps, but higher strength img2img needs "
+                              "more steps to converge cleanly; 24 was chosen via a strength/steps sweep.")
+    parser.add_argument("--denoise-radius", type=float, default=1.0,
+                         help="Gaussian blur radius applied to the init image before upscaling, to remove "
+                              "the original game art's palette dithering (e.g. on ceilings/skies) before "
+                              "FLUX repaints it. 0 disables.")
+    parser.add_argument("--no-protect", dest="protect", action="store_false",
+                         help="Disable walk-zone/hotspot protection (single unprotected inpaint pass over "
+                              "the whole scene, for A/B comparison - not recommended for the final mod "
+                              "pack, since it gives no guarantee ScummVM's coordinate-based walk/click "
+                              "metadata still matches what's on screen).")
+    parser.add_argument("--protect-feather", type=float, default=8.0,
+                         help="Gaussian blur radius applied to each scene's protect_mask.png (walk-zones + "
+                              "hotspots union from tools/extract_rosetattoo_assets.py) before passing it to "
+                              "FluxInpaintPipeline as mask_image, so the redrawn/protected regions meet "
+                              "with a soft edge instead of a hard seam.")
+    parser.set_defaults(protect=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="mps")
     parser.add_argument("--skip-existing", action="store_true")
@@ -320,6 +440,9 @@ def main() -> None:
             args.seed,
             args.prompt_brief_dir if args.prompt_brief_dir.exists() else None,
             args.skip_existing,
+            args.denoise_radius,
+            protect=args.protect,
+            protect_feather=args.protect_feather,
         )
         if result is None:
             continue
