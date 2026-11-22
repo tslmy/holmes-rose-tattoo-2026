@@ -8,6 +8,8 @@
 !/.github/**
 !/docs/
 !/docs/**
+!/site/
+!/site/**
 !/tools/
 !/tools/**
 !/profiles/
@@ -22,6 +24,9 @@
 !/uv.lock
 !/.gitmodules
 !/scummvm-src
+
+# Built site and its game-derived images: published to gh-pages only, never to main.
+/site/_build/
 
 # Common local/generated noise within allowed directories.
 .DS_Store
