@@ -145,7 +145,25 @@ def blocking(new: list[dict], walk_polys: list, hot_polys: list, picture_size: t
     return out
 
 
-def object_gates(sidecar: dict, confident: float) -> dict:
+def partial_match(det: list[float], expect: list[float], grow: float = 0.25,
+                  min_area: float = 0.15, max_area: float = 2.5, max_centre: float = 0.5) -> bool:
+    """A redraw detection that covers only part of the expected object (a door's lower half, a rod's
+    middle), or sits slightly off it, still finds it: its centre lies inside the expected box grown by
+    `grow` of its width/height on each side, no further than `max_centre` times the box's longer side
+    from its centre, and its area is `min_area`..`max_area` times the expected area. Calibrated on iteration 6's near-miss rooms: true matches sit within 0.33 box-lengths of where
+    they should be; unmatched detections centred outside the box are usually another object."""
+    x, y, w, h = expect
+    dx, dy, dw, dh = det
+    cx, cy = dx + dw / 2, dy + dh / 2
+    inside = (x - grow * w <= cx <= x + w + grow * w) and (y - grow * h <= cy <= y + h + grow * h)
+    ratio = (dw * dh) / max(w * h, 1e-9)
+    centre = ((cx - x - w / 2) ** 2 + (cy - y - h / 2) ** 2) ** 0.5 / max(w, h, 1e-9)
+    return inside and centre <= max_centre and min_area <= ratio <= max_area
+
+
+def object_gates(sidecar: dict, confident: float, allow_partial: bool = True) -> dict:
+    """allow_partial: count partial_match detections as found. Callers pass False when the
+    original itself fails the calibrated gate (the calibration then has no footing there)."""
     warp = GridWarp.from_json(sidecar["warp"])
     found, missing, weak_missing, rows = [], [], [], []
     for a in sidecar.get("anchors", []):
@@ -155,9 +173,11 @@ def object_gates(sidecar: dict, confident: float) -> dict:
         corners = np.array([[x, y], [x + w, y], [x, y + h], [x + w, y + h]], float)
         expect = _bbox(warp.to_original_units(corners))
         det = a.get("redraw_det")
-        ok = bool(det and brief.iou(det, expect) >= 0.3)
+        matched = bool(det and brief.iou(det, expect) >= 0.3)
+        partial = allow_partial and bool(det) and not matched and partial_match(det, expect)
+        ok = matched or partial
         rows.append({"id": a["id"], "label": a["label"], "orig_score": a["orig_score"],
-                     "redraw_score": a.get("redraw_score"), "found": ok})
+                     "redraw_score": a.get("redraw_score"), "found": ok, "partial": partial})
         if ok:
             found.append((a, det))
         elif a["orig_score"] >= confident:
@@ -312,6 +332,49 @@ def original_floor(cfg: Config, scene: int, client, polys: list, size: tuple[int
     return {"key": key, "floor": verdict}
 
 
+def original_objects(cfg: Config, scene: int, confident: float) -> dict | None:
+    """Objects gate on the ESRGAN baseline (the 1996 room) as if it were a redraw, with the
+    calibrated gate: identity warp, detector on the de-dithered original and on the plate.
+
+    A gate recalibration only counts where the original passes it, so partial matches are
+    honoured only when this returns ok. Cached per scene; None when inputs are missing."""
+    plate_path = baseline.out_root(cfg) / f"scene_{scene:03d}" / "plate_esrgan.png"
+    objects_path = brief.out_dir(cfg, scene) / "objects.json"
+    dedither = prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png"
+    if not (plate_path.is_file() and objects_path.is_file() and dedither.is_file()):
+        return None
+    objects = json.loads(objects_path.read_text(encoding="utf-8"))["objects"]
+    scene_dir = out_root(cfg) / f"scene_{scene:03d}"
+    cache = scene_dir / "objects_original.json"
+    key = common.fingerprint(objects, confident, plate_path, dedither)
+    if cache.is_file():
+        try:
+            hit = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            hit = None
+        if hit is not None and hit.get("key") == key:
+            return hit
+    from .. import detect as remaster_detect
+
+    original = Image.open(dedither).convert("RGB")
+    plate = Image.open(plate_path).convert("RGB")
+    W, H = original.size
+    sx, sy = plate.width / W, plate.height / H
+    queries = sorted({o["query"] for o in objects}) or ["object"]
+    plate_dets = remaster_detect.detect(plate, queries)
+    for d in plate_dets:
+        d["box"] = [d["box"][0] / sx, d["box"][1] / sy, d["box"][2] / sx, d["box"][3] / sy]
+    anchors = geometry.anchor_objects(objects, remaster_detect.detect(original, queries), queries)
+    geometry.pick_redraw_detections(anchors, plate_dets, queries, np.eye(3), (W, H))
+    warp = GridWarp.identity(W, H, (1.0, 1.0), geometry.thresholds(cfg)["spacing"])
+    objs = object_gates({"warp": warp.to_json(), "anchors": anchors}, confident)
+    ok, _ = objects_gate(objs, [])
+    result = {"key": key, "ok": bool(ok), "found_ratio": objs["found_ratio"],
+              "missing": objs["missing_confident"]}
+    common.write_json(cache, result)
+    return result
+
+
 def vlm_review(cfg: Config, scene: int, original: Image.Image, result: Image.Image,
                sidecar: dict, out: Path) -> dict:
     review: dict = {"errors": []}
@@ -381,7 +444,9 @@ def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out:
     result = Image.open(src / "final.png").convert("RGB")
     geo = sidecar["summary"]
     gates: dict = {"warp": geo["warp_ok"]}
-    objs = object_gates(sidecar, confident)
+    orig_objs = original_objects(cfg, scene, confident)
+    objs = object_gates(sidecar, confident, allow_partial=bool(orig_objs and orig_objs["ok"]))
+    objs["original"] = orig_objs
     gates["order"] = objs["order_ok"]
     if redraw_bg.base_level(cfg, level) == "L1":
         gates["offsets"] = geo.get("layers_offset_ok", True)

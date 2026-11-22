@@ -219,6 +219,26 @@ class QaGateTest(unittest.TestCase):
         self.assertFalse(result["objects_ok"])
         self.assertTrue(result["order_ok"])
 
+    def test_partial_or_slightly_off_detection_still_finds_the_object(self):
+        anchors = [anchor("door", [341, 146, 120, 219], [354, 206, 61, 111]),     # lower half of the door
+                   anchor("rod", [389, 262, 37, 112], [401, 299, 16, 56]),        # middle of a glass rod
+                   anchor("bottle", [179, 302, 22, 39], [77, 362, 33, 59]),       # another bottle, far away
+                   anchor("chair", [507, 214, 109, 151], [536, 357, 57, 90]),     # centre below the chair
+                   anchor("speck", [100, 100, 100, 100], [140, 140, 5, 5])]       # far too small
+        result = qa.object_gates(sidecar_with(anchors, GridWarp.identity(640, 480, (1, 1))), 0.2)
+        found = {r["label"]: (r["found"], r["partial"]) for r in result["objects"]}
+        self.assertEqual(found["door"], (True, True))
+        self.assertEqual(found["rod"], (True, True))
+        self.assertEqual(found["bottle"], (False, False))
+        self.assertEqual(found["chair"], (False, False))
+        self.assertEqual(found["speck"], (False, False))
+        self.assertEqual(sorted(result["missing_confident"]), ["bottle", "chair", "speck"])
+        # where the original fails the calibrated gate, the calibration has no footing: exact IoU only
+        strict = qa.object_gates(sidecar_with(anchors, GridWarp.identity(640, 480, (1, 1))), 0.2,
+                                 allow_partial=False)
+        self.assertEqual(strict["found"], 0)
+        self.assertEqual(sorted(strict["missing_confident"]), ["bottle", "chair", "door", "rod", "speck"])
+
     def test_swapped_people_fail_depth_order_but_walls_do_not(self):
         # two people, one 12 px further forward; each is found near where expected, but swapped in depth
         anchors = [anchor("vendor", [100, 200, 40, 100], [100, 212, 40, 100]),
