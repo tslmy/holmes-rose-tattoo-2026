@@ -1,5 +1,28 @@
 # Phase 1 bake-off results
 
+## Iteration 6: repair pass for near-miss rooms, UI play-test (2026-11-21)
+
+- **The 20 rooms still on the baseline are near-misses:** each one's best of eight seeds fails one QA gate
+  (two for rooms 33 and 54): obstacles 8 (something added on the walkable floor), objects 8 (one small
+  hotspot object not found), vlm 4 (people added), order 1, floor 1.
+- **`L2-repair` variant** (`redraw_bg.repair_source` / `_run_repair`, spec and acceptance test by Opus,
+  implementation by OpenCode on qwen3.8-27b): takes the best near-miss, removes QA's blocking boxes and
+  added people with one edit pasted back only around them, and restores missing objects by pasting the
+  plate's pixels and harmonising them with a second edit. Only for objects the detector did not see in the
+  redraw at all: in round 1 most "missing" objects were present but a little off position, and restoring
+  them made duplicates (room 16's bottle got a second copy with an invented label). Enqueued for those 20
+  rooms only (`L2-repair` jobs alone, so the other levels' redraws are not re-planned).
+- **Result: 2 more rooms pass (36, 81): 57 of 80 redrawn.** Room 21 passed in round 1 and failed in
+  round 2 (the edits are stochastic). The rest still fail mostly on the objects gate, which misses small
+  objects that are present but displaced (rooms 2, 5, 16, 22, 41, 92): a QA calibration question, not a
+  redraw one. Room 81 lost the 1996 scene's deep red tint (review item `room81-red-tint`).
+- **UI play-test** (session `playtest-exits-ui`, `tools/playtest_ui_suite.py` on branch
+  `claude/playtest-ui`, findings in `work/playtest/ui-findings.md`): exits, map, inventory, journal and
+  scrolling render cleanly on it5. Two engine bugs, both also without a pack: a null-frame crash when a
+  talk script walks an NPC (rooms 36, 33) and a missing `Holm57a.tlk` hang on room 57's exit 1. Rooms 18
+  and 68's "To the City" exit never fires (manual check). The map is still the plain upscale.
+- Pack `generated/playable-overrides-2x-remaster-it6`: all 80 scenes load.
+
 ## Iteration 5: cutscene animations, play-test tooling (2026-11-21)
 
 - **Cutscene animations (cAnims) had no overrides.** The 767 cAnims (Holmes picking something up, a door

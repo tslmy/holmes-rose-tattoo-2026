@@ -432,8 +432,12 @@ def _run_repair(cfg: Config, scene: int, backend: str, level: str, seed: int,
         common.install_dir(tmp, target)
         return {k: record.get(k) for k in ("status", "reason", "seconds", "peak_memory_gb", "where", "output_size")}
 
-    summary = (json.loads((qa.job_dir(cfg, scene, backend, src) / "qa.json").read_text(encoding="utf-8"))
-               .get("summary") or {})
+    qa_doc = json.loads((qa.job_dir(cfg, scene, backend, src) / "qa.json").read_text(encoding="utf-8"))
+    summary = qa_doc.get("summary") or {}
+    # QA's per-anchor rows say which anchors were not found; restore only those (several anchors can share
+    # a label, e.g. three chairs with one missing). Without rows, fall back to matching labels.
+    rows = (qa_doc.get("objects") or {}).get("objects") or []
+    unfound_ids = {r.get("id") for r in rows if not r.get("found")}
     blocking = [b for b in (summary.get("blocking_objects") or []) if b.get("box")]
     missing = [str(label) for label in (summary.get("missing") or []) if str(label).strip()]
     # Start from a copy of the source redraw's pixels (the picture); keep it as the raw pass.
@@ -491,6 +495,10 @@ def _run_repair(cfg: Config, scene: int, backend: str, level: str, seed: int,
             label = str(anchor.get("label") or "")
             if label not in missing:
                 continue
+            if rows and anchor.get("id") not in unfound_ids:
+                continue  # this anchor was found in the redraw: leave it
+            if anchor.get("redraw_det"):
+                continue  # detected in the redraw, only off position: restoring it would duplicate it
             box = anchor.get("orig_det") or anchor.get("box")
             if not box:
                 continue

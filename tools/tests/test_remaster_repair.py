@@ -156,6 +156,40 @@ class RepairTest(unittest.TestCase):
         self.assertEqual([r["label"] for r in record["restored"]], ["Cup"])
         self.assertEqual(record["status"], "ok")
 
+    def test_only_anchors_qa_did_not_find_are_restored(self):
+        # two anchors share the label; QA's rows say only the second (id 3) was not found
+        g = geometry.job_dir(self.cfg, 12, "web", "L2-a") / "geometry.json"
+        doc = json.loads(g.read_text())
+        doc["anchors"].append({"id": 3, "label": "Cup", "detectable": True, "orig_det": [60, 40, 8, 6],
+                               "box": [60, 40, 8, 6], "orig_score": 0.5})
+        g.write_text(json.dumps(doc))
+        q = qa.job_dir(self.cfg, 12, "web", "L2-a") / "qa.json"
+        doc = json.loads(q.read_text())
+        doc["objects"] = {"objects": [{"id": 1, "label": "Cup", "found": True},
+                                      {"id": 3, "label": "Cup", "found": False}]}
+        q.write_text(json.dumps(doc))
+        target, out = self.run_repair()
+        record = json.loads((target / "record.json").read_text())
+        self.assertEqual(len(record["restored"]), 1)
+        cx, cy = int((10 + 4) * self.sx), int((40 + 3) * self.sy)
+        np.testing.assert_array_equal(out[cy, cx], RAW)       # the found cup: untouched
+        cx3 = int((60 + 4) * self.sx)
+        np.testing.assert_array_equal(out[cy, cx3], HARM)     # the unfound one: restored
+
+    def test_object_detected_off_position_is_not_restored(self):
+        # QA counts the cup as missing, but the detector saw it in the redraw (displaced): pasting the plate's
+        # cup would make a second one
+        g = geometry.job_dir(self.cfg, 12, "web", "L2-a") / "geometry.json"
+        doc = json.loads(g.read_text())
+        doc["anchors"][0]["redraw_det"] = [5 * self.sx, 30 * self.sy, 8 * self.sx, 6 * self.sy]
+        g.write_text(json.dumps(doc))
+        target, out = self.run_repair()
+        record = json.loads((target / "record.json").read_text())
+        self.assertEqual(record["restored"], [])
+        self.assertEqual(len(self.calls), 1)  # the removal edit only
+        cx, cy = int((10 + 4) * self.sx), int((40 + 3) * self.sy)
+        np.testing.assert_array_equal(out[cy, cx], RAW)
+
     def test_no_source_means_unavailable(self):
         q = qa.job_dir(self.cfg, 12, "web", "L2-a")
         (q / "qa.json").write_text(json.dumps(summary([], 0.6, passed=True)))

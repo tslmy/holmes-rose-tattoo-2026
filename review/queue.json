@@ -543,9 +543,9 @@
     {
       "id": "disk-purgeable",
       "kind": "disk",
-      "title": "Free disk 11.8 GB is below 15.0 GB, but 24.1 GB is purgeable (Time Machine local snapshots)",
+      "title": "Free disk 14.4 GB is below 15.0 GB, but 21.4 GB is purgeable (Time Machine local snapshots)",
       "default": "Runner waits up to 360 min for the snapshots to age out (hourly snapshots expire after about 24 h), then pauses; nothing is deleted",
-      "detail": "free 11.8 GB, purgeable 24.1 GB, 22 local snapshot(s) at 2026-11-21 10:38. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.",
+      "detail": "free 14.4 GB, purgeable 21.4 GB, 9 local snapshot(s) at 2026-11-21 12:45. Work dir: /Users/lmy/Projects/shcrt/work. df under-reports reclaimable space after large deletions while snapshots still reference the deleted blocks.",
       "options": [
         "delete the local snapshots yourself: `tmutil listlocalsnapshots /` then `sudo tmutil deletelocalsnapshots <date>`",
         "lower thresholds.min_free_disk_gb or disk_wait_minutes in remaster.toml"
@@ -555,7 +555,7 @@
       "size_gb": null,
       "images": [],
       "created": "2026-11-16T16:54:03-08:00",
-      "updated": "2026-11-21T10:38:59-08:00"
+      "updated": "2026-11-21T12:45:44-08:00"
     },
     {
       "id": "disk-low",
@@ -608,6 +608,24 @@
       "images": [],
       "created": "2026-11-21T11:04:41-08:00",
       "updated": "2026-11-21T11:04:41-08:00"
+    },
+    {
+      "id": "room81-red-tint",
+      "kind": "decision",
+      "title": "Room 81 (red twin of the card room 71) lost its deep red tint in the iteration 6 repair redraw",
+      "default": "Ship the repaired redraw (normal colours) in the it6 pack; revert to the 1996-based baseline if the red tint carries meaning.",
+      "detail": "work/assemble/it6-repaired.jpg (bottom row): 1996 left, repaired right. Scene 81 is the same set as 71 with Holmes instead of Watson and the whole plate tinted red, likely a deliberate effect. The sign also reads 'ARB CARD ROM'. QA passed it (palette gate does not catch a global tint).",
+      "options": [
+        "keep the repaired redraw",
+        "keep the 1996 baseline for room 81",
+        "re-tint the redraw red"
+      ],
+      "status": "pending",
+      "decision": "",
+      "size_gb": null,
+      "images": [],
+      "created": "2026-11-21T17:10:11-08:00",
+      "updated": "2026-11-21T17:10:11-08:00"
     }
   ]
 }

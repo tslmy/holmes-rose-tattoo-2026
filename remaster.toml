@@ -182,8 +182,10 @@ backends = ["remote-flux2-klein-9b"]
 # cleanup pass (remove_people) under new names, so iteration 2's redraws stay on disk.
 # Iteration 4 (2026-11-19): four more seeds, planned only for the rooms where none of the first four
 # passed (`--scenes`); pick_room skips levels a room has no QA result for.
+# Iteration 6 (2026-11-21): L2-repair edits each baseline room's best near-miss redraw (one or two failing
+# QA gates): removes what QA found blocking, puts missing hotspot objects back. Enqueued for those rooms only.
 levels = ["L2-clean-s47", "L2-clean-s19", "L2-clean-s31", "L2-clean-s41",
-          "L2-clean-s53", "L2-clean-s11", "L2-clean-s23", "L2-clean-s29"]
+          "L2-clean-s53", "L2-clean-s11", "L2-clean-s23", "L2-clean-s29", "L2-repair"]
 seed = 7
 megapixels = 1.0
 # ChatGPT reference images (outside the repo) for scenes that have a matching one.
@@ -215,6 +217,7 @@ L2-clean-s53 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["
 L2-clean-s11 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 11, remove_people = true }
 L2-clean-s23 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 23, remove_people = true }
 L2-clean-s29 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 29, remove_people = true }
+L2-repair = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], repair = true }
 L2-mask = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["no_new_light", "framing"], mask_people = true }
 # Phase 1c: structure-conditioned redraws (Z-Image Turbo + ControlNet Union 2.1), text-to-image under depth
 # and HED outline maps of the original, so the layout is pinned; base level L1 = identity warp + offsets gate.
