@@ -81,10 +81,16 @@ class AmbienceTest(unittest.TestCase):
         self.write_room(6, [bgcopy(2, 30, 5, 5)] * 2)
         self.write_room(7, [bgcopy(50, 30, 10, 10)] * 2)
         self.write_room(8, [bgcopy(20, 30, 5, 4)])
+        # COVER (room_009): one static frame, only in another story state (required flag 7): not in the
+        # plate, so room_sprites cannot cut it; re-based here. Left half copies the plate, right half red.
+        cov = p[30:36, 30:40].copy()
+        cov[:, 5:] = (255, 0, 0)
+        self.write_room(9, [(cov, np.full((6, 10), 255), 0, 0)])
         objects = [obj(0, "LAMP", 1, 5, 4), obj(1, "WALKER", 2, 20, 20), obj(2, "FAN", 3, 30, 10),
                    obj(3, "BUSTL", 4, 40, 2), obj(4, "BUSTR", 4, 40, 2),
                    obj(6, "HIDDEN", 6, 2, 30, required=[5]), obj(7, "EDGE", 7, 55, 35),
-                   obj(8, "CHAIR", 8, 20, 30), obj(9, "PERSON", 1, 5, 4, kind="person")]
+                   obj(8, "CHAIR", 8, 20, 30), obj(9, "PERSON", 1, 5, 4, kind="person"),
+                   obj(10, "COVER", 9, 30, 30, required=[7])]
         (rooms / "metadata.json").write_text(json.dumps({"objects": objects}))
         self.redraw = redraw_2x()
         self.out = root / "out"
@@ -112,12 +118,31 @@ class AmbienceTest(unittest.TestCase):
 
     def test_only_background_like_animated_objects_are_written(self):
         written = self.run_it()
-        self.assertEqual(sorted(w["name"] for w in written), ["FAN", "LAMP"])
+        # objects of other story states are re-based too (HIDDEN animated, COVER static)
+        self.assertEqual(sorted(w["name"] for w in written), ["COVER", "FAN", "HIDDEN", "LAMP"])
         lamp = next(w for w in written if w["name"] == "LAMP")
         self.assertEqual((lamp["image_index"], lamp["frames"]), (1, 2))
         self.assertGreater(lamp["bg_fraction"], 0.8)
-        for index in (2, 4, 6, 7, 8):
+        self.assertFalse(lamp["other_state"])
+        cover = next(w for w in written if w["name"] == "COVER")
+        self.assertTrue(cover["other_state"])
+        self.assertEqual(cover["frames"], 1)
+        for index in (2, 4, 7, 8):
             self.assertFalse((self.out / f"room_{index:03d}").exists(), index)
+
+    def test_other_state_object_keeps_its_own_art_and_takes_the_redraw_behind(self):
+        self.run_it()
+        f = self.frame(9, 0).astype(int)
+        self.assertEqual(f.shape, (12, 20, 4))
+        np.testing.assert_array_equal(f[:, :8, :3], self.redraw[60:72, 60:68])  # plate copy -> redraw
+        mid = f[2:-2, 12:18, :3].reshape(-1, 3).mean(axis=0)
+        np.testing.assert_allclose(mid, (255, 0, 0), atol=12)  # its own art stays
+
+    def test_an_image_room_sprites_already_wrote_is_left_alone(self):
+        (self.out / "room_009").mkdir(parents=True)
+        written = self.run_it()
+        self.assertNotIn("COVER", [w["name"] for w in written])
+        self.assertEqual(list((self.out / "room_009").iterdir()), [])
 
     def test_background_pixels_take_the_redraw(self):
         self.run_it()

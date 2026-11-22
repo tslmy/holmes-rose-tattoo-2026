@@ -285,8 +285,8 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
         return boxes if any(b is not None for b in boxes) else None
 
     def eligible(obj: dict) -> int | None:
-        """The object's image_index if it is a candidate animated room object, else None."""
-        if obj.get("sprite_type") != "active_bg_shape" or not plates.flags_pass(obj):
+        """The object's image_index if it is a candidate room object (any story state), else None."""
+        if obj.get("sprite_type") != "active_bg_shape":
             return None
         if object_scale(obj) <= 0:
             return None
@@ -307,10 +307,15 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
             continue
         if used.get(index, 0) > 1:
             continue  # two objects share this image_index: ambiguous which one is which
+        # Objects of other story states (a cover that appears later, a door shut in another chapter)
+        # are not in the plate, so room_sprites cannot cut them; re-base them like animated ones.
+        other_state = not plates.flags_pass(obj)
         room_dir = sprite_root / f"room_{index:03d}"
         frames = _read(room_dir / "metadata.json").get("frames") or []
-        if len(frames) <= 1:
-            continue  # static (room_sprites' job) or missing: not an animated room object
+        if not frames or (len(frames) == 1 and not other_state):
+            continue  # static in this state (room_sprites' job) or missing
+        if (out_dir / f"room_{index:03d}").exists():
+            continue  # already written (room_sprites)
         boxes = frame_boxes(obj, frames)
         if not boxes:
             continue
@@ -361,7 +366,8 @@ def ambience_sprites(cfg: Config, scene: int, background: Image.Image, out_dir: 
             count += 1
         if count:
             written.append({"name": obj.get("name", ""), "image_index": index, "scale": scale, "frames": count,
-                            "bg_fraction": round(total_same / total_opaque, 3), "dir": str(out_dir_room)})
+                            "bg_fraction": round(total_same / total_opaque, 3), "dir": str(out_dir_room),
+                            "other_state": other_state})
     return written
 
 
