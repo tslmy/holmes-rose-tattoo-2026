@@ -517,11 +517,37 @@ def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
     specs = []
     for scene in common.resolve_scenes(cfg, args.scenes, args.all):
         base = baseline.out_root(cfg) / f"scene_{scene:03d}"
-        fp = common.fingerprint(*_qa_texts(cfg, scene),
+        fp = common.fingerprint(*_qa_texts(cfg, scene), cfg.section("assemble"),
                                 common.read_stamp(base).get("fingerprint"), *CODE)
         specs.append(JobSpec(NAME, f"room/{scene:03d}", {"scene": scene}, fp,
                              after=[f"baseline:scene/{scene:03d}"]))
     return specs
+
+
+def tint_to_original(result: Image.Image, original: Image.Image, radius: float = 14.0) -> Image.Image:
+    """Give a redraw the original's colour cast where the original carries it.
+
+    For rooms whose 1996 art is deliberately tinted (room 81, the red twin of card room 71), which the
+    redraw model paints in natural colour. The tint is the median Lab a/b of the original; wherever the
+    original's (smoothed) a/b lies within `radius` of it, the redraw takes the original's a/b and keeps its
+    own lightness. Parts of the original in other colours (room 81's natural-colour card inset) keep the
+    redraw's colour; the mask is feathered. `result` is in the original's layout (assemble warps back)."""
+    import cv2
+
+    def lab(img: Image.Image) -> np.ndarray:
+        return cv2.cvtColor(np.asarray(img.convert("RGB"), np.float32) / 255.0, cv2.COLOR_RGB2LAB)
+
+    r = lab(result)
+    o = lab(original.resize(result.size, Image.LANCZOS))
+    sigma = max(1.0, result.width / 320)
+    o_ab = cv2.GaussianBlur(o[..., 1:], (0, 0), sigma)
+    tint = np.median(o_ab.reshape(-1, 2), axis=0)
+    dist = np.linalg.norm(o_ab - tint, axis=-1)
+    mask = np.clip((radius * 1.5 - dist) / (radius * 0.5), 0.0, 1.0)  # 1 within radius, 0 beyond 1.5x
+    mask = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), sigma * 2)[..., None]
+    r[..., 1:] = mask * o_ab + (1 - mask) * r[..., 1:]
+    rgb = cv2.cvtColor(r, cv2.COLOR_LAB2RGB)
+    return Image.fromarray(np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8))
 
 
 def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
@@ -541,6 +567,9 @@ def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
         picture = Image.open(geometry.job_dir(cfg, scene, pick["backend"], pick["level"]) / "final.png").convert("RGB")
         result, valid = warp_back(picture, warp, out_size, base_img)
         valid_fraction = round(float(valid.mean()), 4)
+        if scene in {int(s) for s in cfg.section("assemble").get("tint_rooms") or []}:
+            result = tint_to_original(result, base_img)
+            pick = {**pick, "tinted": True}
     else:
         result = base_img
     tmp = common.scratch_dir(cfg, f"assemble-{scene}")

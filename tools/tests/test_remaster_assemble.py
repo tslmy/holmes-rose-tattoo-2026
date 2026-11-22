@@ -127,6 +127,29 @@ class PickTest(unittest.TestCase):
             with mock.patch.object(bakeoff, "change_from_original", return_value=40.0):
                 self.assertEqual(assemble.pick_room(cfg, 12)["source"], "baseline")
 
+    def test_tint_takes_the_original_cast_and_keeps_the_redraw_lightness(self):
+        rng = np.random.default_rng(1)
+        redraw = Image.fromarray((rng.random((40, 60, 3)) * 255).astype(np.uint8))  # natural colour, varied
+        grey = rng.random((40, 60)) * 180 + 40
+        red = Image.fromarray(np.stack([grey, grey * 0.55, grey * 0.5], -1).astype(np.uint8))  # red monochrome
+        out = np.asarray(assemble.tint_to_original(redraw, red)).astype(float)
+        self.assertEqual(out.shape, (40, 60, 3))
+        r, g, b = out[..., 0].mean(), out[..., 1].mean(), out[..., 2].mean()
+        self.assertGreater(r, g + 20)
+        self.assertGreater(r, b + 20)
+        # lightness order kept: the redraw's brightest pixels are still the brightest
+        # a natural-colour inset in the original (room 81's cards) keeps the redraw's colour
+        red_arr = np.asarray(red).copy()
+        red_arr[10:30, 20:40] = (40, 120, 200)  # blue inset
+        out2 = np.asarray(assemble.tint_to_original(redraw, Image.fromarray(red_arr))).astype(int)
+        inner = (slice(15, 25), slice(25, 35))
+        np.testing.assert_allclose(out2[inner].mean(axis=(0, 1)), np.asarray(redraw)[inner].mean(axis=(0, 1)),
+                                   atol=12)
+        self.assertGreater(out2[0:6, 0:15, 0].mean(), out2[0:6, 0:15, 1].mean() + 20)  # outside: still red
+        lum_in = np.asarray(redraw.convert("L")).astype(float).ravel()
+        lum_out = np.asarray(Image.fromarray(out.astype(np.uint8)).convert("L")).astype(float).ravel()
+        self.assertGreater(np.corrcoef(lum_in, lum_out)[0, 1], 0.9)
+
     def test_pick_falls_back_to_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = make_cfg(tmp)

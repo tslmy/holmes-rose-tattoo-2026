@@ -152,6 +152,9 @@ canim_upscaled = "enhanced/canimations-remaster-20261031"
 # QA-passing redraws rejected by eye ("scene/backend/level"); the room falls back to the next candidate
 # or the baseline. 92 s41: invents a large lit brass lamp over the right margin, pasted patch at the magnifier.
 rejected = ["92/remote-flux2-klein-9b/L2-clean-s41"]
+# Rooms whose 1996 art is deliberately tinted: the redraw takes the original's colour cast (Lab a/b).
+# 81: the red twin of card room 71 (LMY-18).
+tint_rooms = [81]
 
 [golden]
 # About six scenes (plus 36, added by decision #5): street, interior, haze room, a clue with writing,
