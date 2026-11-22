@@ -53,6 +53,45 @@ class ModernizedAssemblyTests(unittest.TestCase):
                 assemble(backgrounds.parent, [root / "room"], root / "pack", 2)
             self.assertFalse((root / "pack").exists())
 
+    def test_selects_entire_compatible_baseline_resource(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backgrounds = root / "backgrounds" / "scene_044"
+            candidate = root / "candidate" / "scene_044" / "canim_004"
+            baseline = root / "baseline" / "scene_044" / "canim_004"
+            for path in (backgrounds, candidate, baseline):
+                path.mkdir(parents=True)
+            Image.new("RGB", (6, 4)).save(backgrounds / "background@2x.png")
+            frame = {"index": 0, "file": "frame_000@2x.png", "width": 6, "height": 4}
+            common = {"complete": True, "scale": 2, "frames": [frame]}
+            (baseline / "metadata.json").write_text(json.dumps(common))
+            (candidate / "metadata.json").write_text(json.dumps({**common, "alpha_refinement": {"method": "contour"}}))
+            Image.new("RGBA", (6, 4), (12, 34, 56, 255)).save(baseline / frame["file"])
+            Image.new("RGBA", (6, 4), (200, 30, 40, 255)).save(candidate / frame["file"])
+            destination = root / "pack"
+            manifest = assemble(backgrounds.parent, [root / "candidate"], destination, 2,
+                                {"scene_044/canim_004": root / "baseline"})
+            with Image.open(destination / "sprites/scene_044/canim_004/frame_000@2x.png") as selected:
+                self.assertEqual(selected.getpixel((0, 0)), (12, 34, 56, 255))
+            self.assertEqual(manifest["sprite_fallbacks"][0]["resource"], "scene_044/canim_004")
+            with self.assertRaisesRegex(ValueError, "must not overlap"):
+                assemble(backgrounds.parent, [root / "candidate"], root / "candidate" / "pack", 2)
+
+    def test_rejects_mismatched_fallback_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backgrounds = root / "backgrounds" / "scene_044"
+            candidate = root / "candidate" / "scene_044" / "canim_004"
+            baseline = root / "baseline" / "scene_044" / "canim_004"
+            for path in (backgrounds, candidate, baseline):
+                path.mkdir(parents=True)
+            Image.new("RGB", (6, 4)).save(backgrounds / "background@2x.png")
+            (candidate / "metadata.json").write_text(json.dumps({"complete": True, "scale": 2, "frames": []}))
+            (baseline / "metadata.json").write_text(json.dumps({"complete": True, "scale": 4, "frames": []}))
+            with self.assertRaisesRegex(ValueError, "metadata differs"):
+                assemble(backgrounds.parent, [root / "candidate"], root / "pack", 2,
+                         {"scene_044/canim_004": root / "baseline"})
+
 
 if __name__ == "__main__":
     unittest.main()

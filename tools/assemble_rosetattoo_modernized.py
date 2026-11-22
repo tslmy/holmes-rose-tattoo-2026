@@ -18,7 +18,8 @@ from pathlib import Path
 from sprite_metadata import resource_metadata_paths
 
 
-def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, scale: int) -> dict:
+def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, scale: int,
+             fallbacks: dict[str, Path] | None = None) -> dict:
     if destination.exists():
         raise FileExistsError(f"Refusing to overwrite existing pack: {destination}")
     if not backgrounds.is_dir() or not sprite_roots or any(not root.is_dir() for root in sprite_roots):
@@ -33,6 +34,19 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
     frame_count = 0
     resources = 0
     provenance: Counter[tuple] = Counter()
+    requested_fallbacks = fallbacks or {}
+    used_fallbacks: list[dict] = []
+    for name, root in requested_fallbacks.items():
+        relative = Path(name)
+        if relative.is_absolute() or not relative.parts or ".." in relative.parts or "\\" in name or relative.as_posix() != name:
+            raise ValueError(f"Invalid fallback resource path: {name}")
+        if not root.is_dir():
+            raise ValueError(f"Fallback source does not exist: {root}")
+    output_root = destination.resolve()
+    for input_root in (backgrounds, *sprite_roots, *requested_fallbacks.values()):
+        path = input_root.resolve()
+        if output_root == path or output_root.is_relative_to(path) or path.is_relative_to(output_root):
+            raise ValueError(f"Output and input trees must not overlap: {input_root}")
     for source in background_paths:
         if not re.fullmatch(r"scene_\d+", source.parent.name):
             raise ValueError(f"Invalid scene directory: {source.parent}")
@@ -47,6 +61,16 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
             if metadata.get("complete") is not True or metadata.get("scale") != scale:
                 raise ValueError(f"Incomplete or incompatible sprite run: {manifest_path}")
             relative = manifest_path.parent.relative_to(root)
+            fallback_root = requested_fallbacks.get(relative.as_posix())
+            if fallback_root is not None:
+                fallback_manifest = fallback_root / relative / "metadata.json"
+                fallback_metadata = json.loads(fallback_manifest.read_text(encoding="utf-8"))
+                candidate_identity = {key: value for key, value in metadata.items() if key != "alpha_refinement"}
+                fallback_identity = {key: value for key, value in fallback_metadata.items() if key != "alpha_refinement"}
+                if candidate_identity != fallback_identity:
+                    raise ValueError(f"Fallback metadata differs from candidate: {fallback_manifest}")
+                manifest_path, metadata = fallback_manifest, fallback_metadata
+                used_fallbacks.append({"resource": relative.as_posix(), "source": str(fallback_root.resolve())})
             dest_dir = Path("sprites") / relative
             manifest_dest = dest_dir / "metadata.json"
             if manifest_dest in seen:
@@ -90,6 +114,8 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
                 frame_count += 1
     if not resources:
         raise ValueError("No sprite resource manifests found")
+    if {entry["resource"] for entry in used_fallbacks} != set(requested_fallbacks):
+        raise ValueError("One or more requested fallback resources were not found")
 
     destination.mkdir(parents=True, exist_ok=False)
     for source, relative in copies:
@@ -104,6 +130,7 @@ def assemble(backgrounds: Path, sprite_roots: list[Path], destination: Path, sca
         "background_count": len(background_paths),
         "sprite_resource_count": resources,
         "sprite_frame_count": frame_count,
+        "sprite_fallbacks": used_fallbacks,
         "sprite_provenance": [
             {"upscaler": key[0], "model_sha256": key[1], "alpha_mode": key[2],
              "tile_size": key[3], "tile_pad": key[4], "alpha_refinement": key[5],
@@ -123,11 +150,17 @@ def main() -> None:
     parser.add_argument("--sprite-dir", type=Path, action="append", required=True,
                         help="Completed generated sprite tree; repeat for room, cutscene and shared assets.")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--fallback-sprite", action="append", nargs=2, metavar=("RESOURCE", "BASELINE_ROOT"),
+                        help="Use an audited baseline for a whole resource; may be repeated.")
     parser.add_argument("--scale", type=int, default=2)
     args = parser.parse_args()
     if args.scale < 1:
         parser.error("--scale must be >= 1")
-    manifest = assemble(args.background_dir, args.sprite_dir, args.output_dir, args.scale)
+    pairs = args.fallback_sprite or []
+    if len({name for name, _ in pairs}) != len(pairs):
+        parser.error("--fallback-sprite resource paths must be unique")
+    manifest = assemble(args.background_dir, args.sprite_dir, args.output_dir, args.scale,
+                        {name: Path(root) for name, root in pairs})
     print(json.dumps(manifest, indent=2))
 
 

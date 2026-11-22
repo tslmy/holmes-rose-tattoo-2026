@@ -10,10 +10,12 @@ unusable, so a rendered marker is not proof that every pack asset was used.
 
 ## Engine requirement
 
-Build the ScummVM branch `terra/scene-smoke-engine`, commit
-`36349bc30acfc8aab96290a615f9a7c7fb9a94dd`, which is based on the combined
-`codex/edge-focused-sprites` tip (including `codex/haze-reference`). For example,
-in that separate worktree:
+Build a patched `scummvm-src/` that includes the scene-smoke marker. The
+marker originated in local ScummVM commit
+`36349bc30acfc8aab96290a615f9a7c7fb9a94dd` and was also integrated into the
+combined local engine checkout. The parent repository's submodule pointer
+must be updated separately before a fresh clone can select that checkout.
+For example, in the intended engine checkout:
 
 ```sh
 ./configure --disable-all-engines --enable-engine=sherlock --disable-debug --enable-release

@@ -157,6 +157,11 @@ It does **not** prove that the extraction covers all
 game resources or that the engine consumes each asset correctly. Validate in
 game: include moving characters, foreground occlusion, scripted animations,
 scrolling rooms, palette transitions, UI, inventory, map and save/load.
+The optional [scene-start smoke test](scene-start-smoke-test.md) launches each
+scene with an isolated save copy and waits for an actual rendered-frame marker.
+All 80 local rooms emitted the marker in a preliminary pilot-pack run, but this
+does not validate their natural entrances, story flags or later gameplay; repeat
+it against the finished pack.
 
 For a manual test with a patched `scummvm-src/scummvm` binary and a **copy**
 of a save in slot 0, for example:
@@ -183,6 +188,9 @@ using premultiplied-alpha interpolation while keeping opaque interiors
 nearest-sampled. `bilinear` also smooths interiors; omit the environment
 variable to retain legacy nearest-neighbor sampling. None changes native
 gameplay or hotspot geometry. At 2x, some visible stair-stepping remains.
+The edge filter blends gradually between interpolated and nearest RGB near
+full opacity, avoiding a hard color switch observed in a Holmes shoe frame;
+other source-color and opacity changes can still produce visible variation.
 
 The existing temporal pass can stabilize high-frequency residuals across
 similar frames, but arbitrary room image frame indices are not necessarily
@@ -192,6 +200,10 @@ It accepts nested resources and `--skip-existing`; completed sequences are
 reused only when their input files and temporal settings still match. Soft
 alpha is preserved. Its output manifests can be used as sprite inputs to the
 assembler once the entire selected run is complete.
+An offline comparison of ten scripted streams found small or inconsistent
+changes in a matched-detail stability metric and some RGB edits at moving
+edges. The current pack therefore does not apply the temporal pass globally;
+this comparison does not prove that the original ESRGAN frames never shimmer.
 
 For edge-smoothing experiments without rerunning ESRGAN, the optional
 `tools/refine_rosetattoo_sprite_alpha.py` rebuilds alpha from the native frame
@@ -220,6 +232,33 @@ This keeps the renderer's nearest-sampled ownership coverage unchanged, but
 does not guarantee unchanged visible opacity, silhouettes or occlusion.
 The geometric contour is the selected direction for the current remaster;
 its broader sprite and animation validation is still in progress.
+
+For source-backed contour and topology checks, install the optional audit
+dependencies with `uv sync --extra esrgan --extra contour-audit`; see
+[`sprite-contour-audit.md`](sprite-contour-audit.md). Include both extras when
+you need the model and the audit in the same project environment.
+
+In the local staged run, a source-backed geometry audit compared all 18,380
+palette-qualified walk frames. RGB bytes and nonzero-alpha support were
+unchanged, and no frame changed its 8-connected foreground component count
+or 4-connected hole count at alpha 128. The largest absolute per-frame
+alpha-weighted area change was 0.403%. All frames nevertheless had threshold
+crossings and were flagged for review by the audit's deliberately strict
+policy. A further 3,390 shared/variant frames likewise had no RGB, support,
+or component/hole-count changes. These counts do not prove unchanged geometry,
+acceptable motion, or gameplay safety.
+
+For the 33,189 local scripted-animation frames, the same audit found no RGB
+or support changes, but one frame in `scene_044/canim_004` changed its
+thresholded hole count. The planned local pack keeps the entire 10-frame
+resource on its original Lanczos alpha, avoiding a mask change midway through
+that animation. This is a conservative fallback, not proof that the remaining
+animations are visually correct.
+`assemble_rosetattoo_modernized.py --fallback-sprite scene_044/canim_004
+enhanced/canimations-new` selects that whole baseline resource when assembling
+from a contour tree; the assembler checks its metadata against the candidate
+and records the fallback in the pack manifest. Repeat the audit for each game
+copy rather than assuming this particular fallback list is universal.
 
 ## Local experiment notes
 
