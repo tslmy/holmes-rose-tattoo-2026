@@ -17,7 +17,8 @@ For each target frame it:
    search (the VGS offsets provide the common sprite coordinate system);
 3. aggregates residuals only where the neighbour agrees in source colour and
    opacity, so moving limbs and changing silhouettes are never smeared; and
-4. restores the target frame's exact binary alpha mask.
+4. preserves the input detail frame's alpha mask, including soft edges when
+   present. The pass does not invent a different silhouette.
 
 The result is intentionally conservative: a slightly less "creative" detail
 pass is preferable to a flickering hand, face, or coat edge in a game sprite.
@@ -26,11 +27,15 @@ pass is preferable to a flickering hand, face, or coat edge in a game sprite.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, PngImagePlugin
+
+from sprite_metadata import resource_metadata_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,13 +92,70 @@ def stabilize_sequence(
     scale: int,
     radius: int = 2,
     blend: float = 0.35,
+    skip_existing: bool = False,
 ) -> dict:
+    if output_dir.resolve() in (source_dir.resolve(), input_dir.resolve()):
+        raise ValueError("temporal output must differ from both input directories")
     metadata = json.loads((source_dir / "metadata.json").read_text(encoding="utf-8"))
+    detail_metadata = json.loads((input_dir / "metadata.json").read_text(encoding="utf-8"))
+    if detail_metadata.get("complete") is False or detail_metadata.get("scale", scale) != scale:
+        raise ValueError(f"{input_dir}: incomplete or wrong-scale upscale")
+    sidecars = metadata.get("sidecars", [])
+    if not isinstance(sidecars, list) or detail_metadata.get("sidecars", []) != sidecars:
+        raise ValueError(f"{input_dir}: sidecar metadata mismatch")
     records = metadata["frames"]
+    digest = hashlib.sha256()
+    for path in (source_dir / "metadata.json", input_dir / "metadata.json"):
+        digest.update(path.read_bytes())
+    for name in sidecars:
+        if not isinstance(name, str) or Path(name).name != name or name == "metadata.json" or name.startswith("frame_"):
+            raise ValueError(f"{source_dir}: unsafe sidecar name {name!r}")
+        original = (source_dir / name).read_bytes()
+        if original != (input_dir / name).read_bytes():
+            raise ValueError(f"{input_dir}: sidecar {name} differs from source")
+        digest.update(original)
+    for record in records:
+        for path in (source_dir / record["file"], input_dir / f"{Path(record['file']).stem}@{scale}x.png"):
+            digest.update(path.read_bytes())
+    fingerprint = digest.hexdigest()
+    temporal_settings = {
+        "method": "aligned-neighbour-residual-median",
+        "neighbour_radius": radius,
+        "blend": blend,
+        "alpha_policy": "preserve-target-alpha",
+        "input_sha256": fingerprint,
+    }
+    output_metadata_path = output_dir / "metadata.json"
+    if skip_existing and output_metadata_path.exists():
+        previous = json.loads(output_metadata_path.read_text(encoding="utf-8"))
+        if (previous.get("complete") is True and previous.get("scale") == scale
+                and previous.get("temporal_consistency") == temporal_settings):
+            valid = len(previous.get("frames", [])) == len(records)
+            for record in previous.get("frames", []):
+                try:
+                    with Image.open(output_dir / record["file"]) as image:
+                        image.load()
+                        valid &= image.mode == "RGBA" and image.size == (record["width"], record["height"])
+                except (OSError, KeyError, ValueError):
+                    valid = False
+            for name in sidecars:
+                try:
+                    valid &= (output_dir / name).read_bytes() == (source_dir / name).read_bytes()
+                except OSError:
+                    valid = False
+            if valid:
+                return previous
     source = [rgba_array(source_dir / record["file"]) for record in records]
     enhanced = [rgba_array(input_dir / f"{Path(record['file']).stem}@{scale}x.png") for record in records]
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    output_metadata_path.write_text(json.dumps({**detail_metadata, "complete": False,
+                                                "temporal_consistency": temporal_settings}, indent=2) + "\n", encoding="utf-8")
+    for name in sidecars:
+        target = output_dir / name
+        temporary_path = target.with_name(target.name + ".tmp")
+        shutil.copyfile(input_dir / name, temporary_path)
+        temporary_path.replace(target)
     output_records = []
     for index, (record, lowres, detail_frame) in enumerate(zip(records, source, enhanced)):
         height, width = lowres.shape[:2]
@@ -140,7 +202,14 @@ def stabilize_sequence(
             output_rgb = target_rgb
         output = np.dstack([np.clip(output_rgb, 0, 255), detail_frame[..., 3]])
         output_path = output_dir / f"{Path(record['file']).stem}@{scale}x.png"
-        Image.fromarray(np.rint(output).astype(np.uint8), "RGBA").save(output_path)
+        temporary_path = output_path.with_suffix(".png.tmp")
+        pnginfo = PngImagePlugin.PngInfo()
+        with Image.open(input_dir / output_path.name) as input_image:
+            source_hash = input_image.info.get("source_sha256")
+        if source_hash:
+            pnginfo.add_text("source_sha256", source_hash)
+        Image.fromarray(np.rint(output).astype(np.uint8), "RGBA").save(temporary_path, format="PNG", pnginfo=pnginfo)
+        temporary_path.replace(output_path)
         output_records.append({
             **record,
             "file": output_path.name,
@@ -151,15 +220,11 @@ def stabilize_sequence(
         })
 
     out_metadata = {
-        **metadata,
+        **detail_metadata,
         "scale": scale,
         "upscaler": "temporal-esrgan",
-        "temporal_consistency": {
-            "method": "aligned-neighbour-residual-median",
-            "neighbour_radius": radius,
-            "blend": blend,
-            "alpha_policy": "target-binary-mask",
-        },
+        "complete": True,
+        "temporal_consistency": temporal_settings,
         "frames": output_records,
     }
     (output_dir / "metadata.json").write_text(json.dumps(out_metadata, indent=2) + "\n", encoding="utf-8")
@@ -175,10 +240,17 @@ def main() -> None:
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument("--radius", type=int, default=2, help="Neighbour frames on each side.")
     parser.add_argument("--blend", type=float, default=0.35, help="How much stable detail to restore.")
+    parser.add_argument("--skip-existing", action="store_true", help="Resume unchanged completed sequences.")
     args = parser.parse_args()
+    if args.scale < 1 or args.radius < 0 or not 0 <= args.blend <= 1:
+        parser.error("--scale must be >= 1, --radius >= 0, and --blend between 0 and 1")
+    output_root = args.output_dir.resolve()
+    for input_root in (args.source_dir.resolve(), args.input_dir.resolve()):
+        if input_root == output_root or output_root.is_relative_to(input_root) or input_root.is_relative_to(output_root):
+            parser.error("--output-dir must not overlap either input directory")
 
     resource_names = args.resources or sorted(
-        d.name for d in args.source_dir.iterdir() if d.is_dir() and (d / "metadata.json").exists()
+        str(path.parent.relative_to(args.source_dir)) for path in resource_metadata_paths(args.source_dir)
     )
     for name in resource_names:
         source_dir = args.source_dir / name
@@ -195,17 +267,7 @@ def main() -> None:
         if missing:
             print(f"{name}: no complete @{args.scale}x input sequence, skipping ({len(missing)} missing)")
             continue
-        if len(metadata["frames"]) == 1:
-            # Single-frame assets have no temporal problem; preserve the
-            # existing ESRGAN result and metadata in the new tree.
-            out = args.output_dir / name
-            out.mkdir(parents=True, exist_ok=True)
-            for path in input_dir.glob("*@" + str(args.scale) + "x.png"):
-                Image.open(path).save(out / path.name)
-            (out / "metadata.json").write_text((input_dir / "metadata.json").read_text(), encoding="utf-8")
-            print(f"{name}: copied single frame")
-            continue
-        result = stabilize_sequence(source_dir, input_dir, args.output_dir / name, args.scale, args.radius, args.blend)
+        result = stabilize_sequence(source_dir, input_dir, args.output_dir / name, args.scale, args.radius, args.blend, args.skip_existing)
         print(f"{name}: temporally stabilised {len(result['frames'])} frames")
 
 

@@ -187,6 +187,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--postload-scene",
+        type=int,
+        help=(
+            "After loading --save-slot, jump to a scene using the patched "
+            "engine's debug hook. Use a copy of the save; this does not "
+            "simulate the scene's natural entrance."
+        ),
+    )
+    parser.add_argument(
         "--asset-overrides",
         type=Path,
         help=(
@@ -204,7 +213,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--hires-debug",
-        choices=["composite", "background", "mask", "native"],
+        choices=["composite", "background", "mask", "native", "native-reference"],
         help=(
             "Select an experimental high-resolution renderer debug view. Sets "
             "SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG."
@@ -217,6 +226,18 @@ def main() -> None:
             "Select the experimental high-resolution renderer pixel format. Sets "
             "SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT."
         ),
+    )
+    parser.add_argument(
+        "--palette-safe-sprites",
+        action="store_true",
+        help=(
+            "Use only person-sprite overrides verified against the installed "
+            "palette; missing projections fall back to native artwork."
+        ),
+    )
+    parser.add_argument(
+        "--sprite-filter", choices=["nearest", "bilinear", "edge"],
+        help="Select the patched engine's experimental hires sprite sampling filter.",
     )
     parser.add_argument(
         "--window-size",
@@ -251,6 +272,13 @@ def main() -> None:
         help="macOS window owner process name for --capture-mode window.",
     )
     args = parser.parse_args()
+    if args.postload_scene is not None:
+        if args.save_slot is None:
+            parser.error("--postload-scene requires --save-slot")
+        if args.start_scene is not None:
+            parser.error("choose either --postload-scene or --start-scene")
+        if args.postload_scene < 1:
+            parser.error("--postload-scene must be >= 1")
 
     data_dir = args.data_dir.resolve()
     save_dir = args.save_dir.resolve()
@@ -282,6 +310,8 @@ def main() -> None:
     print("\nLaunch command:")
     if args.start_scene is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_START_SCENE={args.start_scene}")
+    if args.postload_scene is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE={args.postload_scene}")
     if args.asset_overrides is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES={args.asset_overrides.resolve()}")
     if args.hires_scale is not None:
@@ -290,13 +320,21 @@ def main() -> None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG={args.hires_debug}")
     if args.hires_format is not None:
         print(f"  SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT={args.hires_format}")
+    if args.palette_safe_sprites:
+        print("  SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1")
+    if args.sprite_filter is not None:
+        print(f"  SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER={args.sprite_filter}")
     print("  " + shell_join(cmd))
 
     if args.print_only:
         return
     env = os.environ.copy()
     if args.start_scene is not None:
+        env.pop("SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE", None)
         env["SCUMMVM_SHERLOCK_TATTOO_START_SCENE"] = str(args.start_scene)
+    if args.postload_scene is not None:
+        env.pop("SCUMMVM_SHERLOCK_TATTOO_START_SCENE", None)
+        env["SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE"] = str(args.postload_scene)
     if args.asset_overrides is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES"] = str(args.asset_overrides.resolve())
     if args.hires_scale is not None:
@@ -305,6 +343,10 @@ def main() -> None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_DEBUG"] = args.hires_debug
     if args.hires_format is not None:
         env["SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT"] = args.hires_format
+    if args.palette_safe_sprites:
+        env["SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES"] = "1"
+    if args.sprite_filter is not None:
+        env["SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER"] = args.sprite_filter
 
     if args.capture_after is None:
         subprocess.run(cmd, check=True, env=env)
@@ -316,7 +358,8 @@ def main() -> None:
 
     capture_output = args.capture_output
     if capture_output is None:
-        scene_suffix = f"scene-{args.start_scene:03d}" if args.start_scene is not None else "launch"
+        scene = args.postload_scene if args.postload_scene is not None else args.start_scene
+        scene_suffix = f"scene-{scene:03d}" if scene is not None else "launch"
         capture_output = screenshot_dir / f"desktop-{scene_suffix}.png"
     capture_output = capture_output.resolve()
     capture_output.parent.mkdir(parents=True, exist_ok=True)

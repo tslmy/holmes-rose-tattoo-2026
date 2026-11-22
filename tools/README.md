@@ -186,10 +186,10 @@ python3 tools/extract_rosetattoo_sprites.py --resources WATSON.VGS --palette-sce
 python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
 ```
 
-Each frame's alpha channel is separated before upscaling (flattened onto a
-neutral fill so ESRGAN doesn't invent detail in fully-transparent regions),
-then resized and re-thresholded independently, keeping the crisp binary
-cutout edges the engine itself always uses (no partial-alpha blending).
+Each frame's alpha channel is separated before upscaling, with nearby opaque
+colors extended into transparent RGB to avoid neutral-color fringes. The
+default `--alpha-mode binary` resizes and re-thresholds the alpha; use
+`--alpha-mode soft` with the updated hires compositor for antialiased edges.
 Output filenames are scale-qualified (`frame_NNN@Sx.png`), matching the
 background pipeline's `background@Nx.png` convention.
 
@@ -201,11 +201,61 @@ python3 tools/temporal_upscale_rosetattoo_sprites.py --scale 2
 ```
 
 This writes `enhanced/sprites-temporal/`. It keeps the original frame count,
-frame timing, dimensions, offsets, and binary alpha masks. The pass aligns
+frame timing, dimensions, offsets, and the input alpha masks. The pass aligns
 nearby source frames and aggregates only ESRGAN high-frequency residuals where
 the source pixels agree; it stabilizes persistent detail without blending
 moving limbs or changing animation logic. Single-frame assets are copied
 through unchanged.
+
+For character-animation research where ESRGAN cannot recover recognizable
+faces or wardrobe, use the identity-consistent redraw pass. It generates a
+single multi-pose reference sheet per character/body type and composites the
+poses into extracted frames for offline review:
+
+```sh
+python3 tools/compose_character_sheet_redraws.py \
+  --resources watson_vgs mycroft_vgs toby_vgs tux_vgs wiggins_vgs \
+    svgawalk_vgs nohat_vgs coatwalk_vgs \
+    3tright_vgs 3tuprigh_vgs 3tdownrg_vgs gtsright_vgs gtsuprig_vgs \
+    gtsdownr_vgs itright_vgs ituprigh_vgs itdownrg_vgs \
+    qtright_vgs qtuprig_vgs qtdownrg_vgs twright_vgs twuprigh_vgs \
+    twdownrg_vgs tright_vgs tupright_vgs tdownrg_vgs \
+  --scale 2 --output-dir enhanced/sprites-lifelike-seeded
+
+python3 tools/temporal_upscale_rosetattoo_sprites.py \
+  --input-dir enhanced/sprites-lifelike-seeded \
+  --output-dir enhanced/sprites-lifelike \
+  --scale 2 --radius 3 --blend 0.75
+```
+
+The redraw pass is intentionally identity/profile driven: `TOBY` is a dog,
+`WIGGINS` is the scruffy boy in a flat cap and checked scarf, and the Holmes,
+Watson, Mycroft, and Tux profiles are kept distinct. Do not substitute a
+generic “Victorian detective” prompt for these profiles.
+
+To assemble a playable override tree, copy a background set and compatible
+sprite sequences. The newer renderer can replay scene-sprite overrides in
+native draw order, but palette changes, masks and interactions still require
+game-level validation. Generated character-sheet output must not be treated as
+a playable animation: a ten-pose sheet is not a substitute for each original
+motion frame.
+
+```sh
+python3 tools/assemble_rosetattoo_playable_pack.py \
+  --background-dir generated/neural-redraws-cinematic-full \
+  --sprite-dir enhanced/sprites-temporal \
+  --output-dir generated/playable-overrides-2x
+```
+
+The assembler includes pose-matched animation redraws only when explicitly
+requested with `--include-animation-redraws`. For the non-diffusion room and
+cAnim pipeline, see [`docs/sprite-remaster.md`](../docs/sprite-remaster.md).
+
+The assembler writes a manifest and checks cleanly against the runtime
+contract: `scene_NNN/background@2x.png` and
+`sprites/<resource>/frame_NNN@2x.png`. It is safe to use the resulting tree
+with `SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES`; missing individual overrides
+still fall back to native art.
 
 Beyond the room cursor set and Watson, the same pipeline has also been run
 over the player's own walk cycles across coat/hat states (`SVGAWALK.VGS`,
@@ -235,15 +285,12 @@ there is nothing to extract there.
 
 An engine-side runtime override is wired up for the room cursor set
 (`Screen::loadRoseTattooHiresCursorOverride()` in the ScummVM fork), the
-overhead map background (see below), and the live scene's walking
-characters and bg-shape objects (`Screen::queueRoseTattooHiresSceneSprite()`,
-wired into `TattooScene::drawAllShapes()`). Item/inventory icon overrides are
-wired up in `widget_inventory.cpp`. Any character/bg-shape whose current
-resource+frame has no matching override PNG on disk simply falls back to
-the plain nearest-neighbor-upscaled native art for that shape - a quiet
-degradation, not a crash - so extracting a missing resource with the
-commands above and copying it into a production mod's `sprites/` directory
-is always safe to do incrementally. Note that several of the now-extracted
+overhead map background (see below), and item/inventory icons
+(`widget_inventory.cpp`). The newer scene renderer also looks up shared
+characters, embedded room images and streamed cAnim frames in native draw
+order; missing frames fall back to native art. This path remains subject to
+the palette and masking limitations documented in the sprite-remaster guide.
+Note that several of the now-extracted
 resources (`RES##.VGS`, `JOURNAL.VGS`, `LOADING*.VGS`, `DART*.VGS`,
 `HAND*.VGS`, `INTRFACE.VGS`, `PAPER.VGS`, `OPIUM.VGS`) currently have **no
 engine-side consumer at all** for a hires override (unlike scene
@@ -275,7 +322,10 @@ at runtime (see `Screen::getRoseTattooHiresFont()` in the ScummVM fork's
 
 Unlike room backgrounds, `MAP.VGS` stores no palette of its own — the engine
 loads a separate `MAP.PAL` resource for it — so extraction needs
-`--palette-resource` instead of `--palette-scene`:
+`--palette-resource` instead of `--palette-scene`. It is drawn as an opaque
+image, so the extractor keeps palette index 255 opaque for `MAP.VGS` rather
+than using the transparent-index convention used by ordinary sprites. The
+journal, dartboard and foolscap backgrounds are also opaque native blits:
 
 ```sh
 python3 tools/extract_rosetattoo_sprites.py --resources MAP.VGS --palette-resource MAP.PAL
@@ -319,6 +369,12 @@ python3 tools/run_rosetattoo_validation.py \
   --capture-after 3 \
   --capture-output validation/screenshots/desktop-scene-036.png
 ```
+
+The fresh direct-start hook does not initialize every normal game state: a
+scene-7 direct jump can fail while loading an empty player walk resource even
+at native resolution. For a smoke test, use a **copied** save and
+`--save-slot 0 --postload-scene 7` instead. A post-load jump retains that
+save's position and flags, so it is not a test of a natural scene transition.
 
 `--capture-after` captures the ScummVM window directly on macOS by default.
 Use `--capture-mode screen` only when a full-desktop capture is useful.
@@ -375,10 +431,17 @@ python3 tools/run_rosetattoo_validation.py \
   --capture-output validation/screenshots/scene-036-mask.png
 ```
 
-Debug modes are `composite` (default), `background`, `mask`, and `native`.
+Debug modes are `composite` (default), `background`, `mask`, `native`, and
+`native-reference`. The latter presents the native indexed scene and UI as a
+comparison for haze/mask testing; it is not an enhanced-art mode.
 `mask` highlights the native pixels currently being drawn over the high-res
 background; this is the fastest way to find overlay or palette-animation
 mistakes.
+
+For smoother perspective-scaled hires sprites, pass `--sprite-filter edge`.
+It filters transparent boundaries while retaining nearest-sampled opaque
+interiors. `--sprite-filter bilinear` also smooths interiors; `nearest` keeps
+the original sampling. These filters do not alter native gameplay geometry.
 
 For your own playtesting (not just scripted scene captures), the standard
 launch command for a full high-resolution mod pack is:

@@ -35,24 +35,22 @@ _Consider donating to them this holiday season._
 
 ### More technically...
 
-The original game renders at 640x480 with 256-color palettized art. We redraw
-the original assets into detailed, true-color, photorealistic-but-faithful
-renderings. This is achieved via a [FLUX.1][flux] image-to-image pipeline,
-run locally with Hugging Face `diffusers` on Apple's Metal (`mps`) backend.
+The original game renders at 640x480 with 256-color palettized art. The current
+remaster work favors **local non-diffusion super-resolution** over a
+photorealistic redraw: Real-ESRGAN enlarges existing backgrounds and sprite
+frames, while a ScummVM fork composites higher-resolution artwork over the
+original game logic. This can still infer or smooth details, so clues and text
+must be checked against the originals.
 
-Since geometries (object boundaries, hotspots that respond to mouse events,
-walkable regions for playable characters) are important to a point-and-click
-RPG, the redraw uses a low img2img denoise strength against the original
-background as the init image, which keeps composition, walk zones, and small
-embedded text (signage, door numbers) intact rather than hallucinating a new
-scene. (See [`docs/reproducing.md`][rpd] for the calibration history behind
-that choice.)
+Earlier experiments used a [FLUX.1][flux] image-to-image pipeline, as well as
+SDXL/ControlNet and other models. Diffusion can change scene geometry, objects
+or signage; low denoise strength alone is not a gameplay guarantee. Their
+scripts and calibration history remain available for comparison.
 
-[rpd]: docs/reproducing.md#history-and-why-the-pipeline-looks-like-this
-
-For certain assets (cursors and the map of London), we upscale with a
-**non-diffusion** super-resolution model. This reduces the risk of
-hallucinating away small, gameplay-critical silhouettes.
+The sprite-remaster work exports room-specific foregrounds and scripted
+animation frames as well as shared sprites. See
+[`docs/sprite-remaster.md`](docs/sprite-remaster.md) for the pipeline and its
+current palette, masking and playtesting limitations.
 
 Besides upscaling/redrawing images, this mod also enhances text. It renders
 tooltip/UI text with a real vector TrueType font, instead of the original's
@@ -83,7 +81,9 @@ uv run python3 tools/extract_rosetattoo_assets.py --data-dir scummvm --scenes 1 
 
 ## Usage
 
-Follow these steps:
+For the current non-diffusion work, start with the
+**[sprite remaster workflow](docs/sprite-remaster.md)**. The following guides
+also document earlier experiments:
 
 1. **[Reproduce the full pipeline from scratch](docs/reproducing.md)** —
    the complete, ordered, end-to-end guide: extract assets, generate

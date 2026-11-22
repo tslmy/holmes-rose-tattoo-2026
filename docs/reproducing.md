@@ -171,12 +171,12 @@ palette-mapped rendering.
   scenes now go through the same `polish_with_ollama()` path with uniform
   sanitization, and the resulting briefs are backend-agnostic (used by the
   FLUX pipeline the same way they were used by the earlier SD pipeline).
-- **Character/animated sprites are extracted and upscaled but not yet
-  engine-wired.** The cursor set and the overhead map background/icons have
-  full runtime override support; walk-cycle sprites for Watson, the player,
-  and NPCs are upscaled and sitting under `enhanced/sprites/`, but wiring
-  them into `people.cpp`'s draw call sites is a larger, higher-risk change
-  that hasn't been attempted yet (see `tools/README.md`).
+- **Scene sprites and streamed animations now have an ordered override
+  path.** An earlier late external-PNG overlay was unsafe for animation and
+  z-order. The newer renderer replays overrides alongside native scene draws,
+  with native fallback for missing frames. This is still under validation,
+  particularly for palette changes, haze masks and interactions; see the
+  [sprite remaster workflow](sprite-remaster.md).
 
 ### Temporal consistency for animated sprites
 
@@ -191,8 +191,8 @@ uv run python3 tools/temporal_upscale_rosetattoo_sprites.py --scale 2
 
 It performs conservative source-space alignment and neighbour residual
 aggregation while preserving VGS frame indices and timing. It writes the
-stabilized tree to `enhanced/sprites-temporal/`; copy that tree into the
-production mod in place of `enhanced/sprites/` for animated resources.
+stabilized tree to `enhanced/sprites-temporal/`; it is suitable for cursor,
+map, and item override assets and for offline character-animation review.
 
 ## Investigated but not implemented: animation framerate interpolation
 

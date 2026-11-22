@@ -1,8 +1,8 @@
 # Local ESRGAN (spandrel) setup
 
 `tools/upscale_rosetattoo_sprites.py` upscales cursors, inventory/item
-icons, character walk cycles, and the overhead map with a real (non-
-generative) ESRGAN-family super-resolution model, run entirely locally and
+icons, character walk cycles, and the overhead map with a non-diffusion
+ESRGAN-family super-resolution model, run entirely locally and
 in-process via the [`spandrel`](https://github.com/chaiNNer-org/spandrel)
 model-loading library and PyTorch (Apple `mps`, CUDA, or CPU) — no server,
 no Automatic1111/Forge WebUI install required.
@@ -14,8 +14,9 @@ no Automatic1111/Forge WebUI install required.
   where a diffusion model's tendency to invent new detail or drift geometry
   would shift a click hotspot or a character's hand position — see
   `tools/upscale_rosetattoo_sprites.py`'s module docstring. A real
-  super-resolution model instead reconstructs plausible high-frequency
-  detail from the *existing* pixels without redrawing content.
+  super-resolution model instead estimates high-frequency detail from the
+  *existing* pixels without prompts or diffusion. It can still alter or
+  invent fine details, so important text, edges and clues need review.
 - **Not Automatic1111/Forge**: this project used to proxy ESRGAN through an
   Automatic1111/Forge WebUI's `/sdapi/v1/extra-single-image` REST endpoint,
   which meant running and keeping a whole separate WebUI server process
@@ -50,6 +51,30 @@ cache, not tracked in the repo. Any other ESRGAN/RealESRGAN-family `.pth`
 checkpoint works too (e.g.
 [`RealESRGAN_x4plus_anime_6B`](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth)
 for flatter, more cel-shaded art) — pass it via `--model-path`.
+
+## Sprite transparency and resumable runs
+
+The legacy default is `--alpha-mode binary`, which thresholds the scaled mask
+to fully transparent or fully opaque. `--alpha-mode soft` preserves a smooth
+alpha transition for a compositor that supports antialiased sprite edges.
+Opaque colors are extended into nearby transparent pixels before model
+inference to reduce gray fringes. The temporal pass preserves the resulting
+alpha rather than thresholding it.
+
+For large sprite collections, add `--skip-existing` to resume interrupted
+runs. Each resource's metadata records the scale, model hash and alpha mode;
+the tool refuses to resume with different settings, and reprocesses unreadable,
+incorrectly sized, or changed-source frames. Identical source frames are
+upscaled once per run and copied to their other locations. Resource directories
+can be nested (for example, by room) and retain their relative paths in the
+output tree.
+
+Large frames such as the London map may exceed GPU memory at the model's
+native 4x scale. `--tile-size 256 --tile-pad 16` bounds inference memory by
+processing overlapping source tiles, then joins their center regions before
+the final resize. Tiling may introduce slight differences at joins; inspect
+the actual image rather than treating it as numerically identical to untiled
+inference.
 
 ## 3. Run
 

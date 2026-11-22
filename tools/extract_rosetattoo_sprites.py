@@ -38,6 +38,9 @@ PALETTE_SIZE = 256 * 3
 LIB_SIGNATURES = {b"LIB\x1a": False, b"LIC\x1a": True}
 LZV_SIGNATURE = b"LZV\x1a"
 TRANSPARENT_INDEX = 0xFF
+# These resources are drawn with SHblitFrom, not SHtransBlitFrom, by their
+# respective Tattoo map, journal, darts and foolscap implementations.
+OPAQUE_RESOURCES = {"MAP.VGS", "JOURNAL.VGS", "DARTBD.VGS", "PAPER.VGS", "PAPERF.VGS", "PAPERG.VGS"}
 
 
 def palette_6bit_to_8bit(value: int) -> int:
@@ -265,7 +268,7 @@ def decompress_frame(
 
 
 def load_vgs_image(
-    data: bytes, default_palette: list[int] | None = None
+    data: bytes, default_palette: list[int] | None = None, opaque: bool = False
 ) -> tuple[list[int], list[SpriteFrame]]:
     """Parses one VGS-format resource: an optional VGA palette followed by a
     sequence of frames, matching ImageFile::load()/loadPalette().
@@ -334,7 +337,7 @@ def load_vgs_image(
             row_base = y * width
             for x in range(width):
                 index = indices[row_base + x]
-                if index == TRANSPARENT_INDEX:
+                if index == TRANSPARENT_INDEX and not opaque:
                     pixels[x, y] = (0, 0, 0, 0)
                 else:
                     r = palette[index * 3]
@@ -441,7 +444,9 @@ def extract_resource(
         default_palette = load_scene_palette(root, palette_scene)
     else:
         default_palette = None
-    palette, frames = load_vgs_image(data, default_palette=default_palette)
+    # Opaque native blits use index 255 as an ordinary palette color.
+    opaque = resource_name.upper() in OPAQUE_RESOURCES
+    palette, frames = load_vgs_image(data, default_palette=default_palette, opaque=opaque)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     frame_records = []
@@ -462,6 +467,11 @@ def extract_resource(
     metadata = {
         "resource_name": resource_name,
         "source": source,
+        "alpha_policy": "opaque" if opaque else "index-255-transparent",
+        "fallback_palette": (
+            f"resource:{palette_resource}" if palette_resource else
+            f"scene:{palette_scene}" if palette_scene is not None else None
+        ),
         "frame_count": len(frames),
         "frames": frame_records,
     }
