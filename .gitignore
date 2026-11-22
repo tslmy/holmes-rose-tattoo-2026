@@ -3,6 +3,7 @@
 
 !/.gitignore
 !/README.md
+!/CLAUDE.md
 !/.github/
 !/.github/**
 !/docs/
