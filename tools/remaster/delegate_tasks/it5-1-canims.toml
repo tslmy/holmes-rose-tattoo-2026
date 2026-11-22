@@ -1,0 +1,48 @@
+# Delegated 2026-11-21 (iteration 5). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/assemble.py"]
+test = "python -m unittest tests.test_remaster_canims tests.test_remaster_ambience2 tests.test_remaster_ambience tests.test_remaster_roomsprites tests.test_remaster_assemble"
+timeout_s = 2400
+prompt = """
+Add `canim_sprites` to tools/remaster/stages/assemble.py (Python) and call it from run_job. Read the
+acceptance test tools/tests/test_remaster_canims.py first: it defines every name and behaviour; do not edit
+it, and keep test_remaster_ambience2.py, test_remaster_ambience.py, test_remaster_roomsprites.py and
+test_remaster_assemble.py passing. Fixtures are non-square.
+
+Background: cutscene animations (cAnims) are drawn at the cAnim's position + each frame's offset and copy
+much of the 1996 room behind them; on a redrawn room they show old-art rectangles. ambience_sprites already
+solves this for animated room objects; canim_sprites applies the same per-pixel rebuild to cAnim frames.
+
+Signature: canim_sprites(cfg, scene, background, out_dir, *, tolerance=8, shift_tolerance=24) -> list[dict].
+
+1. Inputs. The plate is prepare.out_root(cfg)/scene_NNN/plate.png (as in ambience_sprites). The cAnims are
+   the directories extract.scene_dir(cfg, "canimations", scene)/canim_NNN/ (sorted), each with
+   metadata.json: "animation" has "name", "position" {"x","y"}, "flags", "scale_val" (missing or 0 means
+   256); "frames" lists {"file","width","height","offset_x","offset_y"} and possibly
+   "invalid_placeholder": true (skip those frames: no output file). No canimations directory -> return [].
+   The cAnim index NNN is the directory's number.
+2. Drawn box per valid frame of size (sw, sh), scale s: x0 = pos.x + scaled_offset(offset_x, s),
+   y0 = pos.y + scaled_offset(offset_y, s), w = sw * 256 // s, h = sh * 256 // s (the same formulas as
+   ambience_sprites). Unlike ambience_sprites, a box that leaves the plate does NOT skip anything: pixels
+   whose drawn position is outside the plate are simply old art (not classified as background).
+3. Mirroring: flipped = bool(flags & 4). The engine mirrors the frame on draw, so for a flipped cAnim the
+   reference under the stored (unmirrored) frame is the plate box mirrored left-right, and the 2x redraw
+   region used for compositing is mirrored left-right too. The output is stored unmirrored.
+4. Classification and compositing exactly as ambience_sprites (reuse its code: factor the per-frame rebuild
+   into a shared helper used by both functions rather than duplicating it): _frame_masks at the frame's own
+   resolution with the reference sampled nearest; same -> redraw, tint -> redraw * ratio, shift -> redraw +
+   delta; masks and alpha upscaled NEAREST to (2*sw, 2*sh); redraw region resampled LANCZOS to (2*sw, 2*sh)
+   only when (w, h) != (sw, sh).
+5. Old art (pixels in no class, and off-plate pixels): if cfg.raw.get("assemble", {}).get("canim_upscaled")
+   is set (a path, relative to cfg.root unless absolute), and <that>/scene_NNN/canim_NNN/frame_iii@2x.png
+   exists with size exactly (2*sw, 2*sh), old-art pixels take its RGB; otherwise the 1x frame upscaled with
+   LANCZOS (as ambience_sprites). Alpha always comes from the 1x frame (NEAREST).
+6. No background-fraction gate: every valid frame of every cAnim is written, to
+   out_dir/canim_NNN/frame_iii@2x.png (iii = the frame's position in "frames", zero-based).
+   One record per cAnim with at least one frame written: {"name", "canim": NNN (int), "frames": count,
+   "flipped": bool, "scale": s, "bg_fraction": round((same + tint) / opaque over all written frames, 3)
+   (0.0 when nothing is opaque)}.
+7. run_job: call canim_sprites(cfg, scene, result, tmp) after ambience_sprites and, when it returns
+   records, set record["canims"] = [w["name"] for w in records]. Update the module docstring (the list of
+   files written) to describe canim_NNN/frame_iii@2x.png.
+8. remaster.toml is not yours to edit; the real config will set [assemble] canim_upscaled.
+"""

@@ -1,0 +1,20 @@
+# Delegated 2026-11-15 (Phase 1c). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/qa.py"]
+test = "python -m unittest tests.test_remaster_firegate tests.test_remaster_newcontent tests.test_remaster_textcheck"
+timeout_s = 2400
+prompt = """
+Change the QA light rule in tools/remaster/stages/qa.py (Python). Read the acceptance test
+tools/tests/test_remaster_firegate.py first; do not edit it.
+
+The user now allows new lighting (lit lamps, fires in fireplaces, lit windows, new light fixtures). Only fire
+that changes the story (a burning building, flames out of windows, a room or object on fire) must fail.
+
+1. In VLM_DIFF, keep "new_light_sources" as it is and add one more JSON field after it:
+   "story_fire": [flames anywhere other than inside a fireplace, stove, lamp, candle or torch: a burning
+   building, flames from windows or doors, a room, vehicle or object on fire; [] when none]
+2. Add `fire_gate(diff: dict | None) -> bool | None`: None when diff is None; otherwise False when
+   diff["story_fire"] has any non-blank entry, else True (a missing key counts as no story fire).
+3. In evaluate(): remove gates["light"] entirely. Set gates["fire"] = fire_gate(diff if "diff" in review else None).
+   Keep writing "new_light_sources" into the summary (score-only record). Also add "story_fire" to the summary
+   (list, or None when there was no diff). Nothing else in the scoring changes.
+"""

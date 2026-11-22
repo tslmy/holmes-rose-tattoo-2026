@@ -1,0 +1,58 @@
+# Delegated 2026-11-21 (iteration 6). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/redraw_bg.py", "tools/remaster/imagegen.py"]
+test = "python -m unittest tests.test_remaster_repair tests.test_remaster_peopleclean tests.test_remaster_maskpeople tests.test_remaster_redraw_input"
+timeout_s = 3000
+prompt = """
+Add a `repair` variant to tools/remaster/stages/redraw_bg.py (Python). Read the acceptance test
+tools/tests/test_remaster_repair.py first: it defines every name and behaviour; do not edit it, and keep
+test_remaster_peopleclean.py, test_remaster_maskpeople.py and test_remaster_redraw_input.py passing.
+Fixtures are non-square.
+
+Background: a repair variant does not redraw the room. It takes the room's best near-miss redraw and fixes
+what QA found: objects added on the walkable floor, people added, or a small hotspot object missing.
+
+1. variant(): read `repair = true` from the variant table into the returned dict as "repair" (bool,
+   default False), like remove_people.
+2. repair_source(cfg, scene, backend) -> str | None. Over levels(cfg) whose variant is not a repair variant,
+   read qa.job_dir(cfg, scene, backend, level)/qa.json (skip missing or unreadable files). If any summary
+   has "pass" true, return None (the room already has a passing redraw). Candidates: summary status "ok",
+   not passing, and at most two gates that are exactly False (None does not count). Return the candidate
+   with the fewest False gates, ties broken by the higher "score"; None if there is none. (Import qa lazily
+   inside the function if a module-level import would be circular.)
+3. Prompts in tools/remaster/imagegen.py:
+   REMOVE_OBJECTS_PROMPT = ("Remove the {items} from this photograph and fill the space with what is behind
+   them: the same floor, wall, street or furniture, with matching materials and lighting. Change nothing
+   else: keep the camera, framing, every other object and all writing.")
+   HARMONISE_PROMPT = ("Blend the {items} into this photograph: give {them} the same lighting, materials and
+   photographic detail as the rest of the room, at exactly the same place, size and shape. Change nothing
+   else.")  ({items}: the labels joined with ", "; {them}: "it" for one label, "them" for more).
+4. run_job, when the variant has repair = true (instead of the normal generation):
+   a. source = repair_source(cfg, scene, backend). If None: write record {"status": "unavailable",
+      "reason": "no near-miss redraw to repair", ...} (through the same tmp dir / write_json / write_stamp /
+      install_dir path as the existing unavailable branch) and make no imagegen call.
+   b. Start from a copy of job_dir(cfg, scene, backend, source)/redraw.png (picture pixels). The input image
+      is input_path(cfg, scene) after the same imagegen.resize_to(plate_dedither -> size) as the normal path.
+   c. Remove: boxes = the source qa summary's "blocking_objects" (each {"label", "box": [x, y, w, h]} in
+      picture pixels) plus added_people(input, redraw) boxes labelled "person". If any: one
+      imagegen.generate(cfg, backend, prompt=REMOVE_OBJECTS_PROMPT.format(items=<unique labels joined>),
+      images=[current redraw path], size=size, seed=<variant seed>, out=..., level=level, settings=...,
+      log_dir=tmp); resize its output to the redraw size if it differs; composite with
+      cleanup_alpha(boxes, size) exactly like the people cleanup.
+   d. Restore: for each label in the source summary's "missing", the anchors in
+      geometry.job_dir(cfg, scene, backend, source)/geometry.json with that label and "detectable" true:
+      take its "orig_det" (or "box") [x, y, w, h] in original pixels, map its four corners with
+      GridWarp.from_json(geometry["warp"]).forward(...) to picture pixels and use their bounding box. Paste the
+      input image's pixels into the current redraw inside cleanup_alpha(those boxes, size) (alpha blend),
+      save that as the image to edit, then one imagegen.generate with HARMONISE_PROMPT (items = the restored
+      labels) on it, seed + 1, and composite its output back with cleanup_alpha(those boxes, size) over the
+      pasted image. Skip the step when nothing is missing or no anchor matches.
+   e. Save redraw.png; keep the source redraw as redraw_raw.png. Record: status "ok", "source": source,
+      "removed": [{"label", "box"}...], "restored": [{"label", "box"}...] (picture-pixel boxes), plus the
+      generate records under "edits".
+5. plan(): for a repair variant, add to the fingerprint the text of every non-repair level's qa.json for that
+   scene and backend ("" when missing), so the job re-runs when QA changes, and add
+   after=[f"qa:{qa_key}" for each non-repair level] using qa's own job key function if it has one (look at
+   tools/remaster/stages/qa.py plan()), in addition to the existing dependencies. Other variants' fingerprints
+   must not change.
+6. Update the module docstring with a short paragraph on repair variants.
+"""

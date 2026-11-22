@@ -5,6 +5,57 @@ Every command below also works with a plain `python3` as long as Pillow is
 installed in the active interpreter; `uv run python3 ...` is the recommended,
 reproducible way to get there (see the root [README](../README.md#setup)).
 
+## Pipeline entry point (`remaster`)
+
+Iteration 2 drives the scripts below through one command, configured by
+`remaster.toml` at the repository root (game data path, LLM endpoint and
+models, image backend per asset class, scales, thresholds, golden set):
+
+```sh
+uv sync
+uv run remaster extract prepare            # golden set; --scenes 1 2 or --all
+uv run remaster status                     # job counts, failures, free disk
+uv run remaster run                        # resume every pending job (unattended)
+uv run remaster review                     # rewrite review/queue.md + sheet.html
+uv run remaster review decide 5 keep    # by number or id (golden-set)
+```
+
+- Stages (`extract`, `prepare`, then registered stubs `brief`, `redraw-bg`,
+  `cast`, `redraw-sprites`, `geometry`, `interpolate`, `qa`, `assemble`,
+  `smoke`) live in `tools/remaster/stages/`. `extract` runs the existing
+  extractors unchanged, one job per scene/resource, then the extraction audit.
+  `prepare` de-dithers (`tools/remaster/dedither.py`) and builds default-state
+  plates (`tools/remaster/plates.py`) with edge control images.
+- Outputs go to stable directories under `work/` (ignored), each stamped with a
+  content hash of its inputs and settings; unchanged jobs are skipped.
+- Jobs are kept in `work/state/jobs.sqlite`. The runner holds a lock, runs
+  under `caffeinate`, runs each job in a child process (logs in
+  `work/state/logs/`), checks free disk before every batch and job, and on
+  start puts jobs orphaned by a crash, sleep or reboot back in the queue.
+  `uv run remaster launchd` prints a LaunchAgent that restarts it after reboot.
+- Decisions that need a human go to `review/queue.json` / `review/queue.md`
+  (tracked) and `review/sheet.html` (local, may show game art) with the
+  provisional default in use. Jobs carry the ids of the defaults they assume;
+  overturning one re-queues exactly those jobs.
+- Tests: `uv run python -m unittest tools.tests.test_remaster_prepare
+  tools.tests.test_remaster_jobs`.
+
+Local models and OpenCode: see [`docs/local-models.md`](../docs/local-models.md).
+
+## Native img2img backends
+
+The neural backends live under `tools/img2img/`: `flux.py` (FLUX.1),
+`gpt_image.py` (optional API), `sdxl_controlnet.py` (local SDXL Canny
+ControlNet), `z_image.py` (local Z-Image Turbo),
+`z_image_controlnet.py` (Apple-MLX Z-Image Turbo Union ControlNet), and
+`z_image_controlnet_cuda.py` (native CUDA VideoX-Fun Z-Image Union ControlNet). SDXL uses the extracted
+`protect_mask.png` during generation and provides the geometry-guaranteed
+production candidate. The CUDA Union runner combines the resource-derived inpaint
+mask with Canny geometry control and is the Z-Image production candidate until
+its outputs are validated. Z-Image Turbo alone is a low-strength visual
+candidate. The optional GPT runner is a hosted API client, so unlike the other
+backends it cannot run a model locally.
+
 ## Background pipeline
 
 ### 1. Extract room backgrounds and prompt metadata
@@ -26,6 +77,34 @@ zones, hotspots, description text, and prompt terms), `prompt.txt`, and
 boundary-reference rasters `walk_zones_mask.png`, `hotspots_mask.png`,
 `structure_control.png` (both overlaid), and `protect_mask.png` (solid-filled
 union of walk zones + hotspots, used by the liberal-art masked pass below).
+
+To enumerate story-flag configurations without running ScummVM:
+
+```sh
+python3 tools/generate_rosetattoo_state_masks.py \
+  --input-dir extracted/rosetattoo
+```
+
+This writes `scene_NNN/state_masks.json` and per-configuration masks under
+`scene_NNN/states/`. It uses the same two-required-flag/all-must-pass rule,
+including negative flag literals, as `Scene::checkSceneFlags()` in the engine.
+The masks are useful for image
+editing experiments, but the flag values in a player's save game still need to
+be selected by the caller; the ordinary union mask remains the safe default.
+
+An optional cloud benchmark can submit every scene to GPT Image in one
+resumable pass:
+
+```sh
+uv sync --extra openai
+OPENAI_API_KEY=... uv run python3 tools/openai_image_rosetattoo_pass.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/openai-image-pass
+```
+
+It uses `protect_mask.png` as an inpainting mask and writes request metadata
+and hashes beside each output. ChatGPT Plus is not API access; this backend
+requires a separately billed API key.
 
 ### 2. Baseline (non-neural) upscaling
 
@@ -139,7 +218,16 @@ Useful flags:
 For LLM-polished prompts (recommended — every scene gets one, with no
 per-scene manual overrides):
 
+The default provider is any OpenAI-compatible server, with URL and model
+from `[llm]` in `remaster.toml` (Ollama's `/v1` with `qwen3.5-9b-32k`; see
+[`docs/local-models.md`](../docs/local-models.md)); pass `--base-url` and
+`--model` for LM Studio. The native Ollama path is still available:
+
 ```sh
+uv run python tools/polish_rosetattoo_prompts.py \
+  --input-dir extracted/rosetattoo \
+  --output-dir generated/prompt-briefs
+
 python3 tools/polish_rosetattoo_prompts.py \
   --provider ollama \
   --ollama-url http://127.0.0.1:11434 \

@@ -1,0 +1,27 @@
+# Delegated 2026-11-21 (iteration 8). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/maptiles.py"]
+test = "python -m unittest tests.test_remaster_maptiles"
+timeout_s = 1800
+prompt = """
+Create tools/remaster/maptiles.py (Python, numpy only) with two functions, tile_boxes and blend_tiles.
+Read the acceptance test tools/tests/test_remaster_maptiles.py first: its module docstring is the spec and
+its assertions define every detail; do not edit the test. Fixtures are non-square (200 wide, 120 tall):
+arrays are indexed [y, x], boxes are (x0, y0, x1, y1).
+
+tile_boxes(width, height, cols, rows, overlap): core edges at round(i * width / cols) for i in 0..cols and
+round(j * height / rows) for j in 0..rows; tile (i, j) spans its core, extended by `overlap` on each side
+that is not an image border, clamped to [0, width] / [0, height]. Return a list of tuples of ints in
+row-major order (j outer, i inner).
+
+blend_tiles(tiles, boxes, size): size is (width, height). Accumulate float64 sums of weight * tile and of
+weight. Each tile's weight is the outer product of a vertical 1-D weight (over its rows) and a horizontal
+1-D weight (over its columns), both 1 by default.
+Overlap o of an interior left edge (x0 > 0): take the tile immediately to its left in the same row (same
+y0, largest x1 that is > x0); the two tiles share columns [x0, that x1), which is 2*o wide, so
+o = (that x1 - x0) / 2. On that side the horizontal weight is w(x) = (x + 0.5 - x0) / (2*o) clipped to
+[0, 1], x the absolute column. An interior right edge (x1 < width) mirrors it with the tile to its right:
+w(x) = (x1 - x - 0.5) / (2*o). Multiply both sides' ramps. Vertical weights the same way with the tiles
+above and below in the same column. Image-border edges get no ramp.
+Divide sums by weights, round, clip to 0..255, return uint8 of shape (height, width, 3).
+Run the test until it passes.
+"""

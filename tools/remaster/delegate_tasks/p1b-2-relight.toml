@@ -1,0 +1,19 @@
+# Delegated 2026-11-15 (Phase 1b). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/geometry.py"]
+test = "python -m unittest tests.test_remaster_relight tests.test_remaster_variants"
+prompt = """
+Protected writing/clue regions are pasted from the ESRGAN baseline into the redraw in
+tools/remaster/stages/geometry.py (estimate(), step 4). When the redraw relit the room the pasted patch shows as a
+flat grey block. Read the acceptance test tools/tests/test_remaster_relight.py first; do not edit it.
+
+1. Add relight_patch(patch, target, mask, inner=8, outer=24) -> np.ndarray (float32, same shape as patch):
+   - patch, target: HxWx3 arrays (any numeric dtype, same size); mask: HxW float 0..1 marking the pasted region.
+   - ring = pixels within `outer` px of the region (mask > 0.5) but farther than `inner` px from it (use
+     cv2.dilate with an elliptical kernel, or a distance transform).
+   - If the ring has fewer than 50 pixels, return patch as float32 unchanged.
+   - Otherwise fit, per channel, target ~= gain * patch + offset over the ring pixels by least squares; clip gain
+     to [0.5, 2.0] and refit the offset as mean(target - gain * patch) over the ring; return
+     gain * patch + offset for the whole image (not clipped to 0..255; the caller clips).
+2. In estimate(), apply it before the paste: base_warped = relight_patch(base_warped, final, mask[..., 0]) (the
+   blurred mask already computed there) and then blend as now. Keep everything else unchanged.
+"""

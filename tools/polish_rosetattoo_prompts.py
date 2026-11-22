@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Create visual-only photoreal img2img prompt briefs from raw Rose Tattoo resource text."""
+"""Create visual-only photoreal img2img prompt briefs from raw Rose Tattoo resource text.
+
+Providers:
+  openai   any OpenAI-compatible server (LM Studio, Ollama /v1, llama.cpp) via
+           remaster.llm.ChatClient; defaults come from [llm] in remaster.toml
+  ollama   Ollama's native /api/chat or /api/generate (kept for compatibility)
+  fallback deterministic keyword brief, no model
+"""
 
 from __future__ import annotations
 
@@ -13,8 +20,21 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from remaster.llm import ChatClient
+
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def llm_defaults() -> dict[str, Any]:
+    """The [llm] table of remaster.toml, if present."""
+    try:
+        import tomllib
+
+        with (ROOT / "remaster.toml").open("rb") as handle:
+            return tomllib.load(handle).get("llm", {})
+    except (OSError, ValueError, ImportError):
+        return {}
 
 
 def scene_dirs(root: Path, selected: list[int] | None) -> list[Path]:
@@ -321,16 +341,7 @@ def sanitize_visual_brief(text: str) -> str:
     return fallback or text.strip()
 
 
-def polish_with_ollama(
-    api_url: str,
-    model: str,
-    ollama_api: str,
-    scene_name: str,
-    raw_prompt: str,
-    image_path: Path | None,
-    max_source_chars: int,
-    timeout: int,
-) -> str:
+def build_prompt(scene_name: str, raw_prompt: str, max_source_chars: int) -> tuple[str, str]:
     raw_prompt = trim_raw_prompt(raw_prompt, max_source_chars)
     system = (
         "You convert raw adventure-game resource text and a source image into a compact visual inventory for a photoreal img2img redraw. "
@@ -352,6 +363,32 @@ def polish_with_ollama(
         f"{raw_prompt}\n\n"
         "Write the compact visual inventory now."
     )
+    return system, user
+
+
+def polish_with_openai(
+    client: ChatClient,
+    scene_name: str,
+    raw_prompt: str,
+    image_path: Path | None,
+    max_source_chars: int,
+) -> str:
+    system, user = build_prompt(scene_name, raw_prompt, max_source_chars)
+    result = client.chat(system, user, images=[image_path] if image_path else None, max_tokens=220)
+    return sanitize_visual_brief(" ".join(result.text.split()))
+
+
+def polish_with_ollama(
+    api_url: str,
+    model: str,
+    ollama_api: str,
+    scene_name: str,
+    raw_prompt: str,
+    image_path: Path | None,
+    max_source_chars: int,
+    timeout: int,
+) -> str:
+    system, user = build_prompt(scene_name, raw_prompt, max_source_chars)
     images = [image_file_to_base64(image_path)] if image_path else None
     if ollama_api == "chat":
         user_message: dict[str, Any] = {"role": "user", "content": user}
@@ -424,7 +461,14 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "generated" / "prompt-briefs")
     parser.add_argument("--scenes", type=int, nargs="*")
     parser.add_argument("--skip-existing", action="store_true")
-    parser.add_argument("--provider", choices=["ollama", "fallback"], default="ollama")
+    llm = llm_defaults()
+    parser.add_argument("--provider", choices=["openai", "ollama", "fallback"], default="openai")
+    parser.add_argument("--base-url", default=llm.get("text_base_url") or llm.get("base_url", "http://localhost:1234/v1"),
+                        help="OpenAI-compatible base URL (default: remaster.toml [llm])")
+    parser.add_argument("--model", default=llm.get("text_model", "qwen3.5:9b-mlx"),
+                        help="model id for --provider openai (default: remaster.toml [llm].text_model)")
+    parser.add_argument("--api-key", default=llm.get("api_key"))
+    parser.add_argument("--context-tokens", type=int, default=int(llm.get("context_tokens", 8192)))
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--ollama-model", default="qwen3.5:9b-mlx")
     parser.add_argument("--ollama-api", choices=["chat", "generate"], default="chat")
@@ -443,11 +487,14 @@ def main() -> None:
     parser.add_argument(
         "--no-image",
         action="store_true",
-        help="Do not send the scene background image to vision-capable Ollama models.",
+        help="Do not send the scene background image (use with text-only models).",
     )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    client = ChatClient(args.base_url, args.model, provider="openai", api_key=args.api_key,
+                        timeout=args.api_timeout, context_tokens=args.context_tokens)
+    model_used = {"openai": args.model, "ollama": args.ollama_model}.get(args.provider)
     results = []
     for scene_dir in scene_dirs(args.input_dir, args.scenes):
         scene_id = int(scene_dir.name.split("_", 1)[1])
@@ -473,9 +520,15 @@ def main() -> None:
             if manual_brief_path:
                 brief = manual_brief_path.read_text(encoding="utf-8").strip()
                 provider_used = "manual"
-            elif args.provider == "ollama":
+            elif args.provider in ("openai", "ollama"):
                 try:
-                    brief = polish_with_ollama(
+                    brief = polish_with_openai(
+                        client,
+                        scene_name,
+                        raw_prompt,
+                        None if args.no_image else image_path,
+                        args.max_source_chars,
+                    ) if args.provider == "openai" else polish_with_ollama(
                         args.ollama_url,
                         args.ollama_model,
                         args.ollama_api,
@@ -502,6 +555,8 @@ def main() -> None:
                         "scene_name": scene_name,
                         "provider": provider_used,
                         "requested_provider": args.provider,
+                        "model": model_used if provider_used == args.provider else None,
+                        "base_url": args.base_url if provider_used == "openai" else None,
                         "ollama_model": args.ollama_model if provider_used == "ollama" else None,
                         "manual_brief": str(manual_brief_path) if manual_brief_path else None,
                         "source_prompt": str(raw_prompt_path),
@@ -523,6 +578,7 @@ def main() -> None:
         json.dumps(
             {
                 "provider": args.provider,
+                "model": model_used,
                 "ollama_model": args.ollama_model if args.provider == "ollama" else None,
                 "processed_scene_count": len(results),
                 "available_scene_count": len(available_briefs),

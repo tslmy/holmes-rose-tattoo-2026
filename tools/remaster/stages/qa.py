@@ -1,0 +1,520 @@
+"""`qa`: background gates and VLM review for each redraw (docs/remaster-plan.md, QA gates).
+
+One job per (scene, backend, level) -> work/qa/scene_NNN/<backend>/<level>/qa.json.
+
+Deterministic gates, from the geometry sidecar and detections:
+  objects    every named object the detector finds confidently in the original
+             (score >= thresholds.qa_confident_score) is found again in the redraw where
+             the shipped warp puts it (IoU >= 0.3); weaker ones count towards the score only.
+             One missed label is tolerated when the found ratio is >= qa_object_miss_ratio
+             (default 0.85) and the VLM diff does not report it removed
+  order      found objects keep their left-right and front-back (bottom edge) order
+  warp       invertible, stretch bounded, inverse round-trips; L0/L1 drift within limits
+  offsets    L1 only: re-segmented static layers move <= max_sprite_offset_px
+  protected  every writing/clue region small enough was warped in from the SR baseline
+VLM review (vision model from [llm]):
+  vlm        "what was added or removed?" on original and result side by side; fails if
+             the model names a removed or added object
+  floor      the warped walk zones still lie on walkable ground (asked with the zones tinted)
+Ranking only (not gates): palette closeness (chroma ratio and hue histogram overlap)
+and the VLM's 1-10 photoreal rating.
+
+A failed VLM call is recorded and leaves its gate `null` (unknown), not failed.
+Re-queueing failures with changed settings is the Phase 2 QA loop and is not done here.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+from .. import textcheck
+from ..config import Config
+from ..jobs import JobSpec
+from ..llm import ChatClient
+from ..warp import GridWarp
+from . import baseline, brief, common, geometry, prepare, redraw_bg
+
+NAME = "qa"
+SUMMARY = "Background gates (objects, order, warp, offsets, protected text), VLM review, palette score"
+CODE = [Path(__file__)]
+
+PEOPLE = re.compile(r"\b(person|people|man|men|woman|women|figure|figures|child|children|boy|girl|crowd|"
+                    r"pedestrian|passer|customer|patron|officer|constable|gentleman|lady)s?\b", re.IGNORECASE)
+OBSTACLE_QUERIES = ["table", "chair", "lamp", "floor lamp", "statue", "bust", "cabinet", "barrel",
+                    "crate", "cart", "bench", "person"]
+VLM_SYSTEM = "You are a meticulous art director checking a remastered video game background. Answer with JSON only."
+VLM_DIFF = """Image 1 (left) is the original 1996 game room; image 2 (right) is a photoreal remaster of it.
+List the differences in content, not in style or rendering quality. Return JSON:
+{"removed": [objects or people in the original that are missing from the remaster],
+ "added": [objects or people in the remaster that were not in the original],
+ "moved": [objects that clearly changed position or order],
+ "new_light_sources": [lamps, candles, fires, flames or lit windows in the remaster that are not lit or
+not present in the original],
+ "story_fire": [flames anywhere other than inside a fireplace, stove, lamp, candle or torch: a burning
+building, flames from windows or doors, a room, vehicle or object on fire; [] when none],
+ "writing_changed": true if any sign, poster or printed text was changed, garbled or lost,
+ "photoreal": 1-10 how much the remaster looks like a real photograph of a built set,
+ "palette_kept": 1-10 how well the remaster keeps the original's colours and their vibrancy}
+Only list clear, specific objects (e.g. "fire hydrant", "man behind the bar"); use [] when none."""
+VLM_FLOOR = """The cyan-tinted areas mark where characters walk in this game room. Return JSON:
+{"floor": true if every tinted area lies on walkable ground (floor, street, pavement, rug, stairs) and not on
+walls, furniture tops, windows or sky, "problems": [short descriptions of tinted areas that are not ground]}"""
+VLM_TEXT = """Image 1 (left) is the original 1996 game room; image 2 (right) is a photoreal remaster of it.
+Transcribe the signs and printed text exactly as written (empty list when none is legible). Return JSON:
+{"original_text": [every sign, poster or printed text legible in image 1],
+ "remaster_text": [the same for image 2]}"""
+
+
+def out_root(cfg: Config) -> Path:
+    return cfg.work / "qa"
+
+
+def job_dir(cfg: Config, scene: int, backend: str, level: str) -> Path:
+    return out_root(cfg) / f"scene_{scene:03d}" / backend / level
+
+
+def plan(cfg: Config, args: argparse.Namespace) -> list[JobSpec]:
+    specs = []
+    llm = cfg.section("llm")
+    for spec in geometry.plan(cfg, args):
+        p = spec.params
+        src = geometry.job_dir(cfg, p["scene"], p["backend"], p["level"])
+        fp = common.fingerprint(common.read_stamp(src).get("fingerprint"), llm.get("vision_model"),
+                                cfg.section("thresholds"), VLM_DIFF, VLM_FLOOR, VLM_TEXT, *CODE)
+        specs.append(JobSpec(NAME, spec.key, dict(p), fp, after=[spec.id], tags=spec.tags + ["llm-models"]))
+    return specs
+
+
+def _bbox(poly: np.ndarray) -> list[float]:
+    x0, y0 = poly.min(axis=0)
+    x1, y1 = poly.max(axis=0)
+    return [float(x0), float(y0), float(x1 - x0), float(y1 - y0)]
+
+
+def new_objects(orig_dets: list[dict], final_dets: list[dict], warp: GridWarp, queries: list[str],
+                iou: float = 0.2, min_score: float = 0.25) -> list[dict]:
+    """Redraw detections (picture px) with no confident original match (mapped to picture px)."""
+    mapped = []
+    for d in orig_dets:
+        if d["score"] < 0.1:
+            continue
+        x, y, w, h = d["box"]
+        corners = np.array([[x, y], [x + w, y], [x, y + h], [x + w, y + h]], float)
+        pts = warp.forward(corners).reshape(-1, 2)
+        box = [float(pts[:, 0].min()), float(pts[:, 1].min()),
+               float(pts[:, 0].max() - pts[:, 0].min()), float(pts[:, 1].max() - pts[:, 1].min())]
+        mapped.append((d["query"], box))
+    found = []
+    for d in final_dets:
+        if d["score"] < min_score:
+            continue
+        if any(q == d["query"] and brief.iou(box, d["box"]) >= iou for q, box in mapped):
+            continue
+        found.append({"label": queries[d["query"]], "box": d["box"], "score": d["score"]})
+    return found
+
+
+def blocking(new: list[dict], walk_polys: list, hot_polys: list, picture_size: tuple[int, int],
+             frac: float = 0.2) -> list[dict]:
+    """New objects whose box lies at least `frac` of the way inside the walk/hotspot union."""
+    import cv2
+
+    width, height = picture_size
+    mask = np.zeros((height, width), np.uint8)
+    for poly in list(walk_polys) + list(hot_polys):
+        if poly:
+            cv2.fillPoly(mask, [np.asarray(poly, np.int32).reshape(-1, 1, 2)], 1)
+    out = []
+    for d in new:
+        x, y, w, h = d["box"]
+        x0, y0 = max(int(x), 0), max(int(y), 0)
+        x1, y1 = min(int(x + w), width), min(int(y + h), height)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        area = (x1 - x0) * (y1 - y0)
+        inside = int(mask[y0:y1, x0:x1].sum())
+        if inside / area >= frac:
+            out.append(d)
+    return out
+
+
+def partial_match(det: list[float], expect: list[float], grow: float = 0.25,
+                  min_area: float = 0.15, max_area: float = 2.5, max_centre: float = 0.5) -> bool:
+    """A redraw detection that covers only part of the expected object (a door's lower half, a rod's
+    middle), or sits slightly off it, still finds it: its centre lies inside the expected box grown by
+    `grow` of its width/height on each side, no further than `max_centre` times the box's longer side
+    from its centre, and its area is `min_area`..`max_area` times the expected area. Calibrated on iteration 6's near-miss rooms: true matches sit within 0.33 box-lengths of where
+    they should be; unmatched detections centred outside the box are usually another object."""
+    x, y, w, h = expect
+    dx, dy, dw, dh = det
+    cx, cy = dx + dw / 2, dy + dh / 2
+    inside = (x - grow * w <= cx <= x + w + grow * w) and (y - grow * h <= cy <= y + h + grow * h)
+    ratio = (dw * dh) / max(w * h, 1e-9)
+    centre = ((cx - x - w / 2) ** 2 + (cy - y - h / 2) ** 2) ** 0.5 / max(w, h, 1e-9)
+    return inside and centre <= max_centre and min_area <= ratio <= max_area
+
+
+def object_gates(sidecar: dict, confident: float, allow_partial: bool = True) -> dict:
+    """allow_partial: count partial_match detections as found. Callers pass False when the
+    original itself fails the calibrated gate (the calibration then has no footing there)."""
+    warp = GridWarp.from_json(sidecar["warp"])
+    found, missing, weak_missing, rows = [], [], [], []
+    for a in sidecar.get("anchors", []):
+        if not a["detectable"]:
+            continue
+        x, y, w, h = a["orig_det"] or a["box"]
+        corners = np.array([[x, y], [x + w, y], [x, y + h], [x + w, y + h]], float)
+        expect = _bbox(warp.to_original_units(corners))
+        det = a.get("redraw_det")
+        matched = bool(det and brief.iou(det, expect) >= 0.3)
+        partial = allow_partial and bool(det) and not matched and partial_match(det, expect)
+        ok = matched or partial
+        rows.append({"id": a["id"], "label": a["label"], "orig_score": a["orig_score"],
+                     "redraw_score": a.get("redraw_score"), "found": ok, "partial": partial})
+        if ok:
+            found.append((a, det))
+        elif a["orig_score"] >= confident:
+            missing.append(a["label"])
+        else:
+            weak_missing.append(a["label"])
+    detectable = len(rows)
+    inversions = []
+    for i in range(len(found)):
+        for j in range(i + 1, len(found)):
+            (a, da), (b, db) = found[i], found[j]
+            ao, bo = a["orig_det"] or a["box"], b["orig_det"] or b["box"]
+            # left-right: only objects side by side (no horizontal overlap in the original)
+            apart = ao[0] + ao[2] <= bo[0] or bo[0] + bo[2] <= ao[0]
+            dx_o = (ao[0] + ao[2] / 2) - (bo[0] + bo[2] / 2)
+            dx_r = (da[0] + da[2] / 2) - (db[0] + db[2] / 2)
+            if apart and abs(dx_o) > 8 and np.sign(dx_o) != np.sign(dx_r) and abs(dx_r) > 8:
+                inversions.append(f"{a['label']} / {b['label']} left-right")
+            # front-back: only things standing on the floor (people, sprite layers) have a depth order
+            if a.get("standing", True) and b.get("standing", True):
+                dy_o = (ao[1] + ao[3]) - (bo[1] + bo[3])
+                dy_r = (da[1] + da[3]) - (db[1] + db[3])
+                if abs(dy_o) > 8 and np.sign(dy_o) != np.sign(dy_r) and abs(dy_r) > 8:
+                    inversions.append(f"{a['label']} / {b['label']} front-back")
+    return {"detectable": detectable, "found": len(found),
+            "found_ratio": round(len(found) / detectable, 3) if detectable else None,
+            "missing_confident": missing, "missing_weak": weak_missing, "objects": rows,
+            "objects_ok": not missing, "order_inversions": inversions, "order_ok": not inversions}
+
+
+def palette_scores(original: Image.Image, result: Image.Image) -> dict:
+    import cv2
+
+    def lab(img):
+        arr = np.asarray(img.convert("RGB").resize((320, int(320 * img.height / img.width))))
+        return cv2.cvtColor(arr, cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(np.float32)
+
+    lo, lr = lab(original), lab(result)
+    chroma = lambda l: np.hypot(l[:, 1] - 128, l[:, 2] - 128)  # noqa: E731
+    co, cr = chroma(lo), chroma(lr)
+    ratio = float(cr.mean() / max(co.mean(), 1e-6))
+
+    def hue_hist(l, c):
+        hue = np.arctan2(l[:, 2] - 128, l[:, 1] - 128)
+        hist, _ = np.histogram(hue[c > 8], bins=24, range=(-np.pi, np.pi))
+        return hist / max(hist.sum(), 1)
+    overlap = float(np.minimum(hue_hist(lo, co), hue_hist(lr, cr)).sum())
+    score = float(np.clip(1 - abs(np.log(max(ratio, 1e-3))), 0, 1) * 0.5 + overlap * 0.5)
+    return {"chroma_ratio": round(ratio, 3), "hue_overlap": round(overlap, 3), "palette_score": round(score, 3)}
+
+
+def fire_gate(diff: dict | None) -> bool | None:
+    """New lighting is allowed; only fire that changes the story (burning building, flames from
+    windows, a room or object on fire) fails. Missing key counts as no story fire."""
+    if diff is None:
+        return None
+    story = [s for s in diff.get("story_fire") or [] if s and str(s).strip()]
+    return not story
+
+
+def parse_json(text: str) -> dict:
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"no JSON in reply: {text[:200]}")
+    return json.loads(match.group(0))
+
+
+def floor_gate(redraw_floor: dict | None, original_floor: dict | None) -> bool | None:
+    """The floor check only fails the redraw when the original passes the same check.
+
+    The 1996 walk zones routinely overlap furniture, so the untinted baseline fails
+    the check in most rooms: a redraw failure then says nothing about the remaster."""
+    if redraw_floor is None:
+        return None
+    if redraw_floor.get("floor"):
+        return True
+    return bool(isinstance(original_floor, dict) and original_floor.get("floor") is False)
+
+
+def objects_gate(objs: dict, removed: list, min_ratio: float = 0.85) -> tuple[bool, str | None]:
+    """One missed label is tolerated when nearly all objects were found and the VLM
+    diff does not report it removed (vague labels like "Pictures" are often missed)."""
+    if objs["objects_ok"]:
+        return True, None
+    missing = objs["missing_confident"]
+    ratio = objs["found_ratio"]
+    if len(missing) != 1 or ratio is None or ratio < min_ratio:
+        return False, None
+    label = missing[0]
+    if reported_removed(label, removed):
+        return False, None
+    return True, label
+
+
+def reported_removed(label: str, removed: list) -> bool:
+    """Some word of the label (letters only, >= 4 letters) is a whole word of a removed entry."""
+    words = [w for w in re.findall(r"[a-z]+", label.lower()) if len(w) >= 4]
+    if not words:
+        return False
+    for entry in removed:
+        words_in = set(re.findall(r"[a-z]+", str(entry).lower()))
+        if any(w in words_in for w in words):
+            return True
+    return False
+
+
+def side_by_side(original: Image.Image, result: Image.Image, path: Path, height: int = 640) -> Path:
+    a = original.convert("RGB").resize((int(original.width * height / original.height), height), Image.LANCZOS)
+    b = result.convert("RGB").resize((int(result.width * height / result.height), height), Image.LANCZOS)
+    canvas = Image.new("RGB", (a.width + b.width + 16, height), (255, 255, 255))
+    canvas.paste(a, (0, 0))
+    canvas.paste(b, (a.width + 16, 0))
+    canvas.save(path, quality=90)
+    return path
+
+
+def walk_tint(result: Image.Image, polys: list, path: Path) -> Path:
+    img = result.convert("RGBA")
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    for poly in polys:
+        draw.polygon([tuple(p) for p in poly], fill=(0, 230, 255, 110))
+    img.alpha_composite(layer)
+    img.convert("RGB").save(path, quality=90)
+    return path
+
+
+def original_floor(cfg: Config, scene: int, client, polys: list, size: tuple[int, int]) -> dict | None:
+    """VLM floor verdict on the de-dithered original (tinted the same way as the redraw).
+
+    Cached per scene; the key covers the zones, the size and the model. None when the
+    baseline plate is missing or the chat call fails (failures are not cached)."""
+    plate = baseline.out_root(cfg) / f"scene_{scene:03d}" / "plate_esrgan.png"
+    if not plate.is_file():
+        return None
+    scene_dir = out_root(cfg) / f"scene_{scene:03d}"
+    cache = scene_dir / "floor_original.json"
+    key = common.fingerprint(polys, list(size), client.model, VLM_FLOOR)
+    if cache.is_file():
+        try:
+            hit = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            hit = None
+        if hit is not None and hit.get("key") == key:
+            return {"key": key, "floor": hit.get("floor")}
+    image = Image.open(plate).convert("RGB").resize(size, Image.LANCZOS)
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    tinted = walk_tint(image, polys, scene_dir / "floor_original.jpg")
+    reply = client.chat(VLM_SYSTEM, VLM_FLOOR, images=[tinted], max_tokens=400)
+    verdict = bool(parse_json(reply.text).get("floor"))
+    common.write_json(cache, {"key": key, "floor": verdict})
+    return {"key": key, "floor": verdict}
+
+
+def original_objects(cfg: Config, scene: int, confident: float) -> dict | None:
+    """Objects gate on the ESRGAN baseline (the 1996 room) as if it were a redraw, with the
+    calibrated gate: identity warp, detector on the de-dithered original and on the plate.
+
+    A gate recalibration only counts where the original passes it, so partial matches are
+    honoured only when this returns ok. Cached per scene; None when inputs are missing."""
+    plate_path = baseline.out_root(cfg) / f"scene_{scene:03d}" / "plate_esrgan.png"
+    objects_path = brief.out_dir(cfg, scene) / "objects.json"
+    dedither = prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png"
+    if not (plate_path.is_file() and objects_path.is_file() and dedither.is_file()):
+        return None
+    objects = json.loads(objects_path.read_text(encoding="utf-8"))["objects"]
+    scene_dir = out_root(cfg) / f"scene_{scene:03d}"
+    cache = scene_dir / "objects_original.json"
+    key = common.fingerprint(objects, confident, plate_path, dedither)
+    if cache.is_file():
+        try:
+            hit = json.loads(cache.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            hit = None
+        if hit is not None and hit.get("key") == key:
+            return hit
+    from .. import detect as remaster_detect
+
+    original = Image.open(dedither).convert("RGB")
+    plate = Image.open(plate_path).convert("RGB")
+    W, H = original.size
+    sx, sy = plate.width / W, plate.height / H
+    queries = sorted({o["query"] for o in objects}) or ["object"]
+    plate_dets = remaster_detect.detect(plate, queries)
+    for d in plate_dets:
+        d["box"] = [d["box"][0] / sx, d["box"][1] / sy, d["box"][2] / sx, d["box"][3] / sy]
+    anchors = geometry.anchor_objects(objects, remaster_detect.detect(original, queries), queries)
+    geometry.pick_redraw_detections(anchors, plate_dets, queries, np.eye(3), (W, H))
+    warp = GridWarp.identity(W, H, (1.0, 1.0), geometry.thresholds(cfg)["spacing"])
+    objs = object_gates({"warp": warp.to_json(), "anchors": anchors}, confident)
+    ok, _ = objects_gate(objs, [])
+    result = {"key": key, "ok": bool(ok), "found_ratio": objs["found_ratio"],
+              "missing": objs["missing_confident"]}
+    common.write_json(cache, result)
+    return result
+
+
+def vlm_review(cfg: Config, scene: int, original: Image.Image, result: Image.Image,
+               sidecar: dict, out: Path) -> dict:
+    review: dict = {"errors": []}
+    try:
+        client = ChatClient.from_config(cfg.section("llm"), "vision")
+    except Exception as err:  # noqa: BLE001
+        review["errors"].append(f"client: {err}")
+        return review
+    review["model"] = client.model
+    pair = side_by_side(original, result, out / "pair.jpg")
+    try:
+        reply = client.chat(VLM_SYSTEM, VLM_DIFF, images=[pair], max_tokens=700)
+        review["diff"] = parse_json(reply.text)
+        review["diff_seconds"] = reply.seconds
+    except Exception as err:  # noqa: BLE001
+        review["errors"].append(f"diff: {type(err).__name__}: {str(err)[:300]}")
+    try:
+        reply = client.chat(VLM_SYSTEM, VLM_TEXT, images=[pair], max_tokens=400)
+        review["text"] = parse_json(reply.text)
+        review["text_seconds"] = reply.seconds
+    except Exception as err:  # noqa: BLE001
+        review["errors"].append(f"text: {type(err).__name__}: {str(err)[:300]}")
+    polys = sidecar.get("walk_zones_picture") or []
+    if polys:
+        tinted = walk_tint(result, polys, out / "walk.jpg")
+        try:
+            reply = client.chat(VLM_SYSTEM, VLM_FLOOR, images=[tinted], max_tokens=400)
+            review["floor"] = parse_json(reply.text)
+            review["floor_seconds"] = reply.seconds
+        except Exception as err:  # noqa: BLE001
+            review["errors"].append(f"floor: {type(err).__name__}: {str(err)[:300]}")
+        if "floor" in review and not review["floor"].get("floor"):
+            # the original may fail the same check (walk zones over furniture); ask it
+            try:
+                review["floor_original"] = original_floor(cfg, scene, client, polys, result.size)
+            except Exception as err:  # noqa: BLE001
+                review["errors"].append(f"floor_original: {type(err).__name__}: {str(err)[:300]}")
+    return review
+
+
+def run_job(cfg: Config, params: dict, fingerprint: str) -> dict:
+    scene, backend, level = int(params["scene"]), params["backend"], params["level"]
+    target = job_dir(cfg, scene, backend, level)
+    if common.up_to_date(target, fingerprint):
+        return json.loads((target / "qa.json").read_text(encoding="utf-8"))["summary"]
+    src = geometry.job_dir(cfg, scene, backend, level)
+    sidecar = json.loads((src / "geometry.json").read_text(encoding="utf-8"))
+    tmp = common.scratch_dir(cfg, f"qa-{scene}-{backend}-{level}")
+    try:
+        if sidecar["summary"].get("status") != "ok":
+            summary = {"status": sidecar["summary"].get("status"), "reason": sidecar["summary"].get("reason"),
+                       "pass": False}
+            common.write_json(tmp / "qa.json", {"summary": summary})
+        else:
+            summary = evaluate(cfg, scene, level, sidecar, src, tmp)
+        common.write_stamp(tmp, fingerprint, scene=scene, backend=backend, level=level)
+        common.install_dir(tmp, target)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return summary
+
+
+def evaluate(cfg: Config, scene: int, level: str, sidecar: dict, src: Path, out: Path) -> dict:
+    confident = cfg.threshold("qa_confident_score", 0.2)
+    original = Image.open(prepare.out_root(cfg) / f"scene_{scene:03d}" / "plate_dedither.png").convert("RGB")
+    result = Image.open(src / "final.png").convert("RGB")
+    geo = sidecar["summary"]
+    gates: dict = {"warp": geo["warp_ok"]}
+    orig_objs = original_objects(cfg, scene, confident)
+    objs = object_gates(sidecar, confident, allow_partial=bool(orig_objs and orig_objs["ok"]))
+    objs["original"] = orig_objs
+    gates["order"] = objs["order_ok"]
+    if redraw_bg.base_level(cfg, level) == "L1":
+        gates["offsets"] = geo.get("layers_offset_ok", True)
+    regions = sidecar.get("protected_regions", [])
+    # every region is either warped in from the baseline or explicitly left (too large, with a reason)
+    gates["protected"] = all(r.get("pasted") or r.get("reason") for r in regions)
+    review = vlm_review(cfg, scene, original, result, sidecar, out)
+    new_objs, blocked = [], []
+    try:
+        from .. import detect as remaster_detect
+
+        warp = GridWarp.from_json(sidecar["warp"])
+        new_objs = new_objects(remaster_detect.detect(original, OBSTACLE_QUERIES),
+                               remaster_detect.detect(result, OBSTACLE_QUERIES), warp, OBSTACLE_QUERIES)
+        blocked = blocking(new_objs, sidecar.get("walk_zones_picture") or [],
+                           sidecar.get("hotspots_picture") or [], result.size)
+        gates["obstacles"] = not blocked
+    except Exception as err:  # noqa: BLE001
+        gates["obstacles"] = None
+        review.setdefault("errors", []).append(f"obstacles: {type(err).__name__}: {str(err)[:300]}")
+    diff = review.get("diff") or {}
+    removed = list(diff.get("removed") or []) if "diff" in review else []
+    new_light = list(diff.get("new_light_sources") or []) if "diff" in review else None
+    # one missed label is tolerated unless the VLM diff reports it removed
+    gates["objects"], tolerated = objects_gate(objs, removed, cfg.threshold("qa_object_miss_ratio", 0.85))
+    gates["order"] = objs["order_ok"]
+    if "diff" in review:
+        added = list(diff.get("added") or [])
+        # Removing anything, or adding a figure (an extra character misleads the player), fails;
+        # other additions (furniture glimpsed through a door) only lower the score.
+        added_people = [a for a in added if PEOPLE.search(str(a))]
+        gates["vlm"] = not removed and not added_people
+    else:
+        added = []
+        gates["vlm"] = None
+    gates["fire"] = fire_gate(diff if "diff" in review else None)
+    if "floor" in review:
+        gates["floor"] = floor_gate(review["floor"], review.get("floor_original"))
+    elif sidecar.get("walk_zones_picture"):
+        gates["floor"] = None
+    if "text" in review:
+        gates["text"], text_missing = textcheck.text_gate(list(review["text"].get("original_text") or []),
+                                                          list(review["text"].get("remaster_text") or []))
+    else:
+        gates["text"], text_missing = None, []
+    palette = palette_scores(original, result)
+    known = [v for v in gates.values() if v is not None]
+    passed = all(known)
+    photoreal = diff.get("photoreal")
+    extra = min(len(added) + len(diff.get("moved") or []), 5) / 5 if "diff" in review else 0.0
+    score = (0.35 * (objs["found_ratio"] if objs["found_ratio"] is not None else 0.5)
+             + 0.15 * (1.0 if objs["order_ok"] else 0.0)
+             + 0.15 * (1.0 if geo["warp_ok"] else 0.0)
+             + 0.2 * ((float(photoreal) / 10) if isinstance(photoreal, (int, float)) else 0.5)
+             + 0.15 * palette["palette_score"] - 0.1 * extra)
+    summary = {"status": "ok", "level": level, "pass": passed, "gates": gates,
+               "gates_passed": sum(1 for v in known if v), "gates_known": len(known),
+               "found_ratio": objs["found_ratio"], "missing": objs["missing_confident"],
+               "objects_tolerated": tolerated,
+               "floor_original": (review.get("floor_original") or {}).get("floor"),
+               "inversions": len(objs["order_inversions"]), "removed": removed, "added": added,
+               "new_objects": new_objs, "blocking_objects": blocked,
+               "new_light_sources": list(new_light) if new_light is not None else None,
+               "story_fire": list(diff.get("story_fire") or []) if "diff" in review else None,
+                "text_missing": text_missing,
+               "writing_changed": diff.get("writing_changed"), "photoreal": photoreal,
+               "palette_kept": diff.get("palette_kept"), **palette, "score": round(score, 3),
+               "vlm_errors": review.get("errors", [])}
+    common.write_json(out / "qa.json", {"summary": summary, "objects": objs, "review": review,
+                                         "geometry": geo})
+    return summary

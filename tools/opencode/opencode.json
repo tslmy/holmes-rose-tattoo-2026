@@ -1,0 +1,68 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "providers": {
+    "ollama-local": {
+      "name": "Ollama on this Mac",
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:11434/v1"
+      },
+      "models": {
+        "qwen3.5-9b-32k": {
+          "modelID": "qwen3.5-9b-32k",
+          "name": "Qwen3.5 9B MLX (32k context)",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "body": {
+            "reasoning_effort": "none"
+          },
+          "limit": {
+            "context": 32768,
+            "input": 28672,
+            "output": 4096
+          }
+        }
+      }
+    },
+    "lmstudio-remote": {
+      "name": "LM Studio on the second laptop",
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": {
+        "baseURL": "http://10.0.0.26:1234/v1"
+      },
+      "models": {
+        "qwen/qwen3.8-27b": {
+          "modelID": "qwen/qwen3.8-27b",
+          "name": "Qwen3.8 27B (remote)",
+          "capabilities": {
+            "tools": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "body": {
+            "reasoning_effort": "none"
+          },
+          "limit": {
+            "context": 131072,
+            "input": 122880,
+            "output": 8192
+          }
+        }
+      }
+    }
+  },
+  "model": "lmstudio-remote/qwen/qwen3.8-27b"
+}

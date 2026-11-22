@@ -1,0 +1,37 @@
+# Delegated 2026-11-19 (iteration 4). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/assemble.py"]
+test = "python -m unittest tests.test_remaster_ambience2 tests.test_remaster_ambience tests.test_remaster_roomsprites tests.test_remaster_assemble"
+timeout_s = 2400
+prompt = """
+Extend `ambience_sprites` in tools/remaster/stages/assemble.py (Python). Read the acceptance test
+tools/tests/test_remaster_ambience2.py first: it defines every name and behaviour; do not edit it, and keep
+tools/tests/test_remaster_ambience.py, test_remaster_roomsprites.py and test_remaster_assemble.py passing.
+Fixtures are non-square.
+
+Background: ambience_sprites rebuilds the frames of animated room objects on the redraw (pixels equal to the
+plate take the redraw, brightness-only changes take the redraw times the ratio, the rest keep upscaled old
+art). Two gaps: objects drawn scaled (scale_val != 256) are skipped, and pixels that differ a little from
+the plate (water shimmer) keep old art.
+
+1. Add scaled_offset(offset, scale) -> int, the engine's ImageFrame::sDrawXOffset: if scale == 256 return
+   offset; else w = offset - 1 if scale >= 256 else offset; r = w * 256 // scale; return r + 1 if
+   scale > 256 else r. (scale 0 counts as 1.)
+2. Scaled objects: drop the scale_val == 256 requirement in eligible() (keep scale_val > 0; missing or 0
+   means 256). For a valid frame of size (sw, sh) with offsets (ox, oy), the drawn box is x0 = pos.x +
+   scaled_offset(ox, s), y0 = pos.y + scaled_offset(oy, s), w = sw * 256 // s, h = sh * 256 // s (exactly
+   these formulas; at s == 256 they reduce to the current box). The object is skipped when any valid frame's
+   drawn box leaves the plate (as now). The 1x reference under the frame is the plate sampled nearest at the
+   frame's resolution: ref[j, i] = plate[y0 + j * h // sh, x0 + i * w // sw]. Classification (_frame_masks)
+   and the background fraction work on (sh, sw) arrays as now.
+   At 2x, the redraw region is background.crop((2*x0, 2*y0, 2*(x0+w), 2*(y0+h))) resized to (2*sw, 2*sh)
+   with LANCZOS (no resize when w == sw and h == sh, so unscaled objects are unchanged); the output frame is
+   always 2*sw x 2*sh. Everything else (masks upscaled with NEAREST, alpha with NEAREST, old art with LANCZOS)
+   stays as it is.
+3. Small deltas: add a third pixel class `shift` in the 1x analysis: opaque, not same, not tint, and
+   max over channels |frame - ref| <= shift_tolerance (new keyword argument, default 24). At 2x those
+   pixels are clip(redraw_region + delta2, 0, 255) where delta2 is (frame - ref) as int, upscaled to
+   (2*sw, 2*sh) with NEAREST per channel. Shift pixels do NOT count towards the background fraction: an
+   object is still eligible only when (same + tint) / opaque >= min_bg_fraction.
+4. Each written record gains "scale": s (int). Update the docstring of ambience_sprites to describe the
+   scaled box and the shift class.
+"""

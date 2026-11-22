@@ -1,0 +1,44 @@
+# Delegated 2026-11-16 (iteration 1). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/assemble.py", "tools/remaster/stages/stubs.py", "tools/remaster/stages/__init__.py"]
+test = "python -m unittest tests.test_remaster_assemble tests.test_remaster_variants tests.test_remaster_bakeoff"
+timeout_s = 3600
+prompt = """
+Replace the `assemble` stub of the remaster pipeline (Python, package tools/remaster) with a real stage that
+writes one 2x background per room for the playable pack. Read the acceptance test
+tools/tests/test_remaster_assemble.py first: it defines every name and signature; do not edit it. Its fixture
+rooms are 60x40 (width x height), non-square on purpose.
+
+Create tools/remaster/stages/assemble.py (follow the style of stages/baseline.py and stages/geometry.py):
+
+- NAME = "assemble"; CODE = [Path(__file__)]; out_root(cfg) -> cfg.work / "assemble".
+- pick_room(cfg, scene) -> dict with keys scene, source ("redraw" or "baseline"), backend, level, score, why.
+  Candidates: every backend in redraw_bg.backends(cfg) x every level in redraw_bg.levels(cfg) whose
+  qa.job_dir(...)/qa.json has summary.status == "ok" and summary.pass true, whose
+  geometry.job_dir(...)/final.png exists, and whose bakeoff.change_from_original(cfg, scene, final.png) is
+  not None and >= cfg.threshold("bakeoff_min_change", 20.0). Call it as bakeoff.change_from_original (module
+  attribute) so the test can patch it. Pick the max by (bakeoff.LEVEL_RANK[redraw_bg.base_level(cfg, level)],
+  score). No candidate (or no files at all) -> source "baseline", backend None, level None, score None, and a
+  short why.
+- warp_back(picture: Image, warp: GridWarp, out_size: (width, height), fill: Image) -> (Image, valid) where
+  valid is a bool numpy array of shape (height, width). For each output pixel (i, j) the original point is
+  x = (i + 0.5) * warp.width / out_w, y = (j + 0.5) * warp.height / out_h; its picture position is
+  warp.forward([[x, y]]) (vectorise: pass all points at once). Sample the picture there with cv2.remap
+  (map = picture position - 0.5, INTER_LINEAR, BORDER_REPLICATE). valid = the picture position lies inside
+  [0, picture width] x [0, picture height]. Invalid pixels take the fill image (resized to out_size if needed).
+- plan(cfg, args): one JobSpec per scene in common.resolve_scenes(cfg, args.scenes, args.all), key
+  f"room/{scene:03d}", params {"scene": scene}, after [f"baseline:scene/{scene:03d}"] only (never qa/geometry/
+  redraw jobs: a failed redraw must not block a room). The fingerprint is common.fingerprint over: the text of
+  every existing qa.json for that scene (all backends x levels), the baseline stamp fingerprint
+  (common.read_stamp(baseline.out_root(cfg) / f"scene_{scene:03d}").get("fingerprint")), and *CODE.
+- run_job(cfg, params, fingerprint): pick = pick_room(...). The baseline is
+  baseline.out_root(cfg)/scene_NNN/plate_esrgan.png; out_size = 2 x the original room size (for a redraw:
+  geometry.json original_size; for the baseline: the baseline image size). For a redraw: read
+  geometry.json["warp"] with GridWarp.from_json, warp_back(final.png, warp, out_size, baseline image), and
+  record valid_fraction = valid.mean() rounded to 4 places. For the baseline: copy the baseline pixels
+  unchanged. Write out_root(cfg)/backgrounds/scene_NNN/background@2x.png (RGB PNG) and pick.json next to it
+  (the pick plus fingerprint and valid_fraction when a redraw); build both files in
+  common.scratch_dir(cfg, f"assemble-{scene}") and move them into place with common.install_dir(tmp, target)
+  like baseline.run_job does. Return the pick dict plus valid_fraction for a redraw.
+- In stages/stubs.py remove the "assemble" StubStage; in stages/__init__.py import assemble and add it to
+  STAGES so STAGES["assemble"] is the module (it is already in _ORDER).
+"""

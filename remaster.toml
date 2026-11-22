@@ -1,0 +1,240 @@
+# Configuration for `uv run remaster <stage>`. Paths are relative to this file.
+# Everything here is a default; CLI flags such as --scenes override it.
+
+[paths]
+game_data = "scummvm"          # legally obtained game files (ignored by git)
+work = "work"                  # stable stage outputs (ignored by git)
+review = "review"              # review queue: queue.md is tracked, sheet/assets are not
+scummvm = "scummvm-src/scummvm"
+
+[llm]
+# Any OpenAI-compatible server (LM Studio, Ollama's /v1, llama.cpp, ...).
+base_url = "http://10.0.0.26:1234/v1"   # LM Studio on the second laptop (decision #4/#11)
+api_key = "lm-studio"           # LM Studio ignores it; Ollama ignores it too
+# Text model: scene briefs, QA summaries. See docs/local-models.md.
+text_model = "qwen/qwen3.8-27b"
+text_base_url = "http://10.0.0.26:1234/v1"
+# Vision model: original-vs-redraw review, sign/text checks.
+vision_model = "qwen/qwen3.8-27b"
+vision_base_url = "http://10.0.0.26:1234/v1"
+# Used when the remote server is unreachable or lacks the model (ChatClient.from_config).
+fallback_base_url = "http://127.0.0.1:11434/v1"   # Ollama on this Mac
+fallback_text_model = "qwen3.5-9b-32k"
+fallback_vision_model = "qwen3.5-9b-32k"
+context_tokens = 32768
+timeout_s = 600
+disable_thinking = true
+
+[image]
+# Backend per asset class. Names refer to entries under [image.backends].
+# Provisional until the Phase 1 bake-off; recorded in review/queue.md.
+backgrounds = "remote-flux2-klein-4b"   # decision #14 (2026-11-15)
+sprites = "esrgan"
+casting = "remote-flux2-klein-4b"
+# Diffusion runs on the second laptop's image server. Local mflux backends stay defined but report
+# themselves unavailable while this is false, so nothing heavy runs on this Mac's GPU (2026-11-15).
+local_generation = false
+
+[image.backends.remote-flux2-klein-4b]
+# mflux on the second laptop; see docs/local-models.md "Remote image server".
+# Send `image` (base64) to edit. The server sets steps itself. Key from the environment only.
+tool = "http"
+url = "http://10.0.0.26:8000/v1/images/generations"
+model = "flux2-klein-4b"
+api_key_env = "REMASTER_IMAGE_API_KEY"
+fallback = "flux3-klein-edit"           # local, when the remote laptop is off
+# Freedom levels (server fields since 2026-11-15; imagegen.SERVER_FIELDS): strength = share of the
+# plate kept (img2img); L2 sends no strength, i.e. the free reference edit. `images` carries references.
+levels = { L0 = { strength = 0.6, steps = 8 }, L1 = { strength = 0.45, steps = 8 }, L2 = { steps = 8 } }
+multi_image = true
+
+[image.backends.remote-flux2-klein-9b]
+tool = "http"
+url = "http://10.0.0.26:8000/v1/images/generations"
+model = "flux2-klein-9b"
+api_key_env = "REMASTER_IMAGE_API_KEY"
+levels = { L0 = { strength = 0.6, steps = 8 }, L1 = { strength = 0.45, steps = 8 }, L2 = { steps = 8 } }
+multi_image = true
+
+[image.backends.remote-flux3-image-klein]
+tool = "http"
+url = "http://10.0.0.26:8000/v1/images/generations"
+model = "flux3-image-klein"
+api_key_env = "REMASTER_IMAGE_API_KEY"
+levels = { L0 = { strength = 0.6, steps = 8 }, L1 = { strength = 0.45, steps = 8 }, L2 = { steps = 8 } }
+multi_image = true
+
+[image.backends.flux2-klein-img2img]
+# Same FLUX.2 klein 9B weights as flux2-klein-edit, used as img2img. mflux's image strength is
+# how strongly the init image is kept (0 = ignored), so L0 keeps the most.
+tool = "mflux-generate-flux2"
+model = "mflux-community/flux2-klein-9b-mflux-q4"
+base_model = "flux2-klein-9b"
+steps = 8
+levels = { L0 = { strength = 0.7 }, L1 = { strength = 0.55 }, L2 = { strength = 0.4 } }
+
+[image.backends.flux2-klein-edit]
+tool = "mflux-generate-flux2-edit"
+model = "mflux-community/flux2-klein-9b-mflux-q4"
+base_model = "flux2-klein-9b"
+steps = 4
+
+[image.backends.flux3-klein-edit]
+tool = "mflux-generate-flux3-edit"
+model = "mflux-community/flux-3-image-klein-mflux-q8"
+base_model = "flux3-image-klein"
+steps = 16
+
+[image.backends.qwen21-edit]
+tool = "mflux-generate-qwen-2.1-edit"
+model = "mflux-community/qwen-image-2-1-mflux-q8"
+base_model = "qwen-image-2.1"
+steps = 25
+
+[image.backends.zimage-controlnet]
+tool = "mflux-generate-z-image-controlnet"
+model = "mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8"
+base_model = "z-image-controlnet"
+steps = 9
+# Phase 1c (2026-11-15): the image server has no ControlNet route (its API takes only the FLUX klein
+# models), so this one backend may run on this Mac despite local_generation = false. One job at a time,
+# the runner's disk check applies; weights (~15 GB, re-download approved) and DepthPro fetch on first use.
+allow_local = true
+extra_args = ["--low-ram"]
+levels = { L0 = { control_strength = 0.9 }, L1 = { control_strength = 0.75 }, L2 = { control_strength = 0.55 } }
+
+[image.backends.esrgan]
+tool = "tools/upscale_rosetattoo_sprites.py"
+scale = 2
+
+[scales]
+backgrounds = 4
+ui = 4
+text = 4
+sprites = 2
+
+[prepare]
+# Iteration 2 (2026-11-16): plates keep only single-frame ("static") room objects. Animated objects
+# (people, walkers, fire) are drawn by the engine; baked into the redraw they showed twice in game.
+plate_layers = "static"
+# De-dither: edge-preserving average over neighbours whose colour is within
+# `threshold` (RGB Euclidean, 0-441). Deterministic; see tools/remaster/dedither.py.
+dedither_radius = 1
+dedither_threshold = 48.0
+dedither_iterations = 2
+edge_low = 40
+edge_high = 120
+
+[thresholds]
+min_free_disk_gb = 15        # the runner pauses and queues a request below this
+job_max_attempts = 3
+# QA gates (used from Phase 1)
+max_warp_stretch = 1.6
+max_sprite_offset_px = 3
+max_alpha_area_change = 0.05
+disk_wait_minutes = 360        # short only because of purgeable space: wait this long, then pause
+l0_max_drift_px = 2.0          # p95 measured drift (original px) allowed at L0
+l1_max_drift_px = 4.0          # ... and at L1
+warp_grid_spacing_px = 40      # control-grid spacing of the room warp (original px)
+warp_smoothness = 2.0
+qa_confident_score = 0.2       # objects found this confidently in the original must be found again
+bakeoff_min_change = 20.0     # bake-off: mean |shipped - original| (0-255) below this is not a remaster
+sprite_max_twe_ratio = 1.5   # sprite test: texture warp error vs the baseline walk (Phase 1b)
+sprite_min_flicker_ratio = 0.6 # sprite test: less motion than this vs the baseline walk = one still pose
+sprite_max_flicker_ratio = 1.5 # sprite test: frame-to-frame change vs the ESRGAN baseline
+sprite_max_drift_excess = 0.1  # DINOv2 drift beyond the baseline's own pose variation
+sprite_min_pose_iou = 0.7
+
+[assemble]
+# Upscaled cAnim frames (2x RGBA, October iteration-1 pilot; read-only): figure pixels of each cutscene
+# animation frame come from here when the file matches the frame's 2x size, background pixels from the room.
+canim_upscaled = "enhanced/canimations-remaster-20261031"
+# QA-passing redraws rejected by eye ("scene/backend/level"); the room falls back to the next candidate
+# or the baseline. 92 s41: invents a large lit brass lamp over the right margin, pasted patch at the magnifier.
+rejected = ["92/remote-flux2-klein-9b/L2-clean-s41"]
+# Rooms whose 1996 art is deliberately tinted: the redraw takes the original's colour cast (Lab a/b).
+# 81: the red twin of card room 71 (LMY-18).
+tint_rooms = [81]
+
+[golden]
+# About six scenes (plus 36, added by decision #5): street, interior, haze room, a clue with writing,
+# a scrolling room, a dark room. See docs/remaster-plan.md, Phase 0.
+scenes = [1, 26, 18, 4, 2, 9, 36]
+scene_roles = { 1 = "street (Outside 221B Baker Street)", 26 = "interior (St. Bernard's Billiard Academy; existing engine fixtures)", 18 = "haze room, bright exterior (Cleopatra's Needle)", 4 = "clue with writing (Scotland Yard sign)", 2 = "scrolling room, 1280 wide (Inside Baker Street)", 9 = "dark room (The Strangers Room, mean luma 23)", 36 = "scrolling street, 1280 wide (Spitalfields; added by decision #5)" }
+# Shared VGS resources (extracted with the palette of `sprite_palette_scene`).
+sprites = ["SVGAWALK.VGS", "WATSON.VGS", "RMOUSE.VGS", "OMOUSE.VGS", "ITEM01.VGS", "ITEM10.VGS"]
+sprite_palette_scene = 1
+sprite_roles = { "SVGAWALK.VGS" = "Holmes walk", "WATSON.VGS" = "Watson walk", "RMOUSE.VGS" = "room cursors", "OMOUSE.VGS" = "map cursors", "ITEM01.VGS" = "inventory item", "ITEM10.VGS" = "inventory item" }
+# Streamed cAnims as scene/index (zero-based, as the runtime looks them up).
+canims = ["026/000", "044/004"]
+canim_roles = { "026/000" = "26HEXIT exit (18 frames, engine fixture exists)", "044/004" = "10 frames; the one contour fallback in the candidate pack" }
+
+[bakeoff]
+# Phase 1 (docs/remaster-plan.md): every golden scene x backend x freedom level.
+# Backends that cannot run here are recorded with the reason (weights deleted, no API key).
+# Remote only: the server's flux2-klein-9b and flux3-image-klein are the same models as the local
+# flux2-klein-edit / flux3-klein-edit. Local-only candidates (img2img strengths, Qwen, Z-Image) are
+# queued for review instead of run (review item bakeoff-local-backends).
+# Phase 1b (2026-11-15): the Phase 1 pick only, with fixes as variants (results in docs/bakeoff-results.md;
+# Phase 1 ran all three remote models at L0/L1/L2).
+backends = ["remote-flux2-klein-9b"]
+# Iteration 1 (2026-11-16, user-approved full run to a playable build): every room, 9B L2-fix at the four
+# seeds that passed most in the seed lottery; rooms where none passes keep the ESRGAN baseline.
+# The golden-set bake-off list was:
+#   ["L2", "L2-fix", "L2-fix-s11", "L2-fix-s23", "L2-mask", "L1-s75", "L1-s85", "L1-s90", "ZC-65", "ZC-80",
+#    "ZC-95", "L2-fix-s3", "L2-fix-s5", "L2-fix-s13", "L2-fix-s17", "L2-fix-s19", "L2-fix-s29", "L2-fix-s31",
+#    "L2-fix-s37", "L2-fix-s41", "L2-fix-s43", "L2-fix-s47", "L2-fix-s53"]
+# Iteration 2 used the same four seeds as plain L2-fix-sNN. Iteration 3 (2026-11-18) adds the people
+# cleanup pass (remove_people) under new names, so iteration 2's redraws stay on disk.
+# Iteration 4 (2026-11-19): four more seeds, planned only for the rooms where none of the first four
+# passed (`--scenes`); pick_room skips levels a room has no QA result for.
+# Iteration 6 (2026-11-21): L2-repair edits each baseline room's best near-miss redraw (one or two failing
+# QA gates): removes what QA found blocking, puts missing hotspot objects back. Enqueued for those rooms only.
+levels = ["L2-clean-s47", "L2-clean-s19", "L2-clean-s31", "L2-clean-s41",
+          "L2-clean-s53", "L2-clean-s11", "L2-clean-s23", "L2-clean-s29", "L2-repair"]
+seed = 7
+megapixels = 1.0
+# ChatGPT reference images (outside the repo) for scenes that have a matching one.
+reference_dir = "~/Pictures/260805 ChatGPT reimagined Holmes Rose Tattoo"
+references = { 4 = "ChatGPT Image Aug 5, 2026, 10_02_50 PM.png", 2 = "ChatGPT Image Aug 4, 2026, 10_03_08 PM.png" }
+
+# Named variants (redraw_bg.variant): base level + optional seed, strength, prompt extras, mask_people.
+[bakeoff.variants]
+L2-fix = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"] }
+L2-fix-s11 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 11 }
+L2-fix-s23 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 23 }
+L2-fix-s3 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 3 }
+L2-fix-s5 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 5 }
+L2-fix-s13 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 13 }
+L2-fix-s17 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 17 }
+L2-fix-s19 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 19 }
+L2-fix-s29 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 29 }
+L2-fix-s31 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 31 }
+L2-fix-s37 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 37 }
+L2-fix-s41 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 41 }
+L2-fix-s43 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 43 }
+L2-fix-s47 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 47 }
+L2-fix-s53 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 53 }
+L2-clean-s47 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 47, remove_people = true }
+L2-clean-s19 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 19, remove_people = true }
+L2-clean-s31 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 31, remove_people = true }
+L2-clean-s41 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 41, remove_people = true }
+L2-clean-s53 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 53, remove_people = true }
+L2-clean-s11 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 11, remove_people = true }
+L2-clean-s23 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 23, remove_people = true }
+L2-clean-s29 = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], seed = 29, remove_people = true }
+L2-repair = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["keep_figures", "no_new_light", "framing"], repair = true }
+L2-mask = { level = "L2", backends = ["remote-flux2-klein-9b"], extras = ["no_new_light", "framing"], mask_people = true }
+# Phase 1c: structure-conditioned redraws (Z-Image Turbo + ControlNet Union 2.1), text-to-image under depth
+# and HED outline maps of the original, so the layout is pinned; base level L1 = identity warp + offsets gate.
+ZC-65 = { level = "L1", backends = ["zimage-controlnet"], controls = [["depth", 0.65], ["hed", 0.65]] }
+ZC-80 = { level = "L1", backends = ["zimage-controlnet"], controls = [["depth", 0.8], ["hed", 0.8]] }
+ZC-95 = { level = "L1", backends = ["zimage-controlnet"], controls = [["depth", 0.95], ["hed", 0.95]] }
+L1-s75 = { level = "L1", backends = ["remote-flux2-klein-9b"], strength = 0.75 }
+L1-s85 = { level = "L1", backends = ["remote-flux2-klein-9b"], strength = 0.85 }
+L1-s90 = { level = "L1", backends = ["remote-flux2-klein-9b"], strength = 0.9 }
+
+[bakeoff.sprite_test]
+backends = ["remote-flux2-klein-4b", "remote-flux2-klein-9b"]
+characters.holmes = { resource = "SVGAWALK.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Sherlock Holmes: a tall, lean man with a sharp profile, grey deerstalker cap, grey Inverness cape coat over a black frock coat and waistcoat, white shirt, black trousers and shoes." }
+characters.watson = { resource = "WATSON.VGS", cast_frame = 88, walk = [24, 25, 26, 27, 28, 29, 30, 31], description = "Dr John Watson: a sturdy man with a moustache, black bowler hat, dark brown three-piece suit, striped orange and blue wool scarf, white shirt, dark shoes." }

@@ -1,0 +1,22 @@
+# Delegated 2026-11-15 (Phase 1c). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/geometry.py"]
+test = "python -m unittest tests.test_remaster_degenerate tests.test_remaster_relight tests.test_remaster_textcheck tests.test_remaster_maskpeople"
+timeout_s = 2400
+prompt = """
+Fix the geometry measurement in tools/remaster/stages/geometry.py (Python) for redraws whose textures share
+nothing with the original (ControlNet output). Read the acceptance test tools/tests/test_remaster_degenerate.py
+first; do not edit it. Its size is (width, height) = (640, 480).
+
+Problem: estimate() calls warpmod.match_points(); on such images SIFT returns a nonsense homography (e.g.
+scale 0.017 with strong perspective). pick_redraw_detections() then predicts every object's position with it,
+so no detection is matched, and fit_grid_warp() is fitted to the bad matches.
+
+1. Add homography_degenerate(h, size) -> bool, size = (width, height) in original px. True when: any entry is
+   not finite; or the perspective terms abs(h[2,0])*width or abs(h[2,1])*height exceed 0.1; or the determinant
+   of the top-left 2x2 (after dividing h by h[2,2]) is <= 0 (mirror) or outside [0.25, 4]; or the image centre
+   is mapped more than 0.25 * width away from itself. Otherwise False.
+2. In estimate(), right after match_points: when homography_degenerate(homography, (W, H)) is true, use
+   np.eye(3) as the homography for pick_redraw_detections, drop the SIFT matches (fit on the object anchors
+   only, so src/dst/weights hold just the anchor points), and record "degenerate": True in the written matching
+   info (False otherwise). Everything else, including the checks and their thresholds, is unchanged.
+"""

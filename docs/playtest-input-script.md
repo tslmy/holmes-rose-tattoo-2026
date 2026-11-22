@@ -116,3 +116,71 @@ playing. `menu_mode` is the engine's `MenuMode` value (0 standard, 3 talk,
 * The dumps do not include the cursor.
 * The dummy backend's intermittent `SDL_BlitSurface` startup error still
   occurs. The runner retries it.
+
+## cAnim suite
+
+`tools/playtest_canim_suite.py` runs one generated script per reachable cAnim trigger and compares packs:
+
+```sh
+uv run python tools/playtest_canim_suite.py --scummvm scummvm-src/scummvm --data-dir scummvm \
+  --save validation/saves/rosetattoo.000 --survey-dir work/playtest/survey \
+  --pack before=generated/playable-overrides-2x-remaster-it4 \
+  --pack after=generated/playable-overrides-2x-remaster-it5 --output-dir work/playtest/canims-it5
+```
+
+It needs a survey run per room first (`waitidle`, `objects`, `quit`) under `<survey-dir>/room<N>/`. A
+trigger is an object `uses` entry with a verb, no inventory target and a cAnim number (1-based in the room
+file); hotspots off screen in scrolling rooms are skipped. Results: `results.json` (which cAnim actually
+played per pack) and `sheet-NN.jpg` pages.
+
+## UI suite: exits, map, inventory, journal, scrolling rooms
+
+`tools/playtest_ui_suite.py` generates scripts for what the scene and cAnim checks miss and runs them
+per pack (same `--survey-dir`, `--pack label=dir` and sheet output as the cAnim suite, plus `--jobs`):
+
+```sh
+uv run python tools/playtest_ui_suite.py --scummvm scummvm-src/scummvm --data-dir scummvm \
+  --save validation/saves/rosetattoo.000 --survey-dir work/playtest/survey \
+  --pack it5=generated/playable-overrides-2x-remaster-it5 --output-dir work/playtest/ui-it5
+```
+
+* **exit**: the exit (arrow) zones come from the room file's exit table (`Exit::load()`, not in the
+  extracted metadata). The suite clicks a free floor point of the zone (the engine ignores exits under
+  a hotspot), dumps Holmes walking out, then `waitscene <dest>` and the first, 15th and settled frames
+  of the next room; exits to the map (scenes 90/100) dump the map. Zones fully covered by an object
+  (`room30covr`, `Exitcover1`, ...) are story-gated and skipped.
+* **door**: object verbs whose use names change scene (`*NN`), e.g. Door > Open; other points of the
+  object are tried when a person or hotspot is under the click.
+* **scroll**: rooms wider than 640 px; Holmes is walked to each end over free floor. The expected scroll
+  is predicted from the engine's rule (it scrolls once Holmes passes screen x 480 / 80 and settles with
+  him about 320 px from the edge), so the check accepts ends the free floor cannot reach.
+* **map**: leave Baker Street for the map, scroll it with the mouse at the screen edges, pick 221B or
+  Scotland Yard, dump the close-up and the arrival.
+* **inventory**: right-click empty floor, `verb Inventory`, dump, click outside to close.
+* **journal**: right-click Watson where the save has him (room 24), `verb Journal`, dump.
+
+Rooms whose survey shows talk mode after the scene jump are skipped (they ignore all input).
+`results.json` holds automatic checks per run (expected scene reached, scroll range, near-black dumps,
+script errors); `sheet-NN.jpg` shows one row per test.
+
+Result on it5 (`work/playtest/ui-findings.md`, run `work/playtest/ui-it5-r4/`): 39 of 54 runs pass.
+Map, inventory, journal frame, 16 room-to-room exits and 12 map exits render cleanly. Bugs found are
+engine-side and pack-independent: a segfault in `TattooPerson::setWalking` when a talk script walks an
+NPC with no frame (rooms 36, 33), and room 57's exit into scene 80 needing a missing `Holm57a.tlk`. The
+exits of rooms 18/68 never fire. 15 rooms open in a silent talk mode after the post-load jump.
+
+Gaps in the script language this suite works around or cannot cover:
+
+* `key` events are pushed with `pushEvent()`, whose artificial event source does not allow keymapper
+  mapping, so keys bound to engine actions (F1 journal, Tab/F3 inventory, Home/End on the map,
+  Escape to close windows) do nothing (verified: F1 and Tab left the room unchanged). An
+  `action <name>` command (or sending keys through the mapped path) would fix this.
+* `objects` lists room objects but not people, so Watson (journal) and NPCs standing on hotspots cannot
+  be located. Listing people (index >= 1000) would fix it.
+* `waitidle` does not check `menu_mode`: it returns while a talk window, a description box or a silent
+  talk state is up, and it returns before the room has finished scrolling (the suite adds
+  `waitframes 45` after walks in scrolling rooms).
+* Nothing waits for the overhead map: while it is up `go_to_scene` stays 90/100 and the main loop
+  does not run, so `waitscene`/`waitidle` never return. The suite samples it with `waitframes`.
+* There is no walk-to-scene-coordinate or scroll command; scrolling is predicted, and is off by up to
+  about 100 px in some rooms (room 7).

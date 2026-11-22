@@ -1,0 +1,27 @@
+# Delegated 2026-11-15 (Phase 1b). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/redraw_bg.py", "tools/remaster/stages/geometry.py"]
+test = "python -m unittest tests.test_remaster_maskpeople tests.test_remaster_variants tests.test_remaster_relight tests.test_remaster_textcheck"
+prompt = """
+The image model invents or moves people. Implement the `mask_people` variant (redraw_bg.variant(cfg, name)
+["mask_people"], added by an earlier task): people are removed from the input before the redraw and pasted back
+from the ESRGAN baseline afterwards. Read tools/tests/test_remaster_maskpeople.py first; do not edit it.
+
+1. tools/remaster/stages/redraw_bg.py:
+   - people_mask(cfg, scene, size=None) -> uint8 HxW mask (0/255) in original px, or resized (nearest) to
+     size=(width, height). Objects are brief.out_dir(cfg, scene)/"objects.json" ["objects"]; a person has
+     kind == "person". The silhouette layers are prepare.out_root(cfg)/f"scene_{scene:03d}"/"plate_layers.png"
+     (nonzero = some layer). For each person box [x, y, w, h]: if any layer pixel is inside the box, mask the
+     layer pixels inside the box; otherwise mask the whole box. Then dilate by 3 px (cv2.dilate, 7x7 ellipse).
+   - strip_people(text) -> keep everything up to and including the first blank line ("\\n\\n") unchanged; in the
+     rest, drop every sentence (split after . ! ?) that matches the PEOPLE regex from remaster.stages.qa (import
+     it inside the function to avoid an import cycle).
+   - run_job: when the variant has mask_people, inpaint the input at the generation size with
+     cv2.inpaint(rgb, people_mask(cfg, scene, size), 5, cv2.INPAINT_TELEA), save it as input_masked.png in the
+     job's scratch dir and send that image; the prompt is strip_people(prompt_for(...)) + " The set is empty:
+     there are no people in it." Record "mask_people": true and the masked pixel count in record.json.
+2. tools/remaster/stages/geometry.py, estimate(): when redraw_bg.variant(cfg, level)["mask_people"] is true, add
+   the people back like protected regions: OR redraw_bg.people_mask(cfg, scene) into the `protect` mask (original
+   px) before it is warped and blended (so they are relit by relight_patch like the other patches), and append
+   one region record per person object {"id", "label", "box", "pasted": True, "person": True,
+   "polygon": warp_rect_polygon(shipped, box)}.
+"""

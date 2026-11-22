@@ -1,0 +1,46 @@
+# Delegated 2026-11-19 (iteration 4). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/qa.py"]
+test = "python -m unittest tests.test_remaster_qagates tests.test_remaster_firegate tests.test_remaster_newcontent"
+timeout_s = 2400
+prompt = """
+Change two QA gates in the `qa` stage (Python, tools/remaster/stages/qa.py). Read the acceptance test
+tools/tests/test_remaster_qagates.py first: it defines every name and behaviour; do not edit it, and keep
+tools/tests/test_remaster_firegate.py and tools/tests/test_remaster_newcontent.py passing. Fixtures are
+non-square.
+
+Background: the VLM floor check (VLM_FLOOR on the redraw with walk zones tinted cyan by walk_tint) fails the
+untouched 1996 original in 18 of 23 rooms, because the game's walk zones overlap furniture. A failed floor
+check should only count when the same check passes on the original. The objects gate fails rooms where one
+vague label is not re-detected although nearly all objects are.
+
+1. Add out_root(cfg) -> cfg.work / "qa" and make job_dir use it.
+2. Add floor_gate(redraw_floor, original_floor) -> True/False/None: None when redraw_floor is None; True when
+   redraw_floor["floor"] is truthy; otherwise True only when original_floor is a dict whose "floor" is
+   False (the original fails the same check); False in every other case (original passes, or is None).
+3. Add original_floor(cfg, scene, client, polys, size) -> dict or None: the VLM floor verdict on the original.
+   The original is baseline.out_root(cfg) / f"scene_{scene:03d}" / "plate_esrgan.png" (import baseline from
+   . like the other stages), converted to RGB and resized with LANCZOS to `size` (width, height); return None
+   if that file is missing. Tint it with walk_tint(image, polys, path) and ask
+   client.chat(VLM_SYSTEM, VLM_FLOOR, images=[path], max_tokens=400), parsed with parse_json. Cache per scene
+   in out_root(cfg) / f"scene_{scene:03d}" / "floor_original.json" as {"key": ..., "floor": verdict}: key =
+   common.fingerprint(polys, list(size), client.model, VLM_FLOOR); reuse the cached verdict when the key
+   matches, otherwise ask again and overwrite. Write the tinted image next to the cache file
+   (floor_original.jpg). If the chat call raises, return None and do not cache.
+4. In vlm_review, after the redraw floor verdict is parsed into review["floor"], when its "floor" is not
+   truthy: review["floor_original"] = original_floor(cfg, scene, client, polys, result.size) wrapped in
+   try/except like the other calls (append to review["errors"] on failure). vlm_review needs the scene:
+   add a `scene` parameter and pass it from evaluate.
+5. Add objects_gate(objs, removed, min_ratio=0.85) -> (ok, tolerated_label_or_None), where objs is the dict
+   object_gates returns and removed the VLM diff's "removed" list. (True, None) when objs["objects_ok"].
+   Otherwise, when exactly one label is in objs["missing_confident"], objs["found_ratio"] is not None and
+   >= min_ratio, and that label is not reported removed, return (True, label); else (False, None). "Reported
+   removed": some word of the label, lower-cased, letters only, at least 4 letters long, occurs as a whole
+   word in some removed entry (lower-cased, str()). A label with no such word is never reported removed.
+6. In evaluate: compute the VLM removed list before the objects gate (move code as needed), then
+   gates["objects"], tolerated = objects_gate(objs, removed, cfg.threshold("qa_object_miss_ratio", 0.85))
+   (removed = [] when there is no diff); gates["order"] stays objs["order_ok"]. Replace the floor gate with
+   gates["floor"] = floor_gate(review.get("floor"), review.get("floor_original")) when "floor" in review,
+   keeping the existing None case for missing reviews. Add "objects_tolerated": tolerated and
+   "floor_original": (review.get("floor_original") or {}).get("floor") to the summary dict.
+   Update the module docstring to describe both gates.
+"""

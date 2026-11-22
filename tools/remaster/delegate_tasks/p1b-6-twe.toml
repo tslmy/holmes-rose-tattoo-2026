@@ -1,0 +1,29 @@
+# Delegated 2026-11-15 (Phase 1b). Spec and acceptance test by Opus; implementation by OpenCode.
+files = ["tools/remaster/stages/sprite_test.py"]
+test = "python -m unittest tests.test_remaster_twe tests.test_remaster_bakeoff"
+prompt = """
+The sprite test's flicker ratio misses texture crawl (coat folds and scarf stripes changing between walk frames).
+Add a temporal warp error to tools/remaster/stages/sprite_test.py. Read tools/tests/test_remaster_twe.py first;
+do not edit it.
+
+1. temporal_warp_error(frames, alphas, flow_frames=None, loop=True, fb_px=2.0, sigma=2.5) -> dict:
+   frames: list of HxWx3 uint8; alphas: list of HxW float 0..1 silhouettes; flow_frames: the frames the motion
+   is measured on (default: frames themselves; for a redraw pass the original frames, so the redraw is judged
+   against the original's motion). Pairs are (t, t+1) for consecutive frames, plus (last, first) when loop.
+   For each pair:
+   - optical flow on greyscale flow_frames with cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM):
+     backward flow b = flow(t+1 -> t) and forward flow f = flow(t -> t+1);
+   - valid pixels of frame t+1: alpha[t+1] eroded by 3 px > 0.5, and forward-backward error
+     |b(p) + f(p + b(p))| < fb_px (sample f with cv2.remap at p + b(p));
+   - warped = cv2.remap(frames[t], x + b_x, y + b_y, cv2.INTER_LINEAR) (float32);
+   - e = mean |frames[t+1] - warped| over valid pixels and channels;
+   - e_hf = the same on high-passed images (image - cv2.GaussianBlur(image, (0, 0), sigma)).
+   Return {"e": mean e, "e_hf": mean e_hf, "e_hf_max": max e_hf, "coverage": mean fraction of silhouette pixels
+   that are valid, "pairs": number of pairs}, values rounded to 3 decimals; pairs with no valid pixels are
+   skipped (if all are skipped return e/e_hf/e_hf_max None and coverage 0).
+2. In run_test(): base_twe = temporal_warp_error(base_cut, base_alpha); red_twe = temporal_warp_error(red_cut,
+   base_alpha, flow_frames=base_cut); twe_ratio = red_twe["e_hf"] / base_twe["e_hf"] (None if either is None or
+   0). Put "twe_ratio", "twe_coverage" (red_twe["coverage"]) and both dicts in the summary/record. The pass
+   condition additionally requires twe_ratio is not None and twe_ratio <= thresholds sprite_max_twe_ratio
+   (default 1.5), read like the other sprite thresholds. Update the module docstring's score list.
+"""
