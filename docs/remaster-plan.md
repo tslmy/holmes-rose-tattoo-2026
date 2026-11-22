@@ -41,8 +41,35 @@
 > - 9B L2 often adds people.
 > - Protected patches need colour matching.
 > - The L2 warp handles kept compositions but not recompositions.
->
-> Phase 2 batches have not started.
+
+> **Status, 2026-11-21: Phase 2 (backgrounds) mostly done; parts of 3, 5
+> and 6 started** (details: `docs/bakeoff-results.md`, Phase 1b, 1c and
+> Iterations 1-6). After Phase 1 the user asked for "a full iteration of our
+> pipeline" to a playable game (2026-11-16), so Phase 2 ran as six
+> whole-game iterations instead of batches after a confirmed pick.
+> - **Backgrounds:** FLUX.2 klein 9B, L2 edit of a people-free,
+>   static-only plate. Up to 8 seeds per room, people cleanup, and a repair
+>   edit for near-misses. QA gates: warp, objects, order, obstacles, vlm,
+>   floor, text and story-fire. The floor gate is judged relative to the
+>   original. Light is score-only. **57 of 80 rooms are redrawn**; the
+>   rest keep the ESRGAN baseline. Five haze rooms (7, 8, 18, 53, 68) are
+>   forced to the baseline until Phase 4 renders haze in true colour.
+> - **Assembly:** static and animated room objects (ambience) and all 767
+>   cAnims are re-based onto the redrawn rooms. cAnim figures, characters
+>   and NPCs are still upscaled 1996 art, by design until Phase 3/5.
+> - **Playable pack:** `generated/playable-overrides-2x-remaster-it6`; all
+>   80 scenes load. No engine change: redraws are warped back onto the
+>   original layout.
+> - **Dropped:** L0/L1 image-to-image (no strength keeps geometry while
+>   still changing the picture) and ControlNet (kept the layout, but flat
+>   and not photoreal).
+> - **Phase 6 groundwork:** a headless scripted-input and frame-dump hook in
+>   the engine (fork branch `claude/sherlock-playtest-input`), a cAnim
+>   play-test suite (38 cAnims checked in game) and a UI play-test (exits,
+>   map, inventory, journal, scrolling), branch `claude/playtest-ui`.
+>   Findings: `work/playtest/ui-findings.md`.
+> - **Not started:** sprite casting and redraws (Phase 3); engine warp,
+>   haze, fonts and 4x (Phase 4); interpolation (Phase 5).
 
 Written 2026-11-14. This supersedes the "what's next" notes scattered across
 the other docs. It is a plan, not a record of work done.
@@ -236,6 +263,33 @@ Record time per image and gate results. Produce one HTML contact sheet.
 gate scores and queued for your confirmation. Later phases start on them.
 
 **Phase 2 - Backgrounds.** All 80 plates, QA loop, human pass on the sheet.
+Also owns re-basing room objects, ambience and cAnim frames onto the
+redrawn rooms (the assemble stage), and backgrounds outside rooms (the map,
+close-ups). It runs as whole-game iterations, each ending in a playable pack.
+*Done when* all of these hold:
+- every room has either a QA-passing redraw or a recorded reason for its
+  baseline. The reason is one of: a haze room (handed to Phase 4); still
+  failing after 8 seeds plus a repair round; or failing only a gate that
+  the calibration showed misjudges the original;
+- iterating stops paying: stop when a whole round (new seeds, repair or a
+  calibration) adds fewer than 2 rooms. Recalibrating a gate only counts
+  if the original passes it, and the newly passing rooms are checked by
+  eye;
+- the in-game old-art leftovers that the play-tests found are fixed or
+  assigned to a phase: objects from other story states (`01WLLCVR`), the
+  room 44 fan box, the room 81 red tint, and the map, which is still a
+  plain upscale;
+- the human pass on the sheet is queued in `review/queue.md`. It never
+  blocks Phase 3 or 4.
+
+**Ownership after 2026-11-21:**
+- Phase 2 stays with the session that ran Phases 1 and 2, until it is done.
+- Phase 3 (sprites) and Phase 4 (engine) each get their own session. Phase
+  4 now also owns the engine bugs the play-tests found: the NPC-walk
+  null-frame crash in rooms 33 and 36, the `Holm57a.tlk` hang on room 57's
+  exit, and the "To the City" exit in rooms 18 and 68.
+- Phase 6 keeps the play-test tooling and grows it into the natural-entry
+  playthrough.
 
 **Phase 3 - Sprites.** Begins with a research task for local agents: survey
 sprite-sheet / character-animation LoRAs and pose-conditioned models, and
@@ -310,3 +364,10 @@ it (`ollama stop qwen3.5-9b-32k`) before any local diffusion.
    tried. Deleting any of them only if space runs short, via the review queue.
 5. Attendance is minimal: approvals are queued and never block parallel work.
 6. Local LLM choice is open (LM Studio or Ollama).
+7. First reach a playable game, then improve it: whole-game iterations
+   come before per-phase sign-off (2026-11-16).
+8. New lighting in a redraw (lamps, fires in fireplaces, lit windows) is
+   allowed. Story-changing fire and new obstacles on walk zones are not
+   (2026-11-15).
+9. Backgrounds use the L2 edit only. L0/L1 image-to-image is dropped
+   (Phase 1b).
