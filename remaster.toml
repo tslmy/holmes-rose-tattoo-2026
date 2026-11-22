@@ -149,6 +149,9 @@ sprite_min_pose_iou = 0.7
 # Upscaled cAnim frames (2x RGBA, October iteration-1 pilot; read-only): figure pixels of each cutscene
 # animation frame come from here when the file matches the frame's 2x size, background pixels from the room.
 canim_upscaled = "enhanced/canimations-remaster-20261031"
+# QA-passing redraws rejected by eye ("scene/backend/level"); the room falls back to the next candidate
+# or the baseline. 92 s41: invents a large lit brass lamp over the right margin, pasted patch at the magnifier.
+rejected = ["92/remote-flux2-klein-9b/L2-clean-s41"]
 
 [golden]
 # About six scenes (plus 36, added by decision #5): street, interior, haze room, a clue with writing,

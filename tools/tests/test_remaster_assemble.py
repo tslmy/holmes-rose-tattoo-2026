@@ -114,6 +114,19 @@ class PickTest(unittest.TestCase):
             with mock.patch.object(bakeoff, "change_from_original", return_value=5.0):
                 self.assertEqual(assemble.pick_room(cfg, 12)["source"], "baseline")
 
+    def test_pick_skips_redraws_rejected_by_eye(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_cfg(tmp)
+            write_room(cfg, 12, "web", "L2-fix-s47", passed=True, score=0.80)
+            write_room(cfg, 12, "web", "L2-fix-s19", passed=True, score=0.90)
+            cfg.raw.setdefault("assemble", {})["rejected"] = ["12/web/L2-fix-s19", "13/web/L2-fix-s47"]
+            with mock.patch.object(bakeoff, "change_from_original", return_value=40.0):
+                pick = assemble.pick_room(cfg, 12)
+            self.assertEqual((pick["source"], pick["level"]), ("redraw", "L2-fix-s47"))
+            cfg.raw["assemble"]["rejected"].append("12/web/L2-fix-s47")
+            with mock.patch.object(bakeoff, "change_from_original", return_value=40.0):
+                self.assertEqual(assemble.pick_room(cfg, 12)["source"], "baseline")
+
     def test_pick_falls_back_to_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = make_cfg(tmp)

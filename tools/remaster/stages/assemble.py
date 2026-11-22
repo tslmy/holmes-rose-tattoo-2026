@@ -66,9 +66,13 @@ def pick_room(cfg: Config, scene: int) -> dict:
         return {"scene": scene, "source": "baseline", "backend": None, "level": None, "score": None,
                 "why": "haze room: the engine shows native 1996 pixels under the haze; keep the ESRGAN baseline"}
     min_change = cfg.threshold("bakeoff_min_change", 20.0)
+    # redraws a human rejected by eye after QA passed them: "scene/backend/level"
+    rejected = set(cfg.section("assemble").get("rejected") or [])
     candidates = []
     for backend in redraw_bg.backends(cfg):
         for level in redraw_bg.levels(cfg):
+            if f"{scene}/{backend}/{level}" in rejected:
+                continue
             summary = _read(qa.job_dir(cfg, scene, backend, level) / "qa.json").get("summary", {})
             if not (summary.get("status") == "ok" and summary.get("pass")):
                 continue
