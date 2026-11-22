@@ -1,5 +1,37 @@
 # Phase 1 bake-off results
 
+## Iteration 7: objects-gate calibration (2026-11-21)
+
+- **Calibration** (`qa.partial_match`): a redraw detection that misses the IoU 0.3 match still finds the
+  object when its centre lies inside the expected box grown by 25 %, within half a box length of the
+  expected centre, at 0.15-2.5x its area. Of 924 unmatched detections across all QA records it accepts
+  189; a spot check of 12 found 11 right (the wrong one: room 44's "Strong Room Door" matched the
+  curtain).
+- **The original must pass the gate it is judged by** (rule from the plan, 2026-11-21). The detector ran
+  on the ESRGAN plate of each of the 20 baseline rooms as if it were a redraw
+  (`work/qa-calib/orig_objects.json`):
+  - passes before and after: 4, 5, 25, 39, 61, 71, 81, 91, 92;
+  - passes only after calibration: 24, 29 (the old gate misjudged the original);
+  - fails both: 2, 16, 20, 21, 22, 33, 36, 41, 54. The detector misses objects such as a lamp, a mail slot
+    or a waste bottle in the 1996 room itself, so the objects gate cannot judge these rooms.
+  - QA now computes this per room (`qa.original_objects`, cached in `work/qa/scene_NNN/objects_original.json`)
+    and only honours partial matches where the original passes.
+- **Result after re-running QA on the 20 rooms: 2 more rooms (29, 61): 59 of 80 redrawn.**
+  - Room 2 passed on a partial "Lamp" match, but its original fails the gate, so it stays on the baseline.
+  - Room 92's only qualifying redraw (`L2-clean-s41`) passed QA but fails by eye: it invents a large lit
+    brass lamp over the right margin and shows a pasted patch at the magnifier. It is rejected through the
+    new `[assemble] rejected` list. The faithful seeds (s53, repair) pass QA with a change of 19.2, just
+    under `bakeoff_min_change` (20), so the room keeps the baseline.
+  - Rooms 29 (park) and 61 (drawing room) checked by eye against the 1996 art: composition, objects and
+    exits kept (`work/assemble/calib-it6-new-rooms.jpg`).
+- **Play-test engine bugs** from iteration 6 (rooms 33/36 crash, room 57 hang, rooms 18/68 "To the City")
+  turned out to be side effects of the play-test's post-load scene jump, not engine bugs (Linear LMY-24 to
+  LMY-26; the hook fix is LMY-52, Phase 4).
+- In game (`work/playtest/it7/ingame-29-61.jpg`): room 61 is clean. Room 29 shows old-art layers over the
+  redraw: a dark railing across the middle and the swaying foreground bushes (animated room objects still on
+  the upscaled 1996 frames).
+- Pack `generated/playable-overrides-2x-remaster-it7`: all 80 scenes load.
+
 ## Iteration 6: repair pass for near-miss rooms, UI play-test (2026-11-21)
 
 - **The 20 rooms still on the baseline are near-misses:** each one's best of eight seeds fails one QA gate
