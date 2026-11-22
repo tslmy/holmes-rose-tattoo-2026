@@ -83,10 +83,12 @@ Baseline and candidate scene-summary sets must match and their current JSON
 contents must agree. Source scene summaries are cross-checked when a matching
 enhanced summary exists; a source-only summary is allowed and its scene ID and
 recognized room-list/count fields are checked against source manifests when
-available. The known source-root VGS `manifest.json` is accepted only when its
-variant paths, identities, archives and counts match the complete resource set;
-other unexplained files are rejected. The audit did **not** fingerprint scene
-summaries or that root manifest, so these checks compare their current state,
+available. Known source-root VGS, palette-walk and room-extraction manifests
+are checked against their current resource sets, identities and counts. Palette
+projections must partition the listed scenes for each resource identity; room
+root entries must match the corresponding scene summaries. Unknown root formats
+and unexplained files are rejected. The audit did **not** fingerprint scene
+summaries or the root manifest, so these checks compare their current state,
 not their state when the audit ran.
 
 ## Trust and runtime limitations
