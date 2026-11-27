@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code archive: what each removed script did, and where to get it back</title>
+<meta name="description" content="Code archive: what each removed script did, and where to get it back: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html" aria-current="page">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Code archive: what each removed script did, and where to get it back</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/code-archive.md"><code>docs/code-archive.md</code></a>, a working record of the project.</p><p>On 2026-11-22, after Phase 2 closed, the scripts in <code>tools/</code> were checked against the current pipeline
+(Linear LMY-57). This is the code counterpart of <a href="pack-archive.html"><code>pack-archive.md</code></a>, which covers the
+art packs these scripts produced. A script was removed only when nothing used it: not the <code>remaster</code> CLI
+(<code>tools/remaster/</code>), not <code>remaster.toml</code>, not a test under <code>tools/tests/</code>, not another kept script, and no
+tree we still keep needs it to be rebuilt. All the removed scripts come from the August 2026
+ChatGPT/Codex effort.</p>
+<p>Every removed file is still in <code>origin/main</code> at <code>3426470</code> (the last commit before the removal). The
+&quot;Last change&quot; column is the last commit that edited the file. To restore one:</p>
+<pre><code class="language-sh">git show 3426470:tools/flux_redraw_rosetattoo_backgrounds.py &gt; tools/flux_redraw_rosetattoo_backgrounds.py
+</code></pre>
+<h2 id="removed">Removed</h2>
+<table>
+<thead>
+<tr>
+<th>Script</th>
+<th style="text-align:right">Lines</th>
+<th>Last change</th>
+<th>What it did</th>
+<th>Method / pack</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tools/flux_redraw_rosetattoo_backgrounds.py</code></td>
+<td style="text-align:right">578</td>
+<td><code>e2b9c93</code></td>
+<td>FLUX.1-schnell img2img redraw of the room backgrounds, run in-process through <code>diffusers</code> on <code>mps</code>, with an optional hard resource/edge geometry lock. Wrote a contact sheet and a ScummVM override tree. Setup in <a href="flux-setup.html"><code>flux-setup.md</code></a> (now marked archived).</td>
+<td><code>generated/flux-geometry-locked</code>, <code>mods/flux-geometry-locked</code> (pruned, samples kept). Replaced by FLUX.2 klein through mflux and the <code>redraw-bg</code> stage.</td>
+</tr>
+<tr>
+<td><code>tools/img2img/flux.py</code></td>
+<td style="text-align:right">5</td>
+<td><code>2ccf758</code></td>
+<td>Wrapper that ran the FLUX.1 script above.</td>
+<td>Same.</td>
+</tr>
+<tr>
+<td><code>tools/openai_image_rosetattoo_pass.py</code></td>
+<td style="text-align:right">144</td>
+<td><code>399cdeb</code></td>
+<td>Optional paid GPT Image edit pass over every background, using <code>protect_mask.png</code> as the edit mask, with request hashes in a manifest.</td>
+<td><code>generated/openai-image-pass</code> holds only one scene's edit mask, so it never ran through. No pack was made from it; Phase 1 did not use it.</td>
+</tr>
+<tr>
+<td><code>tools/img2img/gpt_image.py</code></td>
+<td style="text-align:right">5</td>
+<td><code>2ccf758</code></td>
+<td>Wrapper that ran the GPT Image script above.</td>
+<td>Same.</td>
+</tr>
+<tr>
+<td><code>tools/generate_rosetattoo_candidates.py</code></td>
+<td style="text-align:right">500</td>
+<td><code>b1f0d9d</code></td>
+<td>Built per-scene review sheets of background enhancement candidates (resamplers and filters), each with its own override tree and optional live ScummVM captures.</td>
+<td>August Lanczos/filter candidates (<code>generated/candidates</code>). Replaced by <code>remaster review</code>.</td>
+</tr>
+<tr>
+<td><code>tools/build_variant_contact_sheet.py</code></td>
+<td style="text-align:right">226</td>
+<td><code>9a50bd4</code></td>
+<td>Contact sheet comparing the same scenes across the <code>mods/</code> variant packs, plus the original.</td>
+<td>The August <code>mods/*</code> packs, all pruned (see <code>pack-archive.md</code>).</td>
+</tr>
+<tr>
+<td><code>tools/build_playable_rosetattoo_hires.py</code></td>
+<td style="text-align:right">226</td>
+<td><code>b1f0d9d</code></td>
+<td>One-shot pack builder: extract if needed, Lanczos-upscale every background, write <code>mods/hires-backgrounds</code> with an RGBA32 launch manifest, optionally validate.</td>
+<td>The first playable packs (<code>mods/hires-backgrounds</code>). Replaced by <code>assemble_rosetattoo_playable_pack.py</code> and then <code>build_remaster_pack.py</code>.</td>
+</tr>
+<tr>
+<td><code>tools/batch_validate_rosetattoo.py</code></td>
+<td style="text-align:right">248</td>
+<td><code>dd68b32</code></td>
+<td>Captured several scenes through <code>run_rosetattoo_validation.py</code> and built a contact sheet plus <code>report.json</code>. Only <code>build_playable_rosetattoo_hires.py</code> called it.</td>
+<td>August validation of the hires packs. Replaced by <code>tools/smoke_rosetattoo_scenes.py</code> (scene-start smoke) and the play-test suites.</td>
+</tr>
+<tr>
+<td><code>tools/compose_character_sheet_redraws.py</code></td>
+<td style="text-align:right">143</td>
+<td><code>3d40fe8</code></td>
+<td>Composited a generated ten-pose character sheet onto each walk frame's opaque box (&quot;lifelike&quot; sprites).</td>
+<td><code>enhanced/sprites-lifelike*</code> and the v2-v5 playable packs (pruned, samples kept). Rejected: a pose sheet cannot stand in for each motion frame, so poses snap and identity drifts.</td>
+</tr>
+</tbody>
+</table>
+<p>9 files, 2,075 lines. The docs that ran these scripts (<code>tools/README.md</code>, <code>reproducing.md</code>,
+<code>flux-setup.md</code>, <code>.github/copilot-instructions.md</code>) now point here instead.</p>
+<h2 id="kept-and-why">Kept, and why</h2>
+<p>Used by the pipeline or its tests:</p>
+<ul>
+<li>Extractors driven by the <code>extract</code> stage: <code>extract_rosetattoo_assets.py</code>, <code>extract_rosetattoo_sprites.py</code>,
+<code>extract_rosetattoo_room_sprites.py</code>, <code>extract_rosetattoo_canimations.py</code>, and the extraction audit
+<code>audit_rosetattoo_extraction.py</code>.</li>
+<li><code>upscale_rosetattoo_sprites.py</code> (ESRGAN; <code>baseline</code> stage, <code>remaster.toml</code>) and <code>smoke_rosetattoo_scenes.py</code>
+(smoke stage).</li>
+<li><code>build_remaster_pack.py</code> (builds the playable pack; tested), which calls
+<code>assemble_rosetattoo_playable_pack.py</code>, and <code>redraw_rosetattoo_map.py</code> (the redrawn map, <code>--map</code>).</li>
+<li><code>sprite_metadata.py</code>: shared helper imported by the sprite scripts and tests.</li>
+<li><code>tools/opencode/</code>: used by <code>remaster delegate</code>.</li>
+</ul>
+<p>Needed to rebuild trees we keep, or tested, or referred to by current docs:</p>
+<ul>
+<li>The October sprite work that made the kept <code>enhanced/*-remaster-20261031</code> baselines and the contour
+trees: <code>temporal_upscale_rosetattoo_sprites.py</code> (<code>enhanced/sprites-temporal</code>, which every pack ships),
+<code>prepare_rosetattoo_shared_sprites.py</code>, <code>extract_rosetattoo_palette_walks.py</code>,
+<code>extract_rosetattoo_vgs_variants.py</code>, <code>refine_rosetattoo_sprite_alpha.py</code>, and their audits
+<code>audit_rosetattoo_palette_walks.py</code>, <code>audit_rosetattoo_sprite_contours.py</code>, <code>audit_rosetattoo_pack.py</code>,
+<code>validate_rosetattoo_contour_plan.py</code>, <code>assemble_rosetattoo_modernized.py</code>. Each has a test; Phase 3
+compares against these baselines.</li>
+<li><code>upscale_rosetattoo_backgrounds.py</code>: made <code>enhanced/esrgan-hires-backgrounds</code> (kept; <code>--method external</code>).</li>
+<li><code>prepare_animation_redraw.py</code>: made <code>generated/animation-redraws</code>, which <code>build_remaster_pack.py</code> still
+passes to every pack.</li>
+<li><code>playtest_rosetattoo.py</code>, <code>playtest_ui_suite.py</code>, <code>playtest_canim_suite.py</code>, <code>tools/playtest_scripts/</code>:
+the Phase 6 play-test tooling (<code>playtest-input-script.md</code>).</li>
+<li><code>run_rosetattoo_validation.py</code>: the ScummVM launcher (tested; root README).</li>
+<li><code>polish_rosetattoo_prompts.py</code> and <code>profiles/neural/prompt-briefs/</code>: the prompt briefs, read by
+<code>tools/img2img/common.py</code>; <code>local-models.md</code> documents the current invocation.</li>
+<li><code>generate_rosetattoo_state_masks.py</code>: story-flag masks mirroring the engine's object rule. Unused now,
+but kept because the Phase 3/4 story-state work (objects from other states, <code>01WLLCVR</code>) may need it.</li>
+<li><code>tools/img2img/</code> (<code>common.py</code>, <code>sdxl_controlnet.py</code>, <code>z_image*.py</code>, <code>download_zimage_cuda_models.py</code>):
+not used by the pipeline, but <code>common.py</code>, <code>sdxl_controlnet.py</code> and <code>z_image_controlnet_cuda.py</code> had
+uncommitted edits from another session on 2026-11-22, so they were left alone. Candidates for the next
+prune once that work lands or is dropped.</li>
+<li><code>thor-package/</code>: a Flatpak ScummVM launcher and <code>.desktop</code> entry for a Linux machine (stock ScummVM,
+no overrides). Not part of the pipeline, but 24 lines and the only record of that setup.</li>
+</ul>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

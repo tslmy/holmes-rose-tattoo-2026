@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase 3: Sprites</title>
+<meta name="description" content="Phase 3: Sprites: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html" aria-current="page">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Phase 3: Sprites</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/phase3-sprites.md"><code>docs/phase3-sprites.md</code></a>, a working record of the project.</p><p>Results and decisions for Phase 3 (Linear milestone &quot;Phase 3: Sprites&quot;). The plan is the Linear document
+&quot;Remaster plan&quot;; this file holds the numbers. Earlier sprite work: <code>bakeoff-results.md</code> (&quot;Sprite test&quot;,
+Phase 1b item 8), <code>pack-archive.md</code> (August <code>sprites-lifelike*</code>, October SR/contour trees), and the research
+notes <code>sprite-consistency-research.md</code> and <code>face-detail-research.md</code> in the coordinator's session notes.</p>
+<h2 id="starting-point-2026-11-22">Starting point (2026-11-22)</h2>
+<ul>
+<li><strong>Pack:</strong> <code>generated/playable-overrides-2x-remaster-it9</code> (Phase 2, 65 of 80 rooms redrawn). Shared and walk
+sprites come from <code>enhanced/sprites-temporal</code> (184 resources, one palette projection each); room objects
+and cAnims from <code>work/assemble/backgrounds</code> (37,493 frames under <code>sprites/scene_NNN/</code>).</li>
+<li><strong>Characters</strong> are the de-dithered SR sprites (LMY-42, provisional default <code>sr-baseline</code>).</li>
+<li><strong>Phase 1 sprite test</strong> (Holmes and Watson, frames 24-31, cast sheet passed in <code>images</code>): pose IoU
+0.90-0.93, identity steady by eye, but texture crawl (temporal warp error, high-pass) is 2.8-3.2x the SR
+floor (Phase 1b measured 3.3-4.0 with the loop pair), against a gate of 1.5.</li>
+</ul>
+<h2 id="walk-data">Walk data</h2>
+<p>Each hero has a <code>.SEQ</code> file in <code>walk.lib</code> (parsed by <code>WalkSequence::load</code>: 9-byte VGS name, flip byte,
+uint16 length, 4 skipped bytes, then frame bytes; 1-based frames, <code>196</code> means &quot;range from the previous
+number to the next&quot;, <code>0</code> ends a run, <code>129</code>/<code>130</code> are control codes). <code>SVGAWALK.SEQ</code> and <code>WATSON.SEQ</code> have the
+same layout, 28 sequences:</p>
+<table>
+<thead>
+<tr>
+<th>Sequences</th>
+<th>Frames (0-based)</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0-4</td>
+<td>0-11, 12-23, 24-35, 36-47, 48-59</td>
+<td>five walk loops of 12 frames; 5-7 are 3-1 mirrored</td>
+</tr>
+<tr>
+<td>8-12</td>
+<td>60-66, 67-73, 74-80, 81-87, 88-94</td>
+<td>five stop runs (6 frames + a held stand frame); 13-15 mirrored</td>
+</tr>
+<tr>
+<td>16-27</td>
+<td>other resources (<code>TUPRIGHT</code>, <code>TRIGHT</code>, <code>TDOWNRG</code>; Watson <code>TW*</code>)</td>
+<td>turns and talk poses</td>
+</tr>
+</tbody>
+</table>
+<p>So each hero needs 95 frames redrawn in <code>SVGAWALK</code>/<code>WATSON</code> (10 cycles), plus the turn/talk resources. The
+Phase 1 frames 24-31 are two-thirds of walk loop 2 (24-35), which loops 35 -&gt; 24 in game.</p>
+<h2 id="research-lmy-21">Research (LMY-21)</h2>
+<p>What exists, and whether it fits a 1996 walk cycle redrawn photoreal at ~370 px tall, frame by frame:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Examples</th>
+<th>Runs where</th>
+<th>Fit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Identity-conditioned edit (current)</td>
+<td>FLUX.2 klein 4B/9B with <code>images</code> = [frame, cast]</td>
+<td>image server (mflux)</td>
+<td>Pose and identity hold; texture crawls 3x floor. The base route.</td>
+</tr>
+<tr>
+<td>Joint/grid generation</td>
+<td>4x2 sheet of frames in one edit; <a href="https://huggingface.co/smgll/CharacterSheet">CharacterSheet</a> (klein 9B, 3-4 views)</td>
+<td>server</td>
+<td>Steadier identity, worse pose; no temporal gain measured (research note).</td>
+</tr>
+<tr>
+<td>Sprite-sheet LoRAs</td>
+<td><a href="https://huggingface.co/Baragi-AI/LPC-FourDirection-Walk-Flux-Klein-9B">LPC four-direction walk, klein 9B base</a> (propagates one dressed frame to 7, rank 16, little data), <a href="https://huggingface.co/Mystic07/flux-lora-spritesheet">Mystic07 sprite sheet</a>, <a href="https://huggingface.co/svntax-dev/pixel_spritesheet_4walk_small_lora_v1">pixel 4-walk klein 4B base</a>, <a href="https://huggingface.co/xocialize/spritesheet-FLUX.2-klein-4B-lora">2x2 object angles klein 4B</a></td>
+<td>needs a LoRA field on the server; mflux loads LoRAs</td>
+<td>All pixel-art/LPC, trained on the base (not distilled) models, at 512-1024 sheet sizes. None is photoreal. The LPC &quot;propagate one frame's appearance to the others&quot; task is the right idea; it would need our own training data.</td>
+</tr>
+<tr>
+<td>Pose transfer on an edit model</td>
+<td><a href="https://huggingface.co/Qwen/Qwen-Image-Edit-2511">Qwen-Image-Edit-2511</a> (better identity preservation) + <a href="https://huggingface.co/lilylilith/AnyPose">AnyPose</a> LoRA (pose from a reference image)</td>
+<td>mflux has Qwen edit (<code>mlx-community/qwen-image-edit-2511-8bit</code>); not on the server</td>
+<td>Our pose already comes from the frame itself, so a pose LoRA adds little. 2511 is a candidate backend for identity; ~20 GB at 8 bit.</td>
+</tr>
+<tr>
+<td>Video character animation</td>
+<td><a href="https://huggingface.co/Wan-AI/Wan2.2-Animate-14B">Wan2.2-Animate-14B</a> (Apache-2.0): reference image + driving video -&gt; animated character; LTX-2 IC-LoRA; Wan VACE</td>
+<td>CUDA only; no MLX port found (<a href="https://github.com/Blaizzy/mlx-video">mlx-video</a> has no V2V/pose control)</td>
+<td>Conceptually the best fit (cast sheet as reference, the original cycle as driving video, cloth carried through time), but 10 fps big-step walk cycles are off its training distribution and no host here can run it. Deferred until a CUDA host exists.</td>
+</tr>
+<tr>
+<td>Per-character LoRA</td>
+<td>klein 4B base, <code>mflux-train</code> (Apple Silicon)</td>
+<td>this Mac or server, hours per character</td>
+<td>Fixes costume identity, not crawl. After a consistent pipeline exists, to train on its output.</td>
+</tr>
+<tr>
+<td>Flow propagation (EbSynth-style)</td>
+<td>keyframes + optical flow on the originals</td>
+<td>CPU on this Mac</td>
+<td>Tested below.</td>
+</tr>
+</tbody>
+</table>
+<p>Licences: klein 4B Apache-2.0 (preferred); klein 9B and FLUX 3 Klein non-commercial; Wan 2.2 Apache-2.0;
+Qwen-Image-Edit Apache-2.0. LoRA licences vary per author (check before use).</p>
+<h2 id="bake-off-pilot-keyframe--flow-propagation-cpu-0-server-images">Bake-off pilot: keyframe + flow propagation (CPU, 0 server images)</h2>
+<p>On the existing Phase 1 redraws of frames 24-31, keys 24/26/28/30, flow (OpenCV DIS) on the de-dithered
+inputs, a confidence mask from the photometric residual of the warped input and forward-backward
+consistency, nearest key wins, low frequencies from the frame's own redraw. A throwaway reference
+implementation written to check the acceptance test (<code>tools/tests/test_remaster_propagate.py</code>); the real
+module is delegated (<code>p3-1-propagate</code>). Ratio = high-pass temporal warp error / SR floor, no loop pair:</p>
+<table>
+<thead>
+<tr>
+<th>Character, backend</th>
+<th style="text-align:right">independent</th>
+<th style="text-align:right">propagated (tol 12, fb 1.5)</th>
+<th style="text-align:right">coverage</th>
+<th style="text-align:right">propagated (tol 40, fb 8)</th>
+<th style="text-align:right">coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Holmes 4B</td>
+<td style="text-align:right">3.19</td>
+<td style="text-align:right">2.81</td>
+<td style="text-align:right">0.08</td>
+<td style="text-align:right">1.71</td>
+<td style="text-align:right">0.64</td>
+</tr>
+<tr>
+<td>Holmes 9B</td>
+<td style="text-align:right">2.84</td>
+<td style="text-align:right">2.50</td>
+<td style="text-align:right">0.08</td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>Watson 4B</td>
+<td style="text-align:right">3.00</td>
+<td style="text-align:right">2.43</td>
+<td style="text-align:right">0.17</td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+<tr>
+<td>Watson 9B</td>
+<td style="text-align:right">2.99</td>
+<td style="text-align:right">2.52</td>
+<td style="text-align:right">0.18</td>
+<td style="text-align:right"></td>
+<td style="text-align:right"></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>With the strict mask only 8-20% of in-between pixels are propagated (legs and coat edges fail the flow
+check), so crawl drops only ~15%.</li>
+<li>With every pixel propagated, the ratio is still 1.72, and the in-betweens tear (broken coat edges where
+the flow is wrong). The floor is not reachable this way because <strong>the keys themselves differ</strong>: each
+in-between matches its source key but jumps to the next key.</li>
+<li>Sharpness is kept (0.96-0.99 of the independent redraw).</li>
+</ul>
+<p><strong>Conclusion:</strong> propagation is a building block, not the answer. The keys must be consistent with each
+other. Next candidates (need the server, so they wait for disk):</p>
+<ol>
+<li><strong>Chained edit:</strong> redraw frame t with <code>images</code> = [original frame t, the previous redraw warped onto t,
+cast sheet], prompt to keep the fabric and folds of the second image. Walk the loop in order; close the
+loop by also checking 35 -&gt; 24.</li>
+<li><strong>Warped prior + low strength:</strong> img2img (<code>strength</code> ~0.45, the server field exists) on the warped
+previous redraw, so the model only repairs disocclusions.</li>
+<li><strong>Propagation + low-strength cleanup</strong> of the in-betweens.</li>
+<li><strong>Grid sheet</strong> of a whole loop with a cast cell (research note: identity steadier, pose worse).</li>
+</ol>
+<p>Each is scored on full 12-frame loops with the loop pair, pose IoU, sharpness and identity drift.</p>
+<h2 id="contour-folders-lmy-56">Contour folders (LMY-56)</h2>
+<p><code>mods/rosetattoo-contour-candidate-20261031</code> and <code>enhanced/*-contour-staging-20261031</code> are <strong>not needed by
+Phase 3</strong>. Nothing reads them (no tool, config or engine path); Phase 3 cuts alpha from the redrawn art; the
+sprite fallback is the SR baseline (<code>enhanced/sprites</code>, <code>enhanced/sprites-temporal</code>, the kept
+<code>*-remaster-20261031</code> trees), and the staging trees are a deterministic alpha-only pass over those
+(<code>refine_rosetattoo_sprite_alpha.py --method scale4-box --radius 0.35 --thin-guard --preserve-support</code>), so
+they can be rebuilt. Keep <code>palette-walk-remaster-20261031</code> and the other <code>*-remaster-20261031</code> baselines.</p>
+<h2 id="disk">Disk</h2>
+<p>2026-11-22 16:00: 8.4 GB free; the runner's floor is 15 GB, so no runner job (delegate included) starts
+until the Time Machine local snapshot is deleted (LMY-56).</p>
+<h2 id="static-cut-outs-audit-lmy-58">Static cut-outs audit (LMY-58)</h2>
+<p>Phase 2's assemble stage already cuts room objects out of the redrawn plate (<code>room_sprites</code>) and re-bases
+background-like animated objects and every cAnim's background (<code>ambience_sprites</code>, <code>canim_sprites</code>). Room
+image resources per category, from <code>work/extract/room-sprites/*/metadata.json</code> against the override
+directories in <code>work/assemble/backgrounds/scene_NNN/</code> (2026-11-22):</p>
+<table>
+<thead>
+<tr>
+<th>Rooms</th>
+<th>Override written</th>
+<th style="text-align:right">1 frame</th>
+<th style="text-align:right">2-8 frames</th>
+<th style="text-align:right">9+ frames</th>
+<th style="text-align:right">Frames</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>redrawn (65)</td>
+<td>yes</td>
+<td style="text-align:right">590</td>
+<td style="text-align:right">182</td>
+<td style="text-align:right">47</td>
+<td style="text-align:right">3,095</td>
+</tr>
+<tr>
+<td>redrawn (65)</td>
+<td><strong>no (1996 art)</strong></td>
+<td style="text-align:right"><strong>376</strong></td>
+<td style="text-align:right"><strong>71</strong></td>
+<td style="text-align:right"><strong>425</strong></td>
+<td style="text-align:right"><strong>22,495</strong></td>
+</tr>
+<tr>
+<td>baseline (15)</td>
+<td>yes</td>
+<td style="text-align:right">149</td>
+<td style="text-align:right">30</td>
+<td style="text-align:right">42</td>
+<td style="text-align:right">1,209</td>
+</tr>
+<tr>
+<td>baseline (15)</td>
+<td>no</td>
+<td style="text-align:right">109</td>
+<td style="text-align:right">19</td>
+<td style="text-align:right">135</td>
+<td style="text-align:right">5,898</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>The 425 long resources in redrawn rooms are character animations (<code>01VPITCH</code>, <code>06COP</code>, <code>13NURSE</code>,
+<code>13MATRON</code>, ...): people, plus a few animals (<code>01PIGEON</code>, <code>01CAT1</code>). They go to the NPC task (LMY-60),
+with the same route as the heroes.</li>
+<li>The 447 one- to eight-frame resources are props of other story states (papers, notes, a sword, open
+doors, bodies) that are cut-out sprites rather than patches of the room, so Phase 2 kept them as old art.
+They need a prop redraw: a single edit per frame on grey, conditioned on the room's redraw for light and
+material, alpha cut from the original mask. Tracked as a follow-up of LMY-58. Bodies (<code>15FDEAD</code>,
+<code>15MDEAD</code>) are people and go with the NPCs.</li>
+<li>Full list (scene, resource directory, name, frame count): <code>work/phase3/cutout-audit.txt</code> (not tracked).</li>
+</ul>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

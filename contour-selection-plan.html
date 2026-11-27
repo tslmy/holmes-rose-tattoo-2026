@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contour selection-plan validation</title>
+<meta name="description" content="Contour selection-plan validation: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html" aria-current="page">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Contour selection-plan validation</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/contour-selection-plan.md"><code>docs/contour-selection-plan.md</code></a>, a working record of the project.</p><p><code>tools/validate_rosetattoo_contour_plan.py</code> is a standalone Python 3.10+
+standard-library validator. It reads a <strong>trusted</strong>, completed, source-backed
+contour audit and the three current trees; it does not copy, modify or select
+assets in a pack. Its output is a plan for a separate, later assembler.</p>
+<h2 id="decision-policy">Decision policy</h2>
+<ul>
+<li>Empty frame issue lists and the expected <code>threshold_128_crossing</code> are allowed.</li>
+<li>If any frame's <code>threshold_128_topology_changed</code> is present and consistent
+with its reported counts, the <strong>entire resource</strong> is listed for baseline
+fallback. Other frames of that sequence are not switched independently.</li>
+<li>Any other frame or resource issue, global error, nonzero RGB/support change,
+missing frame, unverified source, missing hash or inconsistency is a hard
+failure; no plan is produced.</li>
+</ul>
+<p>The candidate must declare 2x <code>native-alpha-scale4-box</code> refinement with
+<code>preserve_support: true</code>; a baseline that already declares alpha refinement is
+rejected. The known <code>preserve-font-alpha</code>/<code>lanczos-alpha</code> exception is accepted
+only with its no-op settings and unchanged reported opacity and threshold
+metrics. This accommodates the bitmap-font resources in the existing tree.
+The audit itself still determines the pixel and topology metrics.</p>
+<h2 id="command-and-integration">Command and integration</h2>
+<pre><code class="language-sh">python3 -B tools/validate_rosetattoo_contour_plan.py \
+  --audit validation/canimations-contour-bound-audit-20261031.json \
+  --baseline enhanced/canimations-remaster-20261031 \
+  --candidate enhanced/canimations-contour-staging-20261031 \
+  --source extracted/canimations-remaster-20261031 \
+  --plan validation/contour-selection-canimations-new.json
+</code></pre>
+<p><code>--plan</code> is optional; without it the validated result is printed as JSON.
+The plan path must be new, outside all input trees, and distinct from the
+audit. It is published atomically with an exclusive hard link; the filesystem
+must support hard links. Existing files, symlinks, input assets and the audit
+are never overwritten. An interrupted process can leave its private temporary
+file behind. Exit 0 means the plan passed these checks, 1 means validation or
+publication failed, and argparse reports invalid arguments with exit 2.</p>
+<p>For a parent assembler, the reusable function returns an immutable
+<code>SelectionPlan</code> containing canonical <code>baseline_root</code>, <code>candidate_root</code>,
+<code>source_root</code>, <code>fallback_resources</code> (tuple of relative resource paths) and
+the exact <code>audit_sha256</code>:</p>
+<pre><code class="language-python">from pathlib import Path
+from validate_rosetattoo_contour_plan import validate_audit
+
+plan = validate_audit(Path(&quot;validation/audit.json&quot;), Path(&quot;enhanced/baseline&quot;),
+                      Path(&quot;enhanced/contour&quot;), Path(&quot;extracted/source&quot;))
+fallbacks = {resource: plan.baseline_root for resource in plan.fallback_resources}
+# A caller may pass `fallbacks` to the assembler only after its own preflight.
+</code></pre>
+<p>Import from <code>tools/</code> as appropriate for the caller. A root-level resource <code>.</code>
+that needs fallback is rejected because the existing assembler requires a
+nonempty resource-relative name; audit the parent directory instead.</p>
+<h2 id="what-is-verified">What is verified</h2>
+<p>The report must have <code>schema_version: 1</code>, <code>file_hashes_version: 1</code>,
+<code>source_verification: &quot;decoded_rgba&quot;</code>, and canonical inputs matching the
+three requested, distinct trees. Old reports without file hashes are not
+accepted. The validator reads the exact audit bytes once, returns their SHA-256,
+and rejects malformed JSON, duplicate keys and non-finite numbers.</p>
+<p>It independently walks all three roots, rejects symlinks and non-regular or
+orphan files, and requires identical <strong>resource frame-manifest sets</strong> across
+all three trees and the report. Source supersets accepted by the audit are not
+accepted here. It validates metadata, frame indices/order, geometry and
+filenames, declared sidecars, and hashes every baseline/candidate/source PNG,
+resource <code>metadata.json</code> and declared sidecar against the report. It also
+compares declared sidecar bytes across all three trees. Missing, extra or
+unreadable files and incorrect or absent hashes fail closed. Frame issue lists,
+pixel/threshold counts, topology flags, opacity calculations, resource
+aggregates, suspect lists and global totals must agree with one another.</p>
+<p>Baseline and candidate scene-summary sets must match and their current JSON
+contents must agree. Source scene summaries are cross-checked when a matching
+enhanced summary exists; a source-only summary is allowed and its scene ID and
+recognized room-list/count fields are checked against source manifests when
+available. Known source-root VGS, palette-walk and room-extraction manifests
+are checked against their current resource sets, identities and counts. Palette
+projections must partition the listed scenes for each resource identity; room
+root entries must match the corresponding scene summaries. Unknown root formats
+and unexplained files are rejected. The audit did <strong>not</strong> fingerprint scene
+summaries or the root manifest, so these checks compare their current state,
+not their state when the audit ran.</p>
+<h2 id="trust-and-runtime-limitations">Trust and runtime limitations</h2>
+<p>The validator does <strong>not</strong> decode images, recompute topology or independently
+prove source provenance. It verifies hashes and internal report consistency,
+not authenticity: an attacker able to fabricate a self-consistent report and
+hashes can misstate the measurements. The audit must come from a trusted
+process; preserve or authenticate its returned SHA-256 separately. A plan
+file is not an authorization or a substitute for revalidation.</p>
+<p>Filesystem reads do not create an atomic multi-file snapshot. Keep all input
+trees and the audit immutable during validation <strong>and</strong> until the assembler has
+finished reading them, or repeat validation immediately before use and employ
+an external snapshot/locking mechanism. Scene-summary/root-manifest changes
+that happened before validation cannot be compared to the audit snapshot.
+Component/hole counts also miss shape and position changes, so a valid plan
+cannot prove visual, palette, composition or gameplay safety; in-engine
+review and playtesting remain necessary.</p>
+<h2 id="verification-run">Verification run</h2>
+<p>On 2026-10-31 the completed source-backed cAnim bound audit above validated
+767 resources and 33,189 frames, with the single whole-resource fallback
+<code>scene_044/canim_004</code> (frame 9 changed hole counts). The audit SHA-256 was
+<code>38dd88521a964757f3c50fb8f7c30c5db82b05553df3c1c81680f2ad835082e2</code>;
+the ignored local plan is <code>validation/contour-selection-canimations-terra-20261031.json</code>.
+On an Apple M2 Max, that run took 30.82 seconds wall time and about 200 MiB
+maximum RSS; this is not a benchmark of every full corpus. Watson, room and
+cAnim pilots, plus the 3,040-frame shared and 350-frame VGS bound audits, also
+validated without fallback. These are validation observations, not approval to
+roll out a pack.</p>
+<p>Run the standalone tests with:</p>
+<pre><code class="language-sh">python3 -B -m unittest tools.tests.test_contour_selection_plan -v
+</code></pre>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

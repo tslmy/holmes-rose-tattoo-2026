@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local ESRGAN (spandrel) setup</title>
+<meta name="description" content="Local ESRGAN (spandrel) setup: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html" aria-current="page">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Local ESRGAN (spandrel) setup</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/esrgan-setup.md"><code>docs/esrgan-setup.md</code></a>, a working record of the project.</p><p><code>tools/upscale_rosetattoo_sprites.py</code> upscales cursors, inventory/item
+icons, character walk cycles, and the overhead map with a non-diffusion
+ESRGAN-family super-resolution model, run entirely locally and
+in-process via the <a href="https://github.com/chaiNNer-org/spandrel"><code>spandrel</code></a>
+model-loading library and PyTorch (Apple <code>mps</code>, CUDA, or CPU) — no server,
+no Automatic1111/Forge WebUI install required.</p>
+<h2 id="why-not-the-flux-pipeline-and-why-not-automatic1111">Why not the FLUX pipeline, and why not Automatic1111</h2>
+<ul>
+<li><strong>Not FLUX/generative redraw</strong>: cursors, item icons, and walk-cycle frames
+are small, silhouette/hotspot-critical elements (often under 32x32px)
+where a diffusion model's tendency to invent new detail or drift geometry
+would shift a click hotspot or a character's hand position — see
+<code>tools/upscale_rosetattoo_sprites.py</code>'s module docstring. A real
+super-resolution model instead estimates high-frequency detail from the
+<em>existing</em> pixels without prompts or diffusion. It can still alter or
+invent fine details, so important text, edges and clues need review.</li>
+<li><strong>Not Automatic1111/Forge</strong>: this project used to proxy ESRGAN through an
+Automatic1111/Forge WebUI's <code>/sdapi/v1/extra-single-image</code> REST endpoint,
+which meant running and keeping a whole separate WebUI server process
+alive just to call one non-generative operation. <code>spandrel</code> loads the
+same family of <code>.pth</code> checkpoints directly (no legacy <code>basicsr</code> dependency
+or its <code>torchvision</code> compatibility issues), so this is now a plain local
+function call.</li>
+</ul>
+<h2 id="1-install-python-dependencies">1. Install Python dependencies</h2>
+<p>This repo's <code>pyproject.toml</code> has an <code>esrgan</code> optional dependency group
+(<code>torch</code>, <code>spandrel</code>):</p>
+<pre><code class="language-sh">uv sync --extra esrgan
+</code></pre>
+<h2 id="2-download-a-model-weight">2. Download a model weight</h2>
+<p><a href="https://github.com/xinntao/Real-ESRGAN"><code>RealESRGAN_x4plus</code></a> (BSD-3-Clause
+licensed) is the default and works well for this game's painterly,
+photographic-leaning sprite art:</p>
+<pre><code class="language-sh">mkdir -p models/esrgan
+curl -L -o models/esrgan/RealESRGAN_x4plus.pth \
+  https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
+</code></pre>
+<p>This is a single ~64MB file — <code>models/</code> is gitignored, so this is a local
+cache, not tracked in the repo. Any other ESRGAN/RealESRGAN-family <code>.pth</code>
+checkpoint works too (e.g.
+<a href="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth"><code>RealESRGAN_x4plus_anime_6B</code></a>
+for flatter, more cel-shaded art) — pass it via <code>--model-path</code>.</p>
+<h2 id="sprite-transparency-and-resumable-runs">Sprite transparency and resumable runs</h2>
+<p>The legacy default is <code>--alpha-mode binary</code>, which thresholds the scaled mask
+to fully transparent or fully opaque. <code>--alpha-mode soft</code> preserves a smooth
+alpha transition for a compositor that supports antialiased sprite edges.
+Opaque colors are extended into nearby transparent pixels before model
+inference to reduce gray fringes. The temporal pass preserves the resulting
+alpha rather than thresholding it.</p>
+<p>For large sprite collections, add <code>--skip-existing</code> to resume interrupted
+runs. Each resource's metadata records the scale, model hash and alpha mode;
+the tool refuses to resume with different settings, and reprocesses unreadable,
+incorrectly sized, or changed-source frames. Identical source frames are
+upscaled once per run and copied to their other locations. Resource directories
+can be nested (for example, by room) and retain their relative paths in the
+output tree.</p>
+<p>Large frames such as the London map may exceed GPU memory at the model's
+native 4x scale. <code>--tile-size 256 --tile-pad 16</code> bounds inference memory by
+processing overlapping source tiles, then joins their center regions before
+the final resize. Tiling may introduce slight differences at joins; inspect
+the actual image rather than treating it as numerically identical to untiled
+inference.</p>
+<h2 id="3-run">3. Run</h2>
+<pre><code class="language-sh">uv run python3 tools/upscale_rosetattoo_sprites.py \
+  --resources rmouse_vgs omouse_vgs watson_vgs --scale 2
+</code></pre>
+<p><code>spandrel</code> auto-detects the checkpoint's architecture from its state dict,
+runs inference on the requested <code>--device</code> (default <code>mps</code>), then the result
+is resized to the requested <code>--scale</code> if it differs from the model's native
+scale (<code>RealESRGAN_x4plus</code> is natively 4x). Generation is fast — well under
+a second per frame on an M2 Max — so upscaling an entire sprite set takes
+seconds, not the minutes-to-hours the neural background redraw pipeline
+needs.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

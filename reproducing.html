@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reproducing this pipeline from scratch</title>
+<meta name="description" content="Reproducing this pipeline from scratch: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html" aria-current="page">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Reproducing this pipeline from scratch</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/reproducing.md"><code>docs/reproducing.md</code></a>, a working record of the project.</p><p>End-to-end steps to independently reproduce this project's hires
+AI-upscaled ScummVM mod pack, from a stock game install to a playable
+patched ScummVM binary. See <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/tools/README.md"><code>tools/README.md</code></a> for
+detailed flag-by-flag documentation of each command below, and the root
+<a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/README.md#scummvm-strategy">README's ScummVM Strategy section</a> for how
+the patched engine is tracked as a Git submodule.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>A legally-owned copy of <em>The Lost Files of Sherlock Holmes: The Case of
+the Rose Tattoo</em> game data, placed under an ignored local directory (e.g.
+<code>scummvm/</code>). This repository never tracks original game files or data
+derived from them (see the root README's Safety section).</li>
+<li>Python 3.10+, with <a href="https://github.com/astral-sh/uv"><code>uv</code></a> (recommended)
+or a plain venv with Pillow installed.</li>
+<li>The <code>scummvm-src/</code> Git submodule, initialized (<code>git submodule update --init --recursive</code>), for building the patched engine.</li>
+<li>The FLUX.1 + diffusers pipeline set up per
+<a href="flux-setup.html"><code>docs/flux-setup.md</code></a> — required for the neural
+background redraw step, optional if you only want the non-neural Lanczos
+baseline.</li>
+<li>The local ESRGAN pipeline set up per
+<a href="esrgan-setup.html"><code>docs/esrgan-setup.md</code></a> — required for the cursor/item/
+character/map sprite upscaling step.</li>
+<li>Optional: <a href="https://ollama.com">Ollama</a> with a vision-capable model (e.g.
+<code>qwen3.5:9b-mlx</code>) for LLM-polished prompts. The repo ships pre-generated
+prompt briefs under <code>profiles/neural/prompt-briefs/</code>, so this is only
+needed if you want to regenerate them for new/changed scenes.</li>
+</ul>
+<h2 id="step-1--extract-game-assets">Step 1 — Extract game assets</h2>
+<pre><code class="language-sh">uv sync
+uv run python3 tools/extract_rosetattoo_assets.py --data-dir scummvm
+uv run python3 tools/extract_rosetattoo_sprites.py --resources RMOUSE.VGS OMOUSE.VGS
+uv run python3 tools/extract_rosetattoo_sprites.py --resources MAP.VGS --palette-resource MAP.PAL
+uv run python3 tools/extract_rosetattoo_sprites.py --resources MAPICONS.VGS --palette-resource MAP.PAL
+</code></pre>
+<p>Produces <code>extracted/rosetattoo/scene_NNN/</code> (backgrounds, prompts, walk
+zone/hotspot/protect masks) and <code>extracted/sprites/&lt;resource&gt;/</code> (cursor and
+map frames).</p>
+<p>Generate story-state-specific masks from the room object records:</p>
+<pre><code class="language-sh">uv run python3 tools/generate_rosetattoo_state_masks.py \
+  --input-dir extracted/rosetattoo
+</code></pre>
+<p>Each scene receives <code>state_masks.json</code> and masks under
+<code>scene_NNN/states/flags_.../</code>. The extractor mirrors ScummVM's Rose Tattoo
+rule: an object is active only when every non-zero required flag literal in its
+room record passes ScummVM's <code>readFlags()</code> rule (negative literals require the
+underlying flag to be false). Scenes with a small number of flags get every combination;
+larger scenes get a deterministic bounded set containing the empty state, the
+fully-enabled state, and each individual flag. The original union masks stay
+as the conservative production default because a normal build does not know
+the player's save-game flags.</p>
+<h2 id="step-2--generate-neural-photoreal-backgrounds">Step 2 — Generate neural photoreal backgrounds</h2>
+<p>The August FLUX.1 script (<code>tools/flux_redraw_rosetattoo_backgrounds.py</code>) and the optional GPT
+Image pass (<code>tools/openai_image_rosetattoo_pass.py</code>) were removed on 2026-11-22; see
+<a href="code-archive.html"><code>code-archive.md</code></a> for the commits that still have them. The backgrounds are now
+redrawn by the <code>remaster</code> pipeline (<code>uv run remaster redraw-bg</code>, then <code>qa</code> and <code>assemble</code>; backends
+in <code>remaster.toml</code>, results in <a href="bakeoff-results.html"><code>bakeoff-results.md</code></a>).</p>
+<p>For an image-editing backend that can consume masks, use the state directory
+matching the intended save-game configuration as the source of its protected
+regions. Generated pixels must still be composited only into the unprotected
+interior and validated against the original border pixels; an image model's
+mask adherence is not itself a gameplay guarantee.</p>
+<h2 id="step-3--upscale-cursors-and-the-map">Step 3 — Upscale cursors and the map</h2>
+<pre><code class="language-sh">uv run python3 tools/upscale_rosetattoo_sprites.py --resources rmouse_vgs omouse_vgs --scale 2
+uv run python3 tools/upscale_rosetattoo_sprites.py --resources map_vgs mapicons_vgs --scale 2
+</code></pre>
+<p>Also upscale the character/NPC walk-cycle sprites the ScummVM fork's
+character/object hires-sprite override support (Step 4) looks for at
+runtime - both the player's own coat/hat states and the generic body-type
+sprite sheets Rose Tattoo reuses across many different one-off NPCs (see
+<a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/tools/README.md#cursors-items-character-and-font-sprites"><code>tools/README.md</code></a>
+for the full resource list and why extracting these generic sheets is
+higher-leverage than named characters):</p>
+<pre><code class="language-sh">uv run python3 tools/extract_rosetattoo_sprites.py --palette-scene 1 --resources \
+  WATSON.VGS WIGGINS.VGS MYCROFT.VGS TOBY.VGS TUX.VGS \
+  SVGAWALK.VGS NOHAT.VGS COATWALK.VGS \
+  CTDOWNRI.VGS CTRIGHT.VGS CTUPRIGH.VGS HTDOWNRG.VGS HTRIGHT.VGS HTUPRIGH.VGS \
+  JTDOWNRG.VGS JTRIGHT.VGS JTUPRIGH.VGS TDOWNRG.VGS TRIGHT.VGS TUPRIGHT.VGS \
+  3TDOWNRG.VGS 3TRIGHT.VGS 3TUPRIGH.VGS GREEN.VGS \
+  GTDOWNRG.VGS GTRIGHT.VGS GTSDOWNR.VGS GTSRIGHT.VGS GTSUPRIG.VGS GTUPRIGH.VGS \
+  ITDOWNRG.VGS ITRIGHT.VGS ITUPRIGH.VGS QTDOWNRG.VGS QTRIGHT.VGS QTUPRIG.VGS \
+  TWDOWNRG.VGS TWRIGHT.VGS TWUPRIGH.VGS
+uv run python3 tools/upscale_rosetattoo_sprites.py --scale 2 --resources \
+  watson_vgs wiggins_vgs mycroft_vgs toby_vgs tux_vgs \
+  svgawalk_vgs nohat_vgs coatwalk_vgs \
+  ctdownri_vgs ctright_vgs ctuprigh_vgs htdownrg_vgs htright_vgs htuprigh_vgs \
+  jtdownrg_vgs jtright_vgs jtuprigh_vgs tdownrg_vgs tright_vgs tupright_vgs \
+  3tdownrg_vgs 3tright_vgs 3tuprigh_vgs green_vgs \
+  gtdownrg_vgs gtright_vgs gtsdownr_vgs gtsright_vgs gtsuprig_vgs gtuprigh_vgs \
+  itdownrg_vgs itright_vgs ituprigh_vgs qtdownrg_vgs qtright_vgs qtuprig_vgs \
+  twdownrg_vgs twright_vgs twuprigh_vgs
+uv run python3 tools/upscale_rosetattoo_sprites.py --resources item01_vgs item02_vgs ... item84_vgs --scale 2
+</code></pre>
+<p>Copy the results into the same mod directory as step 2's
+<code>--scummvm-overrides</code> (they read from the same <code>sprites/</code> subtree the
+background overrides use):</p>
+<pre><code class="language-sh">cp -R enhanced/sprites/*_vgs mods/flux-hires-backgrounds/sprites/
+</code></pre>
+<h2 id="step-4--build-scummvm">Step 4 — Build ScummVM</h2>
+<p>The patched engine lives at <code>scummvm-src/</code>, tracked as a Git submodule
+pointing at the <code>claude/sherlock-playtest-input</code> branch of a personal fork
+(<a href="https://github.com/tslmy/scummvm">https://github.com/tslmy/scummvm</a>) - see the root
+<a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/README.md#scummvm-strategy">README's ScummVM Strategy section</a> for why.</p>
+<pre><code class="language-sh">git submodule update --init --recursive
+cd scummvm-src
+./configure --enable-freetype2
+make -j$(sysctl -n hw.ncpu 2&gt;/dev/null || nproc)
+cd ..
+</code></pre>
+<p><code>--enable-freetype2</code> is required for the hires TrueType tooltip-text
+feature either way; <code>configure</code> will otherwise silently compile without it
+and tooltip text falls back to upscaled bitmap glyphs. Also drop a TTF font
+file at <code>&lt;mod-directory&gt;/fonts/hires_font.ttf</code> (any legible
+serif/period-appropriate font works; this repository doesn't ship one for
+licensing reasons).</p>
+<h2 id="step-5--play">Step 5 — Play</h2>
+<pre><code class="language-sh">python3 tools/run_rosetattoo_validation.py \
+    --scummvm scummvm-src/scummvm \
+    --asset-overrides mods/flux-hires-backgrounds \
+    --hires-scale 2 \
+    --hires-format rgba32 \
+    --save-dir &quot;$HOME/Library/Application Support/ScummVM/Savegames&quot; \
+    --save-slot 1
+</code></pre>
+<p><code>--hires-scale</code> must match the <code>--scale</code> used in step 2/3. <code>rgba32</code> gives
+true-color output; use <code>clut8</code> to compare against the original
+palette-mapped rendering.</p>
+<h2 id="history-and-why-the-pipeline-looks-like-this">History and why the pipeline looks like this</h2>
+<ul>
+<li><strong>FLUX.1 + diffusers replaced the earlier Stable Diffusion/Automatic1111
+pipeline.</strong> An SDXL + ControlNet + Automatic1111-API pipeline was the
+original approach, but FLUX.1-schnell (run locally via <code>diffusers</code> on
+Apple's <code>mps</code> backend) produces comparable or better photorealism without
+needing a WebUI server, a ControlNet checkpoint, or a two-pass
+base-redraw-plus-masked-decorative-pass design to hold structure — a
+single low-strength img2img pass against the original background as the
+init image is enough to keep geometry, walk zones, and small embedded
+text (signage, door numbers) intact. See
+<code>tools/flux_redraw_rosetattoo_backgrounds.py</code> (removed; <a href="code-archive.html"><code>code-archive.md</code></a>)
+and <a href="flux-setup.html"><code>docs/flux-setup.md</code></a> for that August pipeline, and
+its module docstring/<code>tools/README.md</code> for the strength/steps calibration
+that uses the hard resource/edge geometry lock; the lock, rather than a
+low denoise strength alone, is the gameplay guarantee.</li>
+<li><strong>Every scene gets an LLM-generated prompt brief, no manual overrides.</strong>
+An earlier iteration hand-curated verbatim prompt text for a handful of
+fragile scenes while leaving the rest to raw extracted text, which meant
+different scenes silently went through different prompt pipelines. All
+scenes now go through the same <code>polish_with_ollama()</code> path with uniform
+sanitization, and the resulting briefs are backend-agnostic (used by the
+FLUX pipeline the same way they were used by the earlier SD pipeline).</li>
+<li><strong>Scene sprites and streamed animations now have an ordered override
+path.</strong> An earlier late external-PNG overlay was unsafe for animation and
+z-order. The newer renderer replays overrides alongside native scene draws,
+with native fallback for missing frames. This is still under validation,
+particularly for palette changes, haze masks and interactions; see the
+<a href="sprite-remaster.html">sprite remaster workflow</a>.</li>
+</ul>
+<h3 id="temporal-consistency-for-animated-sprites">Temporal consistency for animated sprites</h3>
+<p>Independent ESRGAN calls can produce small frame-to-frame detail changes even
+when the underlying game art is stable. Do not combine animation frames into
+one tiled image: tile borders become image content and the model cannot reason
+about motion. Use the animation-native temporal pass instead:</p>
+<pre><code class="language-sh">uv run python3 tools/temporal_upscale_rosetattoo_sprites.py --scale 2
+</code></pre>
+<p>It performs conservative source-space alignment and neighbour residual
+aggregation while preserving VGS frame indices and timing. It writes the
+stabilized tree to <code>enhanced/sprites-temporal/</code>; it is suitable for cursor,
+map, and item override assets and for offline character-animation review.</p>
+<h2 id="investigated-but-not-implemented-animation-framerate-interpolation">Investigated but not implemented: animation framerate interpolation</h2>
+<p>An earlier investigation looked at whether animated sprites (character walk
+cycles, cursor wait animation, hotspot object animations) could be
+interpolated to a higher framerate alongside the visual upscale. Findings
+from reading the engine source (<code>events.cpp</code>, <code>objects.cpp</code>, <code>people.cpp</code>,
+<code>sherlock.cpp</code>):</p>
+<ul>
+<li>The whole game logic loop (<code>SherlockEngine::sceneLoop()</code> in
+<code>sherlock.cpp</code>) runs on a single fixed tick, gated by
+<code>Events::checkForNextFrameCounter()</code>. The tick rate is <code>GAME_FRAME_RATE</code>
+(30 in <code>events.h</code>), and is already user-toggleable to 2x
+(<code>Events::toggleSpeed()</code>) — so the engine has no inherent floor below
+30fps, but nothing above 60fps either without further changes.</li>
+<li>Sprite/animation advance is <strong>not</strong> &quot;always show the next frame every
+tick&quot; — it is driven by a per-object bytecode-like <code>_sequences</code> array
+(<code>objects.cpp</code>), which encodes frame indices interleaved with explicit
+timing/pause commands, position deltas, sound triggers, and show/hide
+toggles. Frame <em>indices</em> referenced by this bytecode are the same indices
+baked into <code>.VGS</code> resources, hotspot bounding logic, and save-game state —
+they are not purely cosmetic.</li>
+<li>This means genuine motion interpolation (inserting new &quot;in-between&quot;
+sprite images, e.g. via optical flow tools like RIFE/FILM) would require
+either (a) doubling every <code>_sequences</code> bytecode program to reference new
+interpolated frame indices — risky, since these are hand-authored per
+animation and would need to be mechanically rewritten per resource without
+breaking embedded pause/sound/position commands — or (b) decoupling
+<em>rendering</em> rate from <em>logic</em> rate: keep the 30fps logic tick (so hotspot
+state, sound cues, and walk-path decisions are unchanged) but render an
+extra blended frame between every real logic tick for perceived
+smoothness.</li>
+</ul>
+<p><strong>Recommended approach if this is picked up later</strong> is (b), a purely
+presentational cross-fade rather than true motion interpolation:</p>
+<ol>
+<li>Keep the 30fps logic tick untouched (no <code>_sequences</code>/hotspot/save
+changes).</li>
+<li>In the render path only, when between two logic ticks, alpha-blend the
+previously-drawn sprite frame and the next upcoming one (weighted by how
+far the renderer is between the two logic ticks) to produce one extra
+visual frame at 60fps output.</li>
+<li>This needs no offline art generation and no changes to game data/saves,
+but only smooths animations that hold a frame for multiple render frames
+(i.e. anywhere the render loop already runs faster than the logic tick);
+it will not add genuinely new in-between poses to a walk cycle.</li>
+</ol>
+<p>A higher-quality (but substantially larger) alternative would be an offline
+per-resource pass with a model such as RIFE or FILM to synthesize real
+in-between frames for each <code>.VGS</code> walk-cycle resource, then renumbering and
+re-injecting them into the <code>_sequences</code> bytecode for that resource — this
+was intentionally not attempted given its scope (it touches
+game-logic-adjacent data, not just visuals, and each of the ~15+
+character/object animation resources would need individual verification
+that hotspot/interaction timing wasn't shifted).</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

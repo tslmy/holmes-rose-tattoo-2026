@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rose Tattoo post-load scene-start smoke test</title>
+<meta name="description" content="Rose Tattoo post-load scene-start smoke test: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html" aria-current="page">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Rose Tattoo post-load scene-start smoke test</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/scene-start-smoke-test.md"><code>docs/scene-start-smoke-test.md</code></a>, a working record of the project.</p><p>This test asks whether the <strong>requested scene's initial frame was presented</strong>
+after loading a copied save. It does not establish natural reachability,
+correct story flags, animation or visual quality, interaction, later stability,
+or full playability. The post-load hook keeps the copied save's state and
+position; scene 7 in particular must use this hook, not the fresh-start hook.
+The engine can fall back to native artwork if an override is missing or
+unusable, so a rendered marker is not proof that every pack asset was used.</p>
+<h2 id="engine-requirement">Engine requirement</h2>
+<p>Build a patched <code>scummvm-src/</code> that includes the scene-smoke marker. The
+marker originated in local ScummVM commit
+<code>36349bc30acfc8aab96290a615f9a7c7fb9a94dd</code> and was also integrated into the
+combined local engine checkout. The parent repository's submodule pointer
+must be updated separately before a fresh clone can select that checkout.
+For example, in the intended engine checkout:</p>
+<pre><code class="language-sh">./configure --disable-all-engines --enable-engine=sherlock --disable-debug --enable-release
+make -j8
+</code></pre>
+<p>The marker is silent unless both <code>SCUMMVM_SHERLOCK_TATTOO_SCENE_SMOKE=1</code>
+and <code>SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE=N</code> are set. It requires a real
+loaded save, the requested room resource to exist, and the current scene to
+match <code>N</code>. It is emitted only after the scene transition, <code>screen.update()</code>, and
+any initial entrance animation return.
+An unpatched binary, a different scene, an invalid save, or an earlier failure
+must not be treated as a successful render.</p>
+<h2 id="run">Run</h2>
+<p>The event-driven pipe reader is intended for POSIX hosts; the local run below
+was on macOS with SDL2. Other backends and platforms need separate validation.
+Use the pilot first. Replace all placeholder paths with absolute paths and
+choose a <strong>new</strong> output directory under an existing parent directory. The
+existing save and existing pack are inputs only; no setup requires editing or
+copying files into either. For a future final pack, change <code>--pack</code> to that
+pack's directory and repeat both runs; a result for the pilot does not validate
+the future pack.</p>
+<pre><code class="language-sh">python3 tools/smoke_rosetattoo_scenes.py \
+  --scummvm /absolute/path/to/patched/scummvm \
+  --data-dir /absolute/path/to/local/game-data \
+  --save /absolute/path/to/existing/rosetattoo.000 \
+  --pack /absolute/path/to/pilot-or-final-pack \
+  --output-dir /absolute/existing/parent/new-pilot-run \
+  --pilot --timeout 30 --sdl-retries 4
+
+# Only after examining the pilot results, use a different new output directory:
+python3 tools/smoke_rosetattoo_scenes.py \
+  --scummvm /absolute/path/to/patched/scummvm \
+  --data-dir /absolute/path/to/local/game-data \
+  --save /absolute/path/to/existing/rosetattoo.000 \
+  --pack /absolute/path/to/pilot-or-final-pack \
+  --output-dir /absolute/existing/parent/new-all-scenes-run \
+  --all --timeout 30 --sdl-retries 4
+</code></pre>
+<p><code>--pilot</code> is 1, 2, 7, 18, 26, 36, 53, 68, 91. <code>--all</code> discovers the actual
+<code>RESnn.RRM</code> scene resources rather than assuming a contiguous range; this game's
+local data has 80. <code>--scenes 7 26</code> selects individual resources. The program
+returns nonzero unless every selected scene has a <code>rendered</code> result.</p>
+<p>Each attempt has its own new directory, save copy as <code>rosetattoo.000</code>, config,
+home, working directory, logs, and screenshot path. The source save is read
+once into memory and copied fresh for each attempt; autosaving is disabled and
+the driver's output path cannot be inside the data, pack, or save directory.
+The driver does not modify inputs, although it is not an OS-level read-only
+sandbox for an arbitrary or malicious binary. It fixes the random seed, sets
+SDL dummy video/audio and software rendering, uses the <code>surfacesdl</code> backend,
+RGBA32 2x, palette-safe sprites and edge filtering, and removes inherited
+ScummVM/SDL/XDG settings. It stops the child at the exact marker, or at a
+bounded per-attempt timeout, using event-driven stdout, not elapsed-time
+screenshots or process survival as evidence.</p>
+<p>Pass <code>--haze-native-fallback</code> to exercise the patched engine's optional
+native-rendering safety fallback in scenes 7, 8, 18, 53 and 68. This flag
+sacrifices enhanced scene art in those rooms; it does not implement hires haze.
+The selected setting is recorded in the report.</p>
+<p><code>report.json</code> records the executable and source-save hashes, pack manifest
+hash if present, settings, selected scene IDs, completion flag, per-scene
+status, and each completed attempt's log and exit code. Check <code>completed</code> and compare
+the selected IDs with the results if a run was interrupted. The manifest hash
+is <strong>not</strong> a checksum of the whole pack. A present
+background filename likewise does not verify decoding or use. Results:</p>
+<ul>
+<li><code>rendered</code>: the exact requested marker was observed. The process is stopped
+immediately afterwards, so its termination code is not a game crash and no
+post-marker gameplay stability is measured.</li>
+<li><code>timeout</code>: no matching marker or exit before the deadline.</li>
+<li><code>exited_without_marker</code>: exited zero before the marker; not success.</li>
+<li><code>crash_or_error</code>: exited nonzero before success; inspect the logs for the
+actual cause rather than assuming it is a crash.</li>
+<li><code>sdl_blit_error</code>: the child exited with the specific SDL error
+<code>SDL_BlitSurface failed: Parameter 'src' is invalid!</code> before success.
+This occurred intermittently under this machine's dummy backend, including
+on scenes that also passed on another attempt. The cause was not established.
+<code>--sdl-retries</code> (default 0, maximum 10) retries <strong>only</strong> that exact error,
+with a fresh save and config; all failures remain in the report. Other errors
+and timeouts are never automatically retried.</li>
+</ul>
+<p>Driver tests, using fake child processes and temporary files:</p>
+<pre><code class="language-sh">python3 -m unittest tools.tests.test_scene_smoke_driver -v
+</code></pre>
+<h2 id="local-results">Local results</h2>
+<p>On 2026-10-31 the nine-scene pilot used
+<code>mods/room-remaster-palette-pilot-20261031</code> (manifest SHA-256
+<code>68d793608ca6186d7189ece0ef92f8c446df26d2e24f16ab579b477a6bfb2bb3</code>)
+and a copy of <code>validation/room-remaster-test-saves/rosetattoo.000</code> (SHA-256
+<code>1694e405733dfc885c16d7d2bff187fb5e7f558f627192a0c1f5f108df3fccd7</code>). All
+nine emitted their matching marker; two required a retry after the SDL error.
+The subsequent full run emitted matching markers for all 80 scene resources.
+It recorded 22 SDL blit-error attempts across 17 scenes before those scenes
+rendered on retries; no final scene result was a timeout or other error. The
+binary's SHA-256 was
+<code>16f63931429ce2cec25c4d8347cc6c81c694fe63eab0c87ff830f331b661e4dd</code>.</p>
+<p>The full per-attempt logs and reports are temporary, at
+<code>/private/var/folders/kr/hnndgkzd7wddlz37gv3py84r0000gn/T/opencode/rosetattoo-scene-smoke-pilot-final/</code>
+and
+<code>/private/var/folders/kr/hnndgkzd7wddlz37gv3py84r0000gn/T/opencode/rosetattoo-scene-smoke-all-final/</code>.
+Real-game negative checks also produced no marker with the opt-in variable
+absent, with scene 36's RRM omitted from an isolated game-data directory, and
+with an empty isolated save directory (scene 36 only; no user save was touched).</p>
+<p>The later all-80 run used <code>mods/rosetattoo-contour-candidate-20261031</code> with
+<code>--haze-native-fallback</code> and the combined patched engine. All 80 requested
+initial frames reached the marker; 35 SDL blit-error attempts occurred across
+21 scenes before successful retries. The binary SHA-256 was
+<code>066622f0907f4b75312ea26a1b8d85c8367f55a3665d5abbade2c59e6911189f</code>, and the
+pack manifest SHA-256 was
+<code>e96a33f4f01ea64b26ab94ea0dfd4b213dea8f5f76c40d44950a1db9c974e567</code>.
+The ignored local report is
+<code>validation/contour-candidate-scene-smoke-haze-safe-20261031/report.json</code>.
+This remains a post-load initial-frame check, not a gameplay or visual pass.</p>
+<h2 id="reported-unresponsive-window">Reported unresponsive window</h2>
+<p>The user later force-quit the live candidate because its window was stuck; the
+available launch log did not identify when or why it became unresponsive. A
+separate debugger run of the same copied save loaded its natural scene (no
+post-load jump), reached the scene loop and entered <code>Screen::update</code> at least
+61 times. After the same load and update count in another run, a debugger-
+injected SDL quit event was accepted and the process exited with status 0.
+Both runs used dummy video/audio and a null music driver. They do <strong>not</strong> test
+the macOS window, actual mouse/keyboard interaction, a long session or the
+conditions that produced the user's freeze, and no freeze fix is established.</p>
+<p>The dummy backend also failed before reaching the game with the known SDL blit
+error in separate enhanced and native-mode tests, so that startup failure is
+not unique to the sprite pack. Its cause and its relationship, if any, to the
+reported window freeze are unknown. Local debugger logs are in the ignored
+<code>validation/freeze-investigation-20261031/</code> directory. If the freeze recurs,
+capture a short stack sample of the actual stuck process before terminating it;
+do not treat a successful first frame or a dummy-backend run as a GUI pass.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local models: LLM, OpenCode and image backends</title>
+<meta name="description" content="Local models: LLM, OpenCode and image backends: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html" aria-current="page">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Local models: LLM, OpenCode and image backends</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/local-models.md"><code>docs/local-models.md</code></a>, a working record of the project.</p><p>Phase 0 choices for this machine (M2 Max, 32 GB, ~30 GB free disk after the
+image weights). All are recorded in <code>remaster.toml</code> and, while unconfirmed,
+in <code>review/queue.md</code>.</p>
+<h2 id="text-and-vision-model">Text and vision model</h2>
+<p><strong>Choice (decision #4/#11): <code>qwen/qwen3.8-27b</code> in LM Studio on the second
+laptop</strong> (<code>http://&lt;LAN host&gt;:1234/v1</code>; vision-capable, loaded with a 262k
+context), for both text and vision. It keeps the LLM off this Mac, so its
+32 GB stays free for diffusion and QA no longer has to wait for a batch to
+finish. <strong>Fallback:</strong> when that laptop is unreachable or the model is not
+listed, <code>ChatClient.from_config()</code> switches to <code>qwen3.5:9b-mlx</code> in Ollama on
+this Mac, served through <code>http://127.0.0.1:11434/v1</code> as the alias
+<code>qwen3.5-9b-32k</code> (same weights, <code>num_ctx 32768</code>; no download needed).
+Both are set in <code>[llm]</code> of <code>remaster.toml</code> (<code>fallback_*</code> keys).</p>
+<p>The alias was made with:</p>
+<pre><code class="language-sh">printf 'FROM qwen3.5:9b-mlx\nPARAMETER num_ctx 32768\n' &gt; Modelfile
+ollama create qwen3.5-9b-32k -f Modelfile
+</code></pre>
+<p>Why:</p>
+<table>
+<thead>
+<tr>
+<th>Candidate</th>
+<th>Where</th>
+<th>Vision</th>
+<th>Context</th>
+<th>Result (2026-11-14)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>qwen/qwen3.8-27b</code> (remote LM Studio)</td>
+<td>second laptop</td>
+<td>yes</td>
+<td>262k loaded</td>
+<td>Briefs for scenes 1, 4, 26 grounded in the image, ~6 s per scene; named only clearly legible signs (&quot;221B&quot;, &quot;EXTRA&quot;). Plate-vs-background diff correct (called the hearth fire a &quot;campfire&quot;). Full-frame OCR invented text and looped; enlarged crops read &quot;METROPOLITAN POLICE&quot; but not the small plaque (&quot;NO ENTRANCE&quot;).</td>
+</tr>
+<tr>
+<td><code>qwen3.5:9b-mlx</code> (9.4B, nvfp4, MLX runner)</td>
+<td>Ollama 0.40.16</td>
+<td>yes</td>
+<td>262k native; 32k alias loads at 9.0 GB</td>
+<td>Briefs for scenes 1, 4, 26 grounded in the image (read &quot;EXTRA&quot;, &quot;221B&quot;, &quot;Metropolitan Police&quot;); ~5 s per scene warm. Correctly listed what a plate added over its background (two men, balls, jacket).</td>
+</tr>
+<tr>
+<td><code>mimo-v2.6-distill-qwen-9b-heretic</code></td>
+<td>LM Studio</td>
+<td>no</td>
+<td>loaded at 8k</td>
+<td>Works through the same client, ~4 s per scene, but text-only: briefs pull lore from the resource text that is not visible (a &quot;canary-yellow cashmere coat&quot;, &quot;Wormwood Alley&quot;). Cannot do QA on images.</td>
+</tr>
+<tr>
+<td><code>gpt-oss:20b</code></td>
+<td>Ollama</td>
+<td>no</td>
+<td>–</td>
+<td>Does not load in Ollama 0.40.16 (<code>unsupported tensor ... size overflows</code>); would need a re-pull (13 GB).</td>
+</tr>
+</tbody>
+</table>
+<p>Limits found:</p>
+<ul>
+<li>Free OCR at native 640x480 is unreliable with both models: the full
+scene-4 frame produced invented sign text. Cropped and enlarged 4x, the main sign read correctly
+(&quot;METROPOLITAN POLICE&quot;); a small plaque still came back wrong (&quot;NO
+DETERING&quot; for &quot;No Loitering&quot;). Sign/writing checks must crop by hotspot
+bounds, enlarge, and compare with the extracted description text, and a
+mismatch should send the region to the SR-baseline fallback rather than be
+trusted either way.</li>
+<li>Thinking is off for every call (<code>reasoning_effort: none</code> on <code>/v1</code>, <code>think: false</code> natively); with it on, the model can spend its budget on hidden
+reasoning.</li>
+<li>When the local fallback is in use, unload it before diffusion: <code>ollama stop qwen3.5-9b-32k</code> (and <code>lms unload --all</code> for LM Studio). 32 GB does not hold
+a 9 GB LLM and a 20 GB diffusion peak together. The remote model needs no
+unloading.</li>
+</ul>
+<p>The second laptop also lists <code>nvidia/nemotron-3.5-super-vl</code> (vision, 1M
+context) and <code>meta/muse-glimmer</code> (vision), not loaded and not yet compared;
+candidates if the 27B proves too weak a QA judge.</p>
+<h3 id="client">Client</h3>
+<p><code>tools/remaster/llm.py</code> (<code>ChatClient</code>) is a standard-library client for any
+OpenAI-compatible server, with a native Ollama mode. <code>ChatClient.from_config( cfg.section(&quot;llm&quot;), &quot;vision&quot;)</code> builds it from <code>remaster.toml</code>.
+<code>tools/polish_rosetattoo_prompts.py</code> now defaults to <code>--provider openai</code>
+with the URL and model from <code>[llm]</code>; <code>--provider ollama</code> keeps the old native
+path:</p>
+<pre><code class="language-sh">uv run python tools/polish_rosetattoo_prompts.py --input-dir work/extract/rooms \
+  --output-dir work/brief --scenes 1 4 26
+# LM Studio instead:
+uv run python tools/polish_rosetattoo_prompts.py ... \
+  --base-url http://localhost:1234/v1 --model mimo-v2.6-distill-qwen-9b-heretic --no-image
+</code></pre>
+<h2 id="opencode-headless">OpenCode headless</h2>
+<p><code>opencode</code> is not on <code>PATH</code>, but two copies are installed:</p>
+<ul>
+<li><code>/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode</code>
+(v2.2.7, bundled with OpenChamber; <strong>used</strong>), and</li>
+<li><code>~/Library/Application Support/ai.opencode.desktop/cli/2.0.32-arm64/opencode-cli</code>
+(v2.0.32, from the OpenCode desktop app).</li>
+</ul>
+<p>The project config <code>tools/opencode/opencode.json</code> adds an <code>lmstudio-remote</code>
+provider for <code>qwen/qwen3.8-27b</code> (the default) and an <code>ollama-local</code> provider
+for <code>qwen3.5-9b-32k</code> (<code>OPENCODE_MODEL=ollama-local/qwen3.5-9b-32k</code>); it is passed with <code>OPENCODE_CONFIG</code>, so the
+global <code>~/.config/opencode/opencode.jsonc</code> is untouched. The wrapper finds a
+binary and runs headless with a private server:</p>
+<pre><code class="language-sh">tools/opencode/opencode-local.sh &quot;Read tools/remaster/jobs.py and summarise recover()&quot;
+tools/opencode/opencode-local.sh --auto &quot;Fix the failing test in tools/tests/test_remaster_jobs.py&quot;
+OPENCODE_MODEL=ollama-local/qwen3.5-9b-32k tools/opencode/opencode-local.sh --format json &quot;...&quot;
+</code></pre>
+<p>Checked: with the local model, a plain reply (24 s including server start
+and model load) and a tool-using request (it called <code>read</code> on
+<code>remaster.toml</code> and returned the golden scene list, 29 s); the same
+tool-using request against the remote 27B took 20 s. Not yet checked: multi-step edits with <code>--auto</code>.
+Use it for the QA triage loop and small script edits with tests, as the plan
+says; keep engine C++ off it.</p>
+<h2 id="image-backends-mflux">Image backends (mflux)</h2>
+<p>mflux 0.24.0 is installed as an isolated tool (<code>uv tool install --python 3.13 mflux==0.24.0</code>; binaries in <code>~/.local/bin</code>). The project's <code>zimage</code>
+extra still pins mflux 0.18.1 from git for the existing
+<code>tools/img2img/z_image*.py</code>; bumping it is a queued decision.</p>
+<p>The plan's candidates were checked against current mflux docs. Weights are
+the pre-quantized <code>mflux-community</code> repos, chosen to fit the disk:</p>
+<table>
+<thead>
+<tr>
+<th>Backend (<code>remaster.toml</code>)</th>
+<th>Weights</th>
+<th style="text-align:right">Download</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>flux2-klein-edit</code></td>
+<td><code>mflux-community/flux2-klein-9b-mflux-q4</code></td>
+<td style="text-align:right">9.5 GB</td>
+<td>FLUX.2 klein 9B edit; the 4B (Apache-2.0) is the alternative. 9B is under the FLUX non-commercial licence.</td>
+</tr>
+<tr>
+<td><code>qwen21-edit</code></td>
+<td><code>mflux-community/qwen-image-2-1-mflux-q8</code></td>
+<td style="text-align:right">18.5 GB</td>
+<td>Replaces the plan's Qwen-Image-Edit (20B; 29 GB even at 4-bit) with Qwen-Image 2.1 (7.1B + Qwen3-VL encoder), which mflux documents with reference editing, masks and <code>--strength</code>.</td>
+</tr>
+<tr>
+<td><code>zimage-controlnet</code></td>
+<td><code>mflux-community/z-image-turbo-controlnet-union-2-1-mflux-q8</code></td>
+<td style="text-align:right">15.3 GB</td>
+<td>Z-Image Turbo + Fun ControlNet Union 2.1; canny/depth/HED hints computed locally.</td>
+</tr>
+<tr>
+<td><code>flux3-klein-edit</code></td>
+<td><code>mflux-community/flux-3-image-klein-mflux-q8</code></td>
+<td style="text-align:right">9.9 GB</td>
+<td>FLUX 3 Image Klein (Oct 2026, 5.6B + Qwen3-VL-4B encoder), added on request: editing with up to 10 references, text rendering. 16 distilled steps; no LoRA training in mflux. FLUX Kommunity License v1.0 (non-commercial, plus commercial output for small users).</td>
+</tr>
+</tbody>
+</table>
+<p>Also seen in current mflux and worth a Phase 1 slot: SeedVR2 for the tiled
+4x pass.</p>
+<p>Smoke results (one 1024x768 image each from the scene-26 de-dithered plate,
+seed 7, LLMs unloaded; time includes model load) are in the table below and
+in <code>work/smoke/&lt;backend&gt;/record.json</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Backend</th>
+<th style="text-align:right">Steps</th>
+<th style="text-align:right">Time</th>
+<th style="text-align:right">Peak memory</th>
+<th>What the image showed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>flux2-klein-edit</code> (9B q4)</td>
+<td style="text-align:right">4</td>
+<td style="text-align:right">112 s</td>
+<td style="text-align:right">19.8 GB</td>
+<td>Clear photoreal restyle (rug, wood, lamps); layout mostly kept, but the bartender vanished and the camera shifted slightly.</td>
+</tr>
+<tr>
+<td><code>flux3-klein-edit</code> (q8)</td>
+<td style="text-align:right">16</td>
+<td style="text-align:right">225 s</td>
+<td style="text-align:right">12.9 GB</td>
+<td>Closest to the original layout with more real-looking materials and people; the patron at the right edge was dropped. Lowest memory.</td>
+</tr>
+<tr>
+<td><code>qwen21-edit</code> (q8, <code>--strength 0.7</code>)</td>
+<td style="text-align:right">25</td>
+<td style="text-align:right">267 s</td>
+<td style="text-align:right">25.9 GB</td>
+<td>Almost unchanged at this strength: geometry fully kept, little photoreal shift. Needs higher strength in Phase 1.</td>
+</tr>
+<tr>
+<td><code>zimage-controlnet</code> (q8, canny 0.8)</td>
+<td style="text-align:right">20</td>
+<td style="text-align:right">2,209 s</td>
+<td style="text-align:right">25.8 GB</td>
+<td>Text-to-image under a canny hint: structure followed, but materials, palette and props were reinvented (modern bar, new fireplace). The run swapped heavily (about 10 GB of swap in use), so the time is not representative.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Weights deleted afterwards (decision #15):</strong> the Qwen-Image 2.1 and Z-Image
+ControlNet weights were removed with <code>hf cache rm</code> to free disk; those two
+backends re-download (18.5 GB and 15.3 GB plus 6.7 GB) on next use. FLUX 3
+Klein and FLUX.2 klein 9B remain.</p>
+<h3 id="remote-image-server">Remote image server</h3>
+<p>A second laptop serves mflux behind an OpenAI-style
+<code>POST http://&lt;LAN host&gt;:8000/v1/images/generations</code> (bearer key, kept out of
+the repo; <code>GET /healthz</code> lists models). Request fields: <code>prompt</code>, <code>model</code>,
+<code>width</code>, <code>height</code>, <code>seed</code>, optional base64 <code>image</code> for editing. There is no
+steps or strength field, so the server's defaults apply. Profiled on
+2026-11-15 with <code>REMASTER_IMAGE_API_KEY=... uv run python -m remaster.remote_profile</code> (same 1024x768 scene-26 input, prompt and seed as
+the local smoke; three runs each; the first includes the model load).
+Records are in <code>work/smoke/remote/profile.json</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align:right">Text-to-image first / warm</th>
+<th style="text-align:right">Edit first / warm</th>
+<th>What the edit showed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>flux3-image-klein</code></td>
+<td style="text-align:right">17.9 s / 13.0 s</td>
+<td style="text-align:right">36.5 s / 29.6 s</td>
+<td>Almost identical to the input: lamps and figures redrawn slightly, no photoreal shift. The local 16-step run changed far more, so the server's step or strength default probably differs.</td>
+</tr>
+<tr>
+<td><code>flux2-klein-4b</code></td>
+<td style="text-align:right">8.2 s / 4.0 s</td>
+<td style="text-align:right">12.3 s / 7.3 s</td>
+<td>Convincing photoreal restyle (wood grain, rugs, lit lamps) with the layout, figures and props kept.</td>
+</tr>
+<tr>
+<td><code>flux2-klein-9b</code></td>
+<td style="text-align:right">37.4 s / 10.1 s</td>
+<td style="text-align:right">22.8 s / 18.6 s</td>
+<td>Similar to the 4B, slightly warmer and richer; layout kept.</td>
+</tr>
+</tbody>
+</table>
+<p>The server reports no memory use. Warm edits are 6 to 30 times faster than
+the local runs (225 s for FLUX 3 Klein, 112 s for FLUX.2 9B), and this Mac's
+memory stays free. Text-to-image from all three gave plausible Victorian
+billiard rooms.</p>
+<p><strong>Decision #14 (2026-11-15):</strong> <code>remote-flux2-klein-4b</code> is now the provisional
+backend for backgrounds and casting in <code>remaster.toml</code>, with local
+<code>flux3-klein-edit</code> as the fallback when the remote laptop is off. It is the
+fastest backend, edits as well as the 9B, and is Apache-2.0. Phase 1's
+bake-off can still change it.</p>
+<p>All four load and produce an image on this machine. These are single
+smoke images, not a bake-off: choosing a backend is Phase 1's job. Run one
+again with <code>uv run python -m remaster.mflux_smoke &lt;backend&gt; [--extra ...]</code>.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remastering The Rose Tattoo: what we tried, and what worked</title>
+<meta name="description" content="An illustrated walk-through of four months of AI remastering of a 1996 Sherlock Holmes adventure: the August diffusion experiments, the October super-resolution pilots, and the November pipeline that redrew 65 of 80 rooms.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="article">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html" aria-current="page">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Remastering The Rose Tattoo: what we tried, and what worked</h1>
+<time datetime="2026-11-22">2026-11-22</time>
+<div class="prose">
+<p class="lede"><em>Four months of trying to remaster a 1996 Sherlock Holmes adventure with AI: what an image model will and will not keep, why a detective game is harder than a screenshot, and how 65 of 80 rooms got redrawn without moving a single clue.</em></p>
+
+<p class="reading-guide">The boxed figures are live. Drag across a picture to compare it with the 1996 original, and click the buttons above it to swap in another attempt. Numbered notes open on tap. Every number comes from the project's working documents, which are on this site too (<em>All pages</em>, top left).</p>
+
+<p><em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> came out in 1996. Its 80 rooms are pre-rendered 3D scenes at 640×480 in 256 colours, with hand-placed characters walking through them. This project runs the game on a modified <a href="https://www.scummvm.org/">ScummVM</a> that can load replacement art from a folder, and tries to fill that folder with something better.<span class="sidenote-wrap"><label for="sn-1" class="sidenote-number"></label><input type="checkbox" id="sn-1" class="sidenote-toggle"><span class="sidenote">The engine work lives in a fork of ScummVM. The override contract is an environment variable, <code>SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES</code>, that points the engine at a folder of <code>@2x</code> PNGs keyed by scene, resource and frame.</span></span></p>
+
+<p>“Something better” turned out to be the hard part. This page walks through every method tried so far, roughly in order, with the art each one produced.</p>
+
+<nav class="toc" aria-label="Contents">
+<h2>Contents</h2>
+<ol>
+<li><a href="#problem">Why a detective game is hard to redraw</a></li>
+<li><a href="#timeline">Three bursts of work</a></li>
+<li><a href="#august">August: ask a diffusion model nicely</a></li>
+<li><a href="#lifelike">August: lifelike characters</a></li>
+<li><a href="#october">October: enlarge, don't redraw</a></li>
+<li><a href="#plan">November: a plan built around the failures</a></li>
+<li><a href="#bakeoff">Phase 1: the bake-off</a></li>
+<li><a href="#phase2">Phase 2: eight iterations to 65 rooms</a></li>
+<li><a href="#failures">What failed, and why</a></li>
+<li><a href="#who">Who did the work</a></li>
+<li><a href="#next">What is next</a></li>
+</ol>
+</nav>
+
+<section id="problem">
+<h2>1. Why a detective game is hard to redraw</h2>
+
+<p>The first idea anyone has is to hand each screenshot to an image model and ask for a photograph. The trouble is that this is an adventure game. A door has to stay where the door is, because the player clicks on it. A sign has to say what it says, because it is a clue. If the model helpfully adds a second door, Holmes looks better while solving a different case.</p>
+
+<p>Worse, a room is not one picture. What you see on screen is assembled at run time:</p>
+
+<div class="tw"><table>
+<thead><tr><th>Layer</th><th>What it is</th><th>How many</th></tr></thead>
+<tbody>
+<tr><td>Background</td><td>The empty room, one image per scene (some scroll)</td><td>80</td></tr>
+<tr><td>Room objects</td><td>Chairs, busts, lamps, people standing still; drawn as sprites, some animated</td><td>32,697 frames</td></tr>
+<tr><td>Cutscene animations (cAnims)</td><td>Holmes picking something up, a door opening; each frame copies part of the room behind the figure</td><td>767 animations, 33,189 frames</td></tr>
+<tr><td>Walk sprites</td><td>Holmes, Watson and the cast, re-projected into each room's 256-colour palette</td><td>18,380 palette-qualified frames</td></tr>
+</tbody></table></div>
+
+<p>Clicks are tested against rectangles and walk zones stored in the room data, in the original 640×480 coordinates.<span class="sidenote-wrap"><label for="sn-2" class="sidenote-number"></label><input type="checkbox" id="sn-2" class="sidenote-toggle"><span class="sidenote">From the plan: <code>TattooScene::findBgShape</code> hit-tests with <code>getNewBounds().contains(pt)</code>. Gameplay geometry depends on each frame's canvas size and offset, not on its alpha.</span></span> So a redrawn background must keep its furniture where the game thinks it is, the sprites drawn over it must match its new look, and nothing the story depends on may appear, vanish or change its words.</p>
+</section>
+
+<section id="timeline">
+<h2>2. Three bursts of work</h2>
+
+<p>The repository has 249 commits, in three clusters. Click one to see what it was.</p>
+
+<figure class="widget" data-tabs>
+<figcaption><strong>Commits per week, August to November 2026.</strong> Highlighted weeks belong to the selected burst.</figcaption>
+<div class="tl">
+<button type="button" data-key="aug" data-range="0-1" aria-pressed="true"><b>August</b><small>ChatGPT / Codex · 98 commits</small><template>
+<h4>8-13 August: the diffusion lab</h4>
+<p>Built with ChatGPT and Codex. A patched ScummVM that loads hi-res backgrounds and a true-colour compositor; a hi-res text and dialog renderer; then a run of diffusion redraw pipelines (SDXL with ControlNet on a remote PC, FLUX.1-schnell on this Mac, Z-Image Turbo, a GPT Image pass that never ran) and “lifelike” character sheets. Five playable packs, v2 to v6.</p></template></button>
+<button type="button" data-key="oct" data-range="12-12"><b>October</b><small>Codex · 70 commits</small><template>
+<h4>31 October: super-resolution and sprites</h4>
+<p>Real-ESRGAN 2× on every asset, extraction of every room sprite, cAnim and palette-qualified walk, and a ladder of small pilots on scene 26 that settled alpha, palette and contour handling. Result: a contour candidate pack in which all 80 scenes start.</p></template></button>
+<button type="button" data-key="nov" data-range="14-15"><b>November</b><small>Claude · 81 commits</small><template>
+<h4>14-22 November: the remaster pipeline</h4>
+<p>A written plan, a <code>remaster</code> command with resumable stages, a golden-set bake-off (Phases 0 and 1), then eight whole-game iterations of Phase 2 that took the redrawn rooms from 14 to 65 of 80. Sprites (Phase 3) and engine work (Phase 4) started in parallel sessions.</p></template></button>
+</div>
+<div class="commits" id="commit-hist" data-counts="[19,79,0,0,0,0,0,0,0,0,0,0,70,0,22,61,0]"></div>
+<div class="commits-axis"><span>3 Aug</span><span>Sep</span><span>Oct</span><span>23 Nov</span></div>
+<div class="detail" aria-live="polite"></div>
+</figure>
+</section>
+
+<section id="august">
+<h2>3. August: ask a diffusion model nicely</h2>
+
+<p>The look the project is after came from a conversation with ChatGPT: each scene re-rendered as a photograph of a physical set, with real materials, practical lighting and real-looking people. Those reference images also recompose freely: the camera moves, furniture shifts, figures appear. That is fine for a picture and fatal for a playable room.</p>
+
+<p>The August work tried to get that look while keeping the room. Each method below ran on the same scenes; scene 4, the police station, is the hardest, because its sign is a clue the player must read.</p>
+
+<figure class="widget" data-compare>
+<figcaption><strong>Scene 4, the police station.</strong> Left of the line: the 1996 room. Right: the selected attempt. Drag across the picture.</figcaption>
+<div class="pick" role="group" aria-label="Attempt">
+<button type="button" data-src="img/s04-sdxl-cinematic.webp" data-tag="SDXL cinematic" aria-pressed="true">SDXL + ControlNet<small>denoise 0.4</small><template><p><b>A1111, Juggernaut-XL v9, Canny ControlNet</b> (profile <code>photographic-cinematic</code>, 32 steps, CFG 4.5). The strongest restyle of August: real stone, real light. The sign is rewritten into invented words, and edges drift. All 80 scenes were made this way and fed every v2-v6 playable pack.</p></template></button>
+<button type="button" data-src="img/s04-sdxl-cuda.webp" data-tag="SDXL strength 0.25">SDXL, low strength<small>0.25</small><template><p><b>SDXL + Canny ControlNet on CUDA at strength 0.25</b>, with protect masks over walk zones and hotspots. Geometry survives better, but the picture barely changes, and the remaster plan still records it as rejected for drift.</p></template></button>
+<button type="button" data-src="img/s04-flux1.webp" data-tag="FLUX.1 strength 0.85">FLUX.1-schnell<small>0.85</small><template><p><b>FLUX.1-schnell at strength 0.85</b>, 24 steps. Photographic, and wrong: a “POLICE” sign is added above an unreadable plaque, a hydrant and a carriage appear, a chandelier floats outside. At or below 0.25 FLUX kept geometry and text; at 0.35 and above it garbled signage and invented people and props.</p></template></button>
+</div>
+<div class="compare">
+<img src="img/s04-1996.webp" alt="Scene 4 in 1996: a stone police station with an arched door, a gold sign and two street lamps." width="960" height="720">
+<img class="after" src="img/s04-sdxl-cinematic.webp" alt="" width="960" height="720" loading="lazy">
+<span class="bar"></span><span class="tag l">1996</span><span class="tag r"></span>
+<input type="range" min="0" max="100" value="50" aria-label="Comparison split">
+</div>
+<div class="verdict" aria-live="polite"></div>
+</figure>
+
+<p>Every model told the same story. Once the strength is high enough to look different, the model drifts the geometry, moves or invents objects, and rewrites signs. Turn it down until text survives (FLUX at <code>--steps 12 --strength 0.25</code>, three real denoising steps) and the result looks like the original.<span class="sidenote-wrap"><label for="sn-3" class="sidenote-number"></label><input type="checkbox" id="sn-3" class="sidenote-toggle"><span class="sidenote">A FLUX run with a hard “geometry lock” pasted the original's edges back over the redraw. With the lock on, the seams showed. The lock masks are among the kept samples; <a href="pack-archive.html">pack-archive</a> lists them.</span></span> A particularly convincing hallucination is still a hallucination.</p>
+
+<p>Two more routes were set up and never finished. A Z-Image Turbo spot test worked at low strength, but compositing the original mask back over it damaged the picture. A paid GPT Image pass with protect masks was scripted and never run through.<span class="sidenote-wrap"><label for="sn-4" class="sidenote-number"></label><input type="checkbox" id="sn-4" class="sidenote-toggle"><span class="sidenote">Its folder holds one scene's edit mask and nothing else. The script is described in <a href="code-archive.html">code-archive</a>, with the commit that still has it.</span></span></p>
+</section>
+
+<section id="lifelike">
+<h2>4. August: lifelike characters</h2>
+
+<p>Rooms were only half the problem. Holmes and Watson are sprites about 180 pixels tall, animated frame by frame. The August idea was to generate one photoreal <em>character sheet</em> per character, ten poses on a green screen, and composite the nearest pose onto each walk frame.</p>
+
+<figure class="widget pic">
+<figcaption><strong>Holmes, walk frame 24</strong>, the same frame through each method, at the same 2× height. The sheet on the right is what the lifelike frames were cut from.</figcaption>
+<div class="strip">
+<figure><img class="pixel" src="img/holmes-1996.webp" alt="The 1996 Holmes sprite, walking right in a grey Inverness cape and deerstalker." width="186" height="368">1996 (2× nearest)</figure>
+<figure><img src="img/holmes-esrgan.webp" alt="The same frame enlarged by Real-ESRGAN: smooth, the same pose." width="186" height="368" loading="lazy">ESRGAN 2×</figure>
+<figure><img src="img/holmes-lifelike.webp" alt="The lifelike frame: a photographic Holmes seen from behind, though the frame walks to the right." width="186" height="368" loading="lazy">Lifelike sheet</figure>
+<figure><img class="sheet" src="img/holmes-sheet.webp" alt="A ten-pose photographic character sheet of Holmes on green." width="800" height="493" loading="lazy">The ten-pose sheet</figure>
+</div>
+</figure>
+
+<p>The single frames look more like a person. The animation does not. A walk cycle has dozens of distinct poses and a ten-pose sheet has ten, so the nearest pose is often wrong: frame 24 walks to the right, and its lifelike replacement turns its back. Poses snap from frame to frame, and the face changes with them. A generic “Victorian detective” prompt lost who the character was, so each character got its own profile, which helped faces and not motion.</p>
+
+<p>The five August playable packs (v2 to v6) put the cinematic rooms and these sprites together. They proved the engine side worked, the override folder, the hi-res compositor, the text renderer, and showed a second problem: photographic rooms with sprite-art people look worse than either alone.</p>
+</section>
+
+<section id="october">
+<h2>5. October: enlarge, don't redraw</h2>
+
+<p>The October work went the other way. Instead of asking a model to redraw a room from a prompt, it used <a href="https://github.com/xinntao/Real-ESRGAN">Real-ESRGAN</a>, a super-resolution model, to enlarge every asset 2× from its own pixels. Nothing gets invented at the scale of a door or a sign, and nothing moves.<span class="sidenote-wrap"><label for="sn-5" class="sidenote-number"></label><input type="checkbox" id="sn-5" class="sidenote-toggle"><span class="sidenote">The ESRGAN benchmark on this Mac: 20 sprite frames in 4.24 s on Apple's GPU, 1.6 GB peak. The untiled 1280×960 map ran out of memory; overlapping tiles worked.</span></span></p>
+
+<p>The hard part was the sprites. Each one has a hard-edged 1-bit mask in 256 colours; enlarged, the edges either stair-step or smear. A ladder of small pilot packs, all on scene 26, the billiard academy, settled it one layer at a time:</p>
+
+<figure class="widget" data-tabs>
+<figcaption><strong>The scene-26 pilot ladder, 31 October.</strong> Each pack is the previous one plus one more layer of sprite handling.</figcaption>
+<div class="pipe">
+<button type="button" data-key="p1" aria-pressed="true">Room sprites<small>first pilot</small><template><h4>Room-sprite pilot</h4><p>128 room-sprite frames, ESRGAN 2×. First ordered replay in the engine: lamp, bartender, bar and patron drew in the right order.</p></template></button>
+<button type="button" data-key="p2">Soft alpha<template><h4>Soft alpha</h4><p>Soft alpha on 194 shared and scene-26 resources. Soft and binary alpha render differently at the edges.</p></template></button>
+<button type="button" data-key="p3">cAnim<template><h4>Cutscene animation</h4><p>The <code>26HEXIT</code> cAnim (18 frames), layered like the native <code>BEHIND</code> order.</p></template></button>
+<button type="button" data-key="p4">Identity<template><h4>Stream identity</h4><p>Five resources differ between <code>VGS.LIB</code> and <code>WALK.LIB</code>. Overrides are keyed by stream hash, so a replacement filed under the wrong name falls back to the native art instead of drawing the wrong thing.</p></template></button>
+<button type="button" data-key="p5">Palettes<template><h4>Palette-qualified walks</h4><p>A walking character is re-projected into each room's palette, so the same frame exists once per palette. Watson in room 26's palette: 343 lookups hit across four fixture walks.</p></template></button>
+<button type="button" data-key="p6">Contours<template><h4>Contours that keep their support</h4><p>Feathered-alpha and thin-guard variants were tried and not adopted. The chosen method, <code>scale4-box</code> with <code>--preserve-support</code>, changes alpha only. The audits found no RGB, support or topology change anywhere except one cAnim frame, whose whole resource falls back to the baseline.</p></template></button>
+</div>
+<div class="detail" aria-live="polite"></div>
+</figure>
+
+<p>The result was the <b>contour candidate</b>: ESRGAN backgrounds plus five audited sprite trees, 3,640 resources and 87,656 frames. In a smoke test, all 80 scenes reached their start marker. It was faithful and clean, and it was the same game, only larger: dither patterns scaled up with everything else. It became the baseline that every later method has to beat, and the fallback for every room that fails.</p>
+</section>
+
+<section id="plan">
+<h2>6. November: a plan built around the failures</h2>
+
+<p>In November the work moved to Claude, starting with a written plan. Its central idea answers the August failure directly: <strong>let the model move things, and move the game's geometry with it.</strong></p>
+
+<p>The game keeps running in its original 640×480 coordinates. Each redrawn room ships a smooth, invertible <em>warp</em> from the original coordinates to the new picture, fitted from feature matches, optical flow and the room's own named objects found again in the redraw. Sprites are drawn through the warp, and the mouse is mapped back through its inverse before any hit test. What a warp cannot express (objects swapping order, appearing, vanishing, or a camera move that folds the mapping) fails a gate. Until the engine side exists (Phase 4), <code>assemble</code> runs the warp the other way, pulling each redraw back onto the 1996 layout.<span class="sidenote-wrap"><label for="sn-6" class="sidenote-number"></label><input type="checkbox" id="sn-6" class="sidenote-toggle"><span class="sidenote">The warp is m(p) = s·(p + d(p)): a global scale times a smooth displacement on a 40 px grid, fitted from SIFT + MAGSAC, DIS optical flow and OWLv2 object anchors.</span></span></p>
+
+<p>The other decisions follow from August too: de-dither before anything else, since both super-resolution and diffusion amplify the dither; redraw a <em>plate</em> (the background with its static objects composited in) once so lighting matches, then cut the objects back out; cast each character once and redraw every frame conditioned on the original pose; and never wait for a human. Anything that needs approval goes into a review queue with a provisional default, and work carries on.</p>
+
+<figure class="widget" data-tabs>
+<figcaption><strong>The pipeline</strong>, one command per stage: <code>uv run remaster &lt;stage&gt;</code>, driven by <code>remaster.toml</code>. Click a stage.</figcaption>
+<div class="pipe">
+<button type="button" data-key="extract" aria-pressed="true">extract<small>originals</small><template><h4>extract</h4><p>The existing extractors plus an extraction audit: backgrounds, room sprites, cAnims, walks, palettes, hotspots and walk zones.</p></template></button>
+<button type="button" data-key="prepare">prepare<small>de-dither, plates</small><template><h4>prepare</h4><p>De-dither, build each room's plate, and make structure and edge control images.</p></template></button>
+<button type="button" data-key="brief">brief<small>local LLM</small><template><h4>brief</h4><p>A local vision LLM writes a per-scene prompt brief from the image: what is there, which signs are legible, what must survive.</p></template></button>
+<button type="button" data-key="redraw">redraw-bg<small>FLUX.2 klein</small><template><h4>redraw-bg</h4><p>The photoreal redraw of each plate, on an image server on a second laptop. Several seeds per room.</p></template></button>
+<button type="button" data-key="geometry">geometry<small>the warp</small><template><h4>geometry</h4><p>Fit the room warp, check it is invertible with bounded stretch, write the geometry sidecar.</p></template></button>
+<button type="button" data-key="qa">qa<small>gates</small><template><h4>qa</h4><p>Deterministic gates and a VLM review: every hotspot object found again in the same order; the warp invertible; walk-zone floor still floor; writing pasted from the baseline; no people added or removed; no new obstacles on walkable floor; no story-changing fire; and the picture must actually change.</p></template></button>
+<button type="button" data-key="assemble">assemble<small>playable pack</small><template><h4>assemble</h4><p>Per room, pick the most ambitious passing redraw, else the ESRGAN baseline; warp it back onto the 1996 layout; re-base room objects and cAnim frames on it; build the pack the engine loads.</p></template></button>
+<button type="button" data-key="smoke">smoke<small>in the engine</small><template><h4>smoke</h4><p>Start every scene in the patched engine and check that it renders. Later joined by scripted-input play-tests of exits, the map, the inventory and cAnims.</p></template></button>
+</div>
+<div class="detail" aria-live="polite"></div>
+</figure>
+
+<p><b>Phase 0</b> (14 November) built that skeleton: the CLI and its config, a local LLM client, the queue runner and review queue, an index of the old pilot trees, and a <em>golden set</em> of seven scenes chosen to cover a street, an interior, a haze room, a clue with writing, a scrolling room and a dark room, plus Holmes and Watson.</p>
+</section>
+
+<section id="bakeoff">
+<h2>7. Phase 1: the bake-off</h2>
+
+<p>Phase 1 ran every candidate backend on the golden rooms at three freedom levels: <b>L0</b> and <b>L1</b> are image-to-image at strength 0.6 and 0.45, with the layout locked; <b>L2</b> is a free reference edit, with the fitted warp absorbing whatever moves.</p>
+
+<figure class="widget" id="bakeoff-chart">
+<figcaption><strong>Phase 1, 15 November: 7 golden rooms per row.</strong> Choose what to plot.</figcaption>
+<div class="row"><span class="lab">Show</span>
+<button type="button" data-metric="passed" aria-pressed="true">Rooms passed</button>
+<button type="button" data-metric="change">Picture change</button>
+<button type="button" data-metric="drift">Geometry drift</button></div>
+<div class="bars"></div>
+<div class="detail" aria-live="polite"></div>
+</figure>
+
+<p>Two results shaped everything after. First, <b>a no-op can win.</b> FLUX.3 at L2 returned the input almost unchanged, so it passed every geometry gate and scored highest; the vision model rated the original 3D renders about as photoreal as a real remaster. A minimum-change gate (mean change of at least 20 of 255) fixed that. Second, <b>image-to-image cannot keep a layout.</b> At strength 0.6 the billiard table grows and the door moves; at 0.45 a second barman appears. L0 and L1 were dropped. FLUX.2 klein 9B at L2 became the backend, on the image server, at about 63 seconds a picture.<span class="sidenote-wrap"><label for="sn-7" class="sidenote-number"></label><input type="checkbox" id="sn-7" class="sidenote-toggle"><span class="sidenote">Run locally through mflux on this Mac, the same model took 144 s and 23.2 GB peak per image, which is why diffusion moved to the second laptop.</span></span></p>
+
+<p>Phase 1 ended with 2 of 7 rooms passing. Then the human looked. In scene 4 the model had put flames behind the police-station windows; in scene 9 it had added table lamps and lit the fire. No gate asked about new light. <b>Phase 1b</b> added light and people checks and re-ran 56 redraws: <b>0 of 7</b>. The model fills empty floor with people on its own (a woman, a man and a dog in scene 2 at every seed), and neither a “keep the figures” instruction nor masking the people out stopped it. <b>Phase 1c</b> relaxed the rule to what matters for the story (new lamps are fine; fire outside a fireplace is not) and tried a ControlNet route: 1 of 7, scene 9, with ControlNet at 0 of 7 and worse than the original.</p>
+
+<p>The sprite test came out better. With a cast sheet passed as a second reference image, both characters passed flicker, identity and pose gates on the 4B model, at 8.5 to 13 seconds a frame. The detail of coat folds and scarf stripes still shifted from frame to frame, which is where Phase 3 starts.</p>
+</section>
+
+<section id="phase2">
+<h2>8. Phase 2: eight iterations to 65 rooms</h2>
+
+<p>On 16 November the plan changed from “perfect the golden set” to “first reach a playable game, then improve it”. Each Phase 2 iteration runs every room through the pipeline, builds a playable pack and plays it. Click a bar.</p>
+
+<figure class="widget" data-tabs>
+<figcaption><strong>Rooms redrawn, of 80</strong>, by iteration (16-21 November). The rest keep the ESRGAN baseline.</figcaption>
+<div class="iters goal">
+<button type="button" data-key="1" style="height:17.5%"><span>14</span><template><h4>Iteration 1 · 14 rooms</h4><p>All 80 rooms at four seeds, about 6 hours unattended. In the game, two surprises: the pack shipped the <em>plate</em>, with people and furniture baked in, and the engine drew them again as sprites, so walkers doubled and a ghost head appeared in scene 9. And the 1996 static objects sat over the new rooms.</p></template></button>
+<button type="button" data-key="2" style="height:17.5%"><span>14</span><template><h4>Iteration 2 · 14 rooms</h4><p>Static-only plates, and 726 room-object overrides cut from the redraw. Now the model's habit showed in full: 347 candidate added people. Animated ambience (lights, a fan) still showed as 1996 rectangles.</p></template></button>
+<button type="button" data-key="3" style="height:27.5%"><span>22</span><template><h4>Iteration 3 · 22 rooms</h4><p>Added people are detected and painted out; animated objects are re-based on the redraw. Patches show where an animation's frames differ from the plate.</p></template></button>
+<button type="button" data-key="4" style="height:68.75%"><span>55</span><template><h4>Iteration 4 · 55 rooms</h4><p>The big jump: the floor and objects gates were made relative to the original (the 1996 room must pass the gate it is judged by), and four more seeds were tried. Haze rooms go back to the baseline, because the engine shows native pixels under the haze.</p></template></button>
+<button type="button" data-key="5" style="height:68.75%"><span>55</span><template><h4>Iteration 5 · 55 rooms</h4><p>767 cutscene animations each copy part of the 1996 room behind the figure; in 47 of 55 redrawn rooms at least one would flash an old-art rectangle. All 33,189 frames were re-based on the redraw. A scripted-input hook in the engine let the play-test open the wardrobe in room 3: 38 distinct cAnims verified, every one clean.</p></template></button>
+<button type="button" data-key="6" style="height:71.25%"><span>57</span><template><h4>Iteration 6 · 57 rooms</h4><p>A repair variant for near-miss rooms: remove what blocks a gate, restore what is missing. Restoring “missing” objects that were only slightly displaced made duplicates, so it is only used for objects the detector cannot see at all.</p></template></button>
+<button type="button" data-key="7" style="height:73.75%"><span>59</span><template><h4>Iteration 7 · 59 rooms</h4><p>Objects-gate calibration: of 924 unmatched detections, 189 accepted as partial matches; a spot check found 11 of 12 right. One room passed QA and was rejected by eye for an invented brass lamp.</p></template></button>
+<button type="button" data-key="8" style="height:81.25%" aria-pressed="true"><span>65</span><template><h4>Iteration 8 · 65 rooms</h4><p>Room-object overrides had never reached the game: the pack put them next to the background, but the engine reads sprites from <code>sprites/</code>. Moving them fixed several “model failures” at once. The map was redrawn in overlapping tiles. The last repair round added one room, under the stopping rule of two, so Phase 2 stopped at <b>65 of 80</b> (pack it9 differs from it8 only in room 2).</p></template></button>
+</div>
+<div class="iters-axis"><span>it1</span><span>it2</span><span>it3</span><span>it4</span><span>it5</span><span>it6</span><span>it7</span><span>it8</span></div>
+<div class="detail" aria-live="polite"></div>
+</figure>
+
+<p>Here is what that looks like. Scene 9 is the dark sitting room, the one golden room that passed in Phase 1c.</p>
+
+<figure class="widget" data-compare>
+<figcaption><strong>Scene 9, the sitting room.</strong> Left: 1996. Right: the selected pack.</figcaption>
+<div class="pick" role="group" aria-label="Pack">
+<button type="button" data-src="img/s09-it9.webp" data-tag="Phase 2 result (it9)" aria-pressed="true">Phase 2 result<small>it9</small><template><p><b>The shipped redraw.</b> Same room, same furniture in the same places, re-lit as a photograph. The lamp and fireplace are new light, which is allowed; the redraw is warped back onto the 1996 layout, so the game's hotspots still land on the chairs, busts and paintings.</p></template></button>
+<button type="button" data-src="img/s09-it1.webp" data-tag="Iteration 1">Iteration 1<small>it1</small><template><p><b>Iteration 1 redrew the plate with its people.</b> The seated man is part of the background here, and the engine draws its own seated man on top: in the game, a ghost head appears behind him. From iteration 2 on, plates are static-only.</p></template></button>
+</div>
+<div class="compare">
+<img src="img/s09-1996.webp" alt="Scene 9 in 1996: a dark red-walled sitting room with armchairs, busts, bookcases and a fireplace." width="960" height="720">
+<img class="after" src="img/s09-it9.webp" alt="" width="960" height="720" loading="lazy">
+<span class="bar"></span><span class="tag l">1996</span><span class="tag r"></span>
+<input type="range" min="0" max="100" value="50" aria-label="Comparison split">
+</div>
+<div class="verdict" aria-live="polite"></div>
+</figure>
+
+<p>Scene 26, the billiard academy, failed every Phase 1 round: the model zoomed in about 1.2×, added bar furniture and removed the dartboard. It passed in Phase 2. Compare it with the August FLUX attempt at the same room.</p>
+
+<figure class="widget" data-compare>
+<figcaption><strong>Scene 26, the billiard academy.</strong> Left: 1996. Right: the selected attempt.</figcaption>
+<div class="pick" role="group" aria-label="Attempt">
+<button type="button" data-src="img/s26-it9.webp" data-tag="Phase 2 result (it9)" aria-pressed="true">Phase 2 result<small>November</small><template><p><b>FLUX.2 klein 9B, reference edit, warped back.</b> The table, the lamps, the dartboard, the doors and the portrait are where the game expects them; the room is re-lit and re-textured. Compare the corner table at bottom right, which the walk zone runs past.</p></template></button>
+<button type="button" data-src="img/s26-flux1.webp" data-tag="FLUX.1, August">FLUX.1-schnell<small>August</small><template><p><b>FLUX.1-schnell img2img, August.</b> A new “PARK HALL” sign, an armchair and a pint glass on the floor, a second set of lamps, a fireplace where the wall was. Plausible, and a different room.</p></template></button>
+</div>
+<div class="compare">
+<img src="img/s26-1996.webp" alt="Scene 26 in 1996: a billiard room with a green table under a row of glass lamps, a bar at the back and a portrait on the left wall." width="960" height="720">
+<img class="after" src="img/s26-it9.webp" alt="" width="960" height="720" loading="lazy">
+<span class="bar"></span><span class="tag l">1996</span><span class="tag r"></span>
+<input type="range" min="0" max="100" value="50" aria-label="Comparison split">
+</div>
+<div class="verdict" aria-live="polite"></div>
+</figure>
+</section>
+
+<section id="failures">
+<h2>9. What failed, and why</h2>
+
+<p>Most of the time went into failures. The useful ones, in the order they were met:</p>
+
+<div class="fail"><h4>Strength is not a safety dial</h4><p>August. Low enough to keep text means too low to change the look. Every model, every setting. The answer was gates that check objects and writing, and a warp that tolerates movement, rather than trusting the model to stay still.</p></div>
+
+<div class="fail"><h4>A pose sheet is not an animation</h4><p>August. Ten poses cannot stand in for each frame of a walk; poses snap and identity drifts. Phase 3 redraws every frame, conditioned on the original frame and a cast sheet.</p></div>
+
+<div class="fail"><h4>The best-scoring redraw changed nothing</h4><p>Phase 1. FLUX.3 returned its input and topped every score. Hence a minimum-change gate.</p></div>
+
+<div class="fail"><h4>The model adds people</h4><p>Phases 1-2, the most common failure. Instructions and masking did not stop it; detecting the added people and painting them out did (iteration 3). Three rooms still fail the vision check after eight seeds and three repairs.</p></div>
+
+<div class="fail"><h4>The gate misjudged the original</h4><p>Iteration 7. In nine baseline rooms the object detector cannot find a lamp or a mail slot in the 1996 room itself, so it could never find it in a redraw. Rule since then: the original must pass the gate it is judged by, and newly passing rooms are checked by eye.</p></div>
+
+<figure class="widget pic">
+<figcaption><strong>Scene 57 in game, iteration 1.</strong> The pack shipped a plate with the street's people painted in, and the engine drew its own walkers on top. This is the capture that found the bug.</figcaption>
+<img src="img/s57-it1-ingame.webp" alt="An in-game capture of a photoreal hotel front at night with a crowd of gentlemen in top hats, some of them duplicated." width="960" height="720" loading="lazy">
+</figure>
+
+<div class="fail"><h4>Not every bug is the model's</h4><p>Iteration 8. Room-object overrides had sat in the wrong folder since iteration 2, so the 1996 railing, bushes and wall cover drew over the redraws. Several rooms that looked like model failures were pack bugs. Likewise, three “engine crashes” in the play-test came from the test's own scene jump.</p></div>
+
+<p>Fifteen rooms keep the ESRGAN baseline, each with a recorded reason:</p>
+<div class="tw"><table>
+<thead><tr><th>Rooms</th><th>Why they stay on the baseline</th></tr></thead>
+<tbody>
+<tr><td>7, 8, 18, 53, 68</td><td>Haze rooms: the engine draws native pixels under the haze. Engine work (Phase 4).</td></tr>
+<tr><td>4, 33, 91</td><td>Still add or remove people after 8 seeds and 3 repairs. Scene 4's sign is also still garbled.</td></tr>
+<tr><td>5, 24, 25, 54, 71</td><td>Still add an object on walkable floor; the 1996 rooms pass that gate.</td></tr>
+<tr><td>2</td><td>Every passing redraw fails by eye: the bearskin rug becomes a live animal, the bullet holes sit in a pasted patch.</td></tr>
+<tr><td>92</td><td>The 1996 close-up is already photographic; faithful redraws change it too little.</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="who">
+<h2>10. Who did the work</h2>
+
+<p>The November plan split the labour. Claude (Opus) wrote specs, interfaces and acceptance tests, reviewed diffs and gate results, and designed the C++ engine changes. Implementation went, where it could, to <a href="https://opencode.ai/">OpenCode</a> running on a local model, qwen3.8-27b on the second laptop, as queued <code>delegate</code> jobs with a spec, a list of files it may change and a test. The same local model wrote every scene brief and judged every vision QA question. Diffusion ran on the second laptop, too.<span class="sidenote-wrap"><label for="sn-8" class="sidenote-number"></label><input type="checkbox" id="sn-8" class="sidenote-toggle"><span class="sidenote">In Phase 1 about 10% of engineering lines were delegated, plus all briefs and QA judgement; Phase 2 started delegation-first. When the model host went down mid-task in iteration 5, Opus wrote that piece itself and logged why.</span></span></p>
+
+<p>The human set the art direction, answered approval questions when convenient, and played the game. Nothing waited for those answers: every decision has a provisional default in the review queue, and an overturned one re-queues exactly the assets it touched.</p>
+</section>
+
+<section id="next">
+<h2>11. What is next</h2>
+
+<ul>
+<li><b>Phase 3, sprites</b> (started). Characters are still the October upscales, so photoreal rooms carry sprite-art people. The plan: research sprite and pose-conditioned models, cast the main characters, redraw walk cycles frame by frame from keyframes plus flow propagation, with a temporal warp error as the gate, then the long tail of cAnims and NPCs, graded per room.</li>
+<li><b>Phase 4, engine</b> (a third done). The room warp for drawing and mouse input, haze effects in true colour so the five haze rooms can be redrawn, palette fades on true-colour art, mixed 2×/4× assets, and the play-test crashes in rooms 33, 36 and 57.</li>
+<li><b>Phase 5, animation.</b> Smoother motion: interpolate positions in the renderer, then offline in-between frames.</li>
+<li><b>Phase 6, validation and release.</b> A natural playthrough from the start of the game, a short reproduction guide, and this write-up.</li>
+</ul>
+
+<p>The working documents behind every number here are on this site. Good places to start: <a href="bakeoff-results.html">the bake-off and iteration results</a>, <a href="pilot-lessons.html">the index of old pilot trees</a>, <a href="pack-archive.html">the pack archive</a> and <a href="code-archive.html">the code archive</a>.</p>
+</section>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

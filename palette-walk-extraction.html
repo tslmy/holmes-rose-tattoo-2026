@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palette-qualified walk sprite sources</title>
+<meta name="description" content="Palette-qualified walk sprite sources: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html" aria-current="page">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Palette-qualified walk sprite sources</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/palette-walk-extraction.md"><code>docs/palette-walk-extraction.md</code></a>, a working record of the project.</p><p><code>tools/extract_rosetattoo_palette_walks.py</code> extracts native-size PC Rose Tattoo
+walk images for each distinct <strong>initial room palette projection</strong>. It is a
+separate extractor: it does not change older scripts, engine files, packs, or
+game data. It requires Python 3.10+ and Pillow. No model or diffusion is used.</p>
+<h2 id="run-safely">Run safely</h2>
+<p>From the repository root, choose a <strong>new</strong> destination beneath an ignored
+directory such as <code>extracted/</code>; its parent must already exist. Existing files,
+directories and symlinks are refused, as is overlap with the game directory.
+All files are created exclusively. A failed/interrupted run can leave a partial
+new directory; inspect it and choose a different new destination on retry.</p>
+<p>The commands used here were:</p>
+<pre><code class="language-sh">.venv-upscale/bin/python tools/extract_rosetattoo_palette_walks.py \
+  --data-dir scummvm --output-dir extracted/palette-walk-pilot-terra-20261031 \
+  --scenes 1 26 36 --resources NOHAT.VGS OPIUM.VGS
+.venv-upscale/bin/python tools/audit_rosetattoo_palette_walks.py \
+  --data-dir scummvm --source-dir extracted/palette-walk-pilot-terra-20261031
+
+.venv-upscale/bin/python tools/extract_rosetattoo_palette_walks.py \
+  --data-dir scummvm --output-dir extracted/palette-walk-all-terra-20261031
+.venv-upscale/bin/python tools/audit_rosetattoo_palette_walks.py \
+  --data-dir scummvm --source-dir extracted/palette-walk-all-terra-20261031
+
+.venv-upscale/bin/python -m unittest discover -s tools/tests -p test_palette_walk_extraction.py -v
+</code></pre>
+<p>Use fresh destination names when repeating extraction. <code>--scenes</code> limits the
+room palettes, not the set of sprites; without it all case-insensitively
+discovered <code>RES*.RRM</code> rooms are used. <code>--resources</code> accepts a case-insensitive
+subset of names found in the walk SEQs or listed as extras below. Unknown,
+repeated, missing or unsafe names fail rather than being silently skipped.
+Both <code>VGS.LIB</code> and <code>WALK.LIB</code> are required; missing referenced resources,
+malformed records, collisions, and truncated frames are errors.</p>
+<p>The read-only audit recalculates source identities, all palette groups, and
+the entire manifest, then checks every sidecar, metadata record, PNG pixel,
+size, offset, and expected path. It uses the extractor's decoder, so it checks
+reproducibility and completeness, <strong>not an independent engine decode</strong>. It
+does not validate visual quality, in-game lookup, or temporal behavior.</p>
+<h2 id="selection-and-identity">Selection and identity</h2>
+<p>The extractor parses the count and variable-length <code>WalkSequence::load</code> records
+in every Tattoo-format <code>.SEQ</code> found in the two libraries, including separately
+stored copies, and takes the union of their actual nine-byte VGS names. It
+records each archive/SEQ reference in metadata. <code>TINYWALK.SEQ</code> is explicitly
+excluded: it is a legacy fixed-layout sequence, not that record format. Real
+SEQ files can have unused trailing bytes; the engine reads the declared count.</p>
+<p>Six conservative walk-looking directional files not referenced by the installed
+SEQs are additionally included: <code>3TDOWNRG.VGS</code>, <code>3TRIGHT.VGS</code>,
+<code>3TUPRIGH.VGS</code>, <code>GTSDOWNR.VGS</code>, <code>GTSRIGHT.VGS</code>, and <code>GTSUPRIG.VGS</code>. Their
+presence is not proof of actual gameplay use. <code>--resources</code> can select only
+these known extras or parsed SEQ references, not arbitrary archive content.</p>
+<p>Every selected name is searched in both archives. Byte-identical
+<strong>decompressed</strong> streams deduplicate while retaining both archive provenances;
+different bytes get different identities. This includes both archive streams of
+<code>HTUPRIGH</code>, <code>JTDOWNRG</code>, <code>JTRIGHT</code>, <code>JTUPRIGH</code>, and <code>NOHAT</code>.
+For those five names, selection requires an entry in <strong>both</strong> libraries;
+missing either entry is an error, even if the other archive has the resource.
+Archive names and filesystem names are matched case-insensitively, with
+ambiguous case duplicates rejected. Loose VGS files and other libraries are
+not searched. Identity is <code>hashlib.md5(decompressed_bytes, usedforsecurity=False).hexdigest()</code>; MD5 is an engine-compatible content key,
+not a security guarantee, and same-name digest collisions are rejected.</p>
+<p>For each identity <strong>every frame</strong> is decoded in <code>skipPal=false</code>,
+<code>animImages=false</code> mode, and its opaque native index values are unioned.
+Index 255 is the transparent key; index 0 is opaque and must be included when
+used. No palette range is guessed. Each resource is paired conservatively with
+all selected scenes, then scenes with identical relevant colors are grouped.
+The scene list is a palette provenance list, <strong>not</strong> an assertion that the
+character appears in or can reach those rooms.</p>
+<h2 id="format-contract">Format contract</h2>
+<pre><code class="language-text">&lt;resource&gt;_vgs/variants/&lt;resource-md5&gt;-s0a0/palettes/&lt;projection-md5&gt;/
+  frame_000.png
+  ...
+  metadata.json
+  palette.bin
+manifest.json
+</code></pre>
+<p>The full lowercase projection MD5 hashes <strong>exactly</strong> the <code>palette.bin</code> bytes:</p>
+<ol>
+<li>Eight ASCII bytes <code>b&quot;RT-PAL1\0&quot;</code>.</li>
+<li>32 bitset bytes: index <code>i</code> sets bit <code>i % 8</code> of byte <code>i // 8</code>. Bit 255 is
+always clear. All opaque indices used in any frame, including 0, are set.</li>
+<li>Three bytes of active-palette RGB for each set index, in ascending index
+order. Each 6-bit channel from the room palette is converted with the
+engine's integer formula <code>x * 255 // 63</code>.</li>
+</ol>
+<p>The sidecar has no padding or trailing data. Metadata contains
+<code>sidecars: [&quot;palette.bin&quot;]</code>, the hashes, mode, archive/SEQ provenance, exact
+used indices, palette source scenes, original frame dimensions and unsigned
+offsets, alpha policy and limitations. PNGs are RGBA, index 255 transparent,
+and other indices opaque. RGB for transparent pixels is set to zero.</p>
+<p><code>ImageFile::loadPalette</code> can read an embedded VGS palette, but Tattoo person
+drawing uses <code>SHtransBlitFrom</code> into the indexed active scene buffer
+(<code>tattoo_people.cpp</code>, <code>tattoo_scene.cpp</code>, <code>image_file.cpp</code>). Therefore these
+PNGs always use the selected RRM palette even if the VGS has an embedded
+palette. This is covered by a synthetic embedded-palette test. Only initial
+RRM palettes are represented: dynamic changes, fades, special effects, other
+decode modes, scene reachability and non-walk assets remain out of scope.</p>
+<p>The existing recursive upscaler and pack assembler must support <code>sidecars</code>
+and preserve this nested tree; merely extracting it does not install a pack or
+make an engine use these keys. A compatible runtime must calculate the same
+resource/decode and palette keys and fail safely when no exact projection is
+available. Dynamic palettes are not approximated by a different initial
+projection. Test in-game separately. Never assume a fixed scene palette is
+correct in another room.</p>
+<h2 id="local-results">Local results</h2>
+<p>The installed data contains 19 Tattoo SEQ archive entries referencing 35
+names. Their five additional distinct same-name streams give 40 identities,
+436 projections and 17,180 frame paths across the 80 available room palettes.
+The six extra names/identities add 60 projections and 1,200 frame paths. Full
+result: <strong>41 names, 46 identities, 496 projections, 18,380 frame paths</strong>, with
+80 scenes (not numbered consecutively). <code>QTRIGHT</code> alone has 52 projections,
+while <code>TOBY</code> has 4; the other 44 identities have 10 each. This is why a
+fixed palette-index range or a single palette per sprite is insufficient.
+45 of the 46 identities use index 0. No selected installed identity has an
+embedded palette; the synthetic test covers that separate case.</p>
+<p>The pilot contains 3 scenes, 2 names, 3 identities, 9 projections and 855
+frame paths. Both pilot and full outputs passed the read-only audit above.
+As an additional local comparison, the existing independent archive and room
+frame decoders were run on all <strong>46 identities and 1,811 native frames</strong>,
+using an injective test palette: decoded bytes, every RGBA pixel, opaque index
+sets, dimensions, encodings and offsets agreed. These comparisons do not run
+the actual engine. A stub-only 2x upscaler check additionally verified 95
+frames, dimensions, scaled offsets, nested path and copied sidecar; no model was
+used and those fake nearest-neighbor test frames must not be used in a pack.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Z-Image Turbo setup</title>
+<meta name="description" content="Z-Image Turbo setup: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html" aria-current="page">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Z-Image Turbo setup</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/z-image-setup.md"><code>docs/z-image-setup.md</code></a>, a working record of the project.</p><p><code>tools/img2img/z_image.py</code> is the native-Python, Apple-Silicon Z-Image Turbo
+img2img backend. It does not require a WebUI. It uses MFLUX and its official
+4-bit Z-Image Turbo conversion, which is small enough to coexist with this
+project's FLUX and SDXL model caches on the Mac.</p>
+<p>Download the model once into the ignored project cache:</p>
+<pre><code class="language-sh">uv sync --extra zimage
+</code></pre>
+<p>Run a representative scene on the local Mac:</p>
+<pre><code class="language-sh">uv run python3 tools/img2img/z_image.py --scenes 1 --scale 1
+</code></pre>
+<p>The first run downloads <code>filipstrand/Z-Image-Turbo-mflux-4bit</code> automatically
+into the standard Hugging Face cache. The default output is
+<code>generated/z-image-turbo/</code>. MFLUX's Z-Image img2img starts from the scaled
+source with the requested strength. It is deliberately a low-strength visual
+candidate, not the geometry-guaranteed production path: the regular Z-Image
+img2img API has no mask input, and compositing rectangular resource bounds
+back over its output visibly damages the redraw. Use SDXL ControlNet for a
+geometry-locked production candidate. On the 32 GB M2 Max, start at
+<code>--scale 1</code>; use a later deterministic upscaler for the 2x runtime asset. A
+2x diffusion pass needs substantially more unified memory.</p>
+<h2 id="cuda-union-controlnet-production-candidate">CUDA Union-ControlNet (production candidate)</h2>
+<p>The Apple MFLUX Union runner is useful for experiments, but MFLUX is
+Apple-MLX-only. The geometry-preserving CUDA candidate is
+<code>tools/img2img/z_image_controlnet_cuda.py</code>, which wraps the official
+VideoX-Fun Python library. It uses the current <code>lite-2602-8steps</code> Union checkpoint
+with a clean Canny control image and a structural mask. It locks resource
+regions plus a blurred source-edge band, so doorway/window/facade contours
+remain anchored even when no game hotspot covers them; only material interiors
+are repainted.</p>
+<p>On the Windows RTX machine, clone the runtime and install its declared
+dependencies once:</p>
+<pre><code class="language-powershell">git clone https://github.com/aigc-apps/VideoX-Fun.git D:\shcrt\VideoX-Fun
+python -m pip install -r D:\shcrt\VideoX-Fun\requirements.txt
+python -m pip install triton-windows==3.2.0.post21
+</code></pre>
+<p>Download the official weights into the ignored project model cache:</p>
+<pre><code class="language-powershell">python D:\shcrt\tools\img2img\download_zimage_cuda_models.py
+</code></pre>
+<p>Then run a deterministic two-times calibration scene:</p>
+<pre><code class="language-powershell">python D:\shcrt\tools\img2img\z_image_controlnet_cuda.py `
+  --videox-root D:\shcrt\VideoX-Fun `
+  --model D:\shcrt\models\z-image-cuda\Z-Image-Turbo `
+  --controlnet D:\shcrt\models\z-image-cuda\controlnet\Z-Image-Turbo-Fun-Controlnet-Union-2.1-lite-2602-8steps.safetensors `
+  --scenes 1 --scale 2
+</code></pre>
+<p>Do not use the regular Z-Image runner to build a playable pack: it can change
+door, storefront, and walkway geometry even at very low strength. Accept a
+CUDA Union-ControlNet output only after visual and game-level validation.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

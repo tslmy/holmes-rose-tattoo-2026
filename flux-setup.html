@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FLUX.1 + diffusers (Metal/mps) setup</title>
+<meta name="description" content="FLUX.1 + diffusers (Metal/mps) setup: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html" aria-current="page">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>FLUX.1 + diffusers (Metal/mps) setup</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/flux-setup.md"><code>docs/flux-setup.md</code></a>, a working record of the project.</p><blockquote>
+<p><strong>Archived (2026-11-22).</strong> The script this page sets up, <code>tools/flux_redraw_rosetattoo_backgrounds.py</code>,
+was removed with the August scripts; restore it from git history (see <a href="code-archive.html"><code>code-archive.md</code></a>).
+The current pipeline runs FLUX.2 klein through mflux (<code>remaster.toml</code>, <a href="local-models.html"><code>local-models.md</code></a>).</p>
+</blockquote>
+<p><code>tools/flux_redraw_rosetattoo_backgrounds.py</code> is this project's neural
+photoreal background redraw pipeline. It loads a
+<a href="https://huggingface.co/black-forest-labs/FLUX.1-schnell">FLUX.1-schnell</a>
+pipeline directly, in-process, with Hugging Face <code>diffusers</code>, running on
+Apple's Metal Performance Shaders (<code>mps</code>) backend, so nothing else needs to
+be installed or kept running as a server.</p>
+<h2 id="why-flux1-schnell-not-dev-and-why-quantized">Why FLUX.1-schnell (not Dev), and why quantized</h2>
+<ul>
+<li><strong>Schnell over Dev</strong>: Schnell is Apache-2.0 licensed (Dev is a
+non-commercial research license) and is distilled for 1-4 step inference,
+which keeps each scene's generation time reasonable on a laptop GPU.</li>
+<li><strong>GGUF-quantized transformer</strong>: the full bf16 FLUX transformer is ~24GB by
+itself. On a 32GB unified-memory Mac that leaves no headroom for the text
+encoders, VAE, OS, and other apps. This pipeline instead loads
+<a href="https://huggingface.co/city96/FLUX.1-schnell-gguf">city96/FLUX.1-schnell-gguf</a>'s
+<code>Q4_K_S</code> quantization (~6.8GB) via <code>diffusers</code>' <code>GGUFQuantizationConfig</code>,
+dequantized on the fly to bf16 for compute. Other quant levels (<code>Q5_K_S</code>,
+<code>Q6_K</code>, <code>Q8_0</code>, up to <code>F16</code>) are available from the same repo if more
+memory/disk headroom is available and higher fidelity is wanted.</li>
+<li><strong>Full-precision text encoders/VAE</strong>: the T5-XXL prompt encoder and VAE
+are comparatively small (~9.5GB and ~170MB) and disproportionately affect
+prompt-following and color accuracy, so they're kept at fp16 rather than
+quantized.</li>
+</ul>
+<h2 id="1-install-python-dependencies">1. Install Python dependencies</h2>
+<p>This repo's <code>pyproject.toml</code> has a <code>flux</code> optional dependency group
+(<code>torch</code>, <code>torchvision</code>, <code>diffusers</code>, <code>transformers</code>, <code>accelerate</code>,
+<code>sentencepiece</code>, <code>protobuf</code>, <code>gguf</code>):</p>
+<pre><code class="language-sh">uv sync --extra flux
+</code></pre>
+<h2 id="2-download-model-components">2. Download model components</h2>
+<p><code>black-forest-labs/FLUX.1-schnell</code> on Hugging Face is gated behind a
+click-through license agreement, which isn't practical to script headlessly.
+This pipeline instead pulls the non-transformer components (text encoders,
+tokenizers, VAE, scheduler, and the small <code>transformer/config.json</code> needed
+to interpret the GGUF file) from
+<a href="https://huggingface.co/unsloth/FLUX.1-schnell"><code>unsloth/FLUX.1-schnell</code></a>, an
+identical, non-gated mirror in <code>diffusers</code> format:</p>
+<pre><code class="language-sh">uv run python3 -c &quot;
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id='unsloth/FLUX.1-schnell',
+    allow_patterns=[
+        'model_index.json', 'scheduler/*', 'text_encoder/*', 'text_encoder_2/*',
+        'tokenizer/*', 'tokenizer_2/*', 'vae/*', 'transformer/config.json',
+    ],
+    local_dir='models/flux-schnell',
+)
+&quot;
+
+uv run python3 -c &quot;
+from huggingface_hub import hf_hub_download
+hf_hub_download(
+    repo_id='city96/FLUX.1-schnell-gguf',
+    filename='flux1-schnell-Q4_K_S.gguf',
+    local_dir='models/flux-schnell-gguf',
+)
+&quot;
+</code></pre>
+<p>This downloads ~16GB total (the deliberately-skipped fp32/bf16 transformer
+weights from the mirror would add another ~24GB). Both <code>models/</code> and
+<code>generated/</code>/<code>mods/</code> are gitignored — this is a local cache, not tracked
+game or generated art.</p>
+<h2 id="3-run">3. Run</h2>
+<pre><code class="language-sh">uv run python3 tools/flux_redraw_rosetattoo_backgrounds.py \
+  --scenes 1 18 36 --scale 2
+</code></pre>
+<p>The defaults (<code>--strength 0.60 --steps 24</code>) give FLUX useful <strong>artistic
+freedom</strong> while a hard geometry lock keeps gameplay-critical boundaries fixed:
+FLUX is free to
+reimagine materials, decor, props, and lighting as richer, more cinematic
+concept art. Small embedded text/signage is <strong>not</strong> preserved at this
+strength and will typically render as garbled gibberish — the
+<code>STYLE_PROMPT</code> asks the model to avoid inventing new readable text, but
+doesn't attempt to preserve existing text.</p>
+<p>This game still has to remain playable, though, and high-strength img2img
+alone gives <em>no actual geometric guarantee</em>. The tool therefore uses two
+layers of protection. <code>FluxInpaintPipeline</code> receives the inverse of each
+scene's <code>protect_mask.png</code> for semantic conditioning. After generation, a
+hard geometry lock restores only the boundaries of walk zones and all
+resource-declared object states, plus a narrow edge map from the original
+room and the explicit <code>structure_control.png</code> lines. This matters because a
+hotspot record can be a 1x1 click anchor rather than the visible door or prop;
+the union of all resource states and image boundaries covers both cases while
+leaving interiors available for photoreal repainting. <code>--no-geometry-lock</code> is
+available only for A/B experiments. <code>--protect-feather</code> (default <code>8.0</code>)
+controls the soft inpaint conditioning transition; it does not weaken the
+final hard lock.</p>
+<p>Calibration notes from visual inspection
+(<code>validation/contact-sheets/flux-strength-sweep.jpg</code>, comparing
+strength=0.5/0.7/0.85 with steps=16/20/24 respectively, and
+<code>validation/contact-sheets/flux-inpaint-protect-test.jpg</code>, confirming the
+walk-zone/hotspot mask keeps protected regions ~3x closer to the original
+by mean pixel difference than the freely-redrawn regions):</p>
+<ul>
+<li><code>--strength</code> is the img2img denoise strength; <code>--steps</code> is the <em>base</em>
+step count from which <code>strength * steps</code> actual denoising steps are run.
+Higher strength needs proportionally more steps to converge cleanly —
+<code>strength=0.85, steps=24</code> (~20 real steps) was the best match for the
+&quot;cinematic movie-set diorama&quot; look the project is going for.</li>
+<li><code>--denoise-radius</code> (default <code>1.0</code>) applies a light Gaussian pre-blur to
+the init image before upscaling. The original 256-color game art uses
+ordered dithering to fake smooth gradients (very visible on flat
+surfaces like ceilings); without this pre-blur FLUX tends to preserve
+that dithering noise instead of erasing it. Set to <code>0</code> to disable.</li>
+<li><code>guidance_scale</code> is fixed at <code>0.0</code> in the script — FLUX.1-schnell is a
+CFG-distilled model and does not use classifier-free guidance.</li>
+<li>On Apple <code>mps</code>, generation is slow relative to SDXL/Forge (roughly
+25-30s/iteration on an M2 Max at <code>--scale 2</code>), so a full ~80-scene pack
+run takes several hours; use <code>--skip-existing</code> to resume an interrupted
+run, and <code>--scenes</code> to spot-check a handful first. See below for a much
+faster CUDA option if a discrete NVIDIA GPU is available.</li>
+</ul>
+<p>Add <code>--scummvm-overrides mods/flux-hires-backgrounds</code> to also write a
+ScummVM-ready <code>background@Nx.png</code> override pack per scene (see the main
+<a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/tools/README.md"><code>tools/README.md</code></a> and
+<code>tools/run_rosetattoo_validation.py</code> for how to launch/validate a pack).</p>
+<h2 id="4-optional-run-on-a-discrete-nvidia-gpu-instead-of-apple-mps">4. Optional: run on a discrete NVIDIA GPU instead of Apple <code>mps</code></h2>
+<p>Pass <code>--device cuda</code> to run this same script on any machine with an
+NVIDIA GPU and a CUDA-enabled PyTorch install (<code>pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124</code>, plus the
+same <code>diffusers</code>/<code>transformers</code>/<code>accelerate</code>/<code>sentencepiece</code>/<code>protobuf</code>/
+<code>gguf</code> packages as the <code>flux</code> extra). Copy <code>models/flux-schnell</code>,
+<code>models/flux-schnell-gguf</code>, and <code>extracted/rosetattoo/</code> to the GPU
+machine, then run the same command as above with <code>--device cuda</code>.</p>
+<p>On <code>cuda</code>, <code>load_pipeline()</code> calls <code>enable_model_cpu_offload()</code> instead of
+<code>pipe.to(device)</code>, keeping only the actively-running submodule resident
+on the GPU. This matters on cards with less VRAM than the combined model
+size (transformer + fp16 T5 text encoder + VAE, roughly 17GB total) —
+without offloading, PyTorch silently spills into slow shared/system
+memory instead of raising an out-of-memory error, which looks like it's
+&quot;working&quot; (100% <code>nvidia-smi</code> utilization) while running far slower than
+plain CPU/unified memory. With offloading enabled, a 12GB RTX 4070 Ti
+runs at roughly <strong>2-3s/iteration</strong> — about 8-12x faster than an M2 Max on
+<code>mps</code> — since the T5/VAE/transformer swap in and out of VRAM as needed
+instead of all sitting resident at once.</p>
+<p>For a long unattended run over SSH on Windows, launch via a Windows
+Scheduled Task (<code>schtasks /Create ... &amp;&amp; schtasks /Run ...</code>) pointed at a
+<code>.bat</code> file that calls the full path to the Python interpreter (bare
+<code>python</code> resolves to a non-functional Windows Store alias under Task
+Scheduler's non-interactive session). This keeps the job running
+independently of the SSH connection.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

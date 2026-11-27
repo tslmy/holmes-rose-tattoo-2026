@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rose Tattoo room-image extraction</title>
+<meta name="description" content="Rose Tattoo room-image extraction: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html" aria-current="page">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Rose Tattoo room-image extraction</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/room-sprite-extraction.md"><code>docs/room-sprite-extraction.md</code></a>, a working record of the project.</p><p>PC <code>RES*.RRM</code> resources contain image chunks in addition to the painted room
+background. Extract every available scene, or pass <code>--scenes 26 36</code> to select
+rooms:</p>
+<pre><code class="language-sh">python3 tools/extract_rosetattoo_room_sprites.py --data-dir scummvm \
+  --output-dir extracted/room-sprites
+</code></pre>
+<p>The output directory must be new or empty; use a different directory to rerun
+an extraction. Game artwork and metadata stay in the ignored <code>extracted/</code>
+tree. The extractor reads the PC room format, not 3DO resources or cAnim
+cutscene streams. It does not create an upscaled pack or enable overrides.</p>
+<p>The stable key for an embedded image is its scene plus its <strong>one-based</strong>
+<code>Scene::_images</code> slot. <code>room_004</code> corresponds to image chunk ordinal 3 (the
+fourth chunk), not the fourth scene object or a filename from the room header.
+Frames are <strong>zero-based</strong> <code>ImageFile</code> frame indices. For example:</p>
+<pre><code class="language-text">extracted/room-sprites/scene_026/room_004/frame_000.png
+extracted/room-sprites/scene_026/room_004/metadata.json
+</code></pre>
+<p>The corresponding proposed 2x runtime override key under an override root is
+<code>sprites/scene_026/room_004/frame_000@2x.png</code>. This extraction does not make
+that file or promise that any current runtime consumes it. Missing runtime
+support and composition/z-order behavior must be handled separately.</p>
+<p>Frames are native-size RGBA using the room's initial VGA palette, with palette
+index 255 transparent. Runtime palette changes are not represented. Each
+room's metadata records its source, slot, zero-based chunk ordinal, stored and
+expanded sizes and source offset; each frame records index, dimensions, native
+offset, encoding, and byte offset within the expanded chunk. Header
+<code>max_frames</code> is retained as metadata, not used to truncate the frame list.
+Scene metadata and the root <code>manifest.json</code> summarize all chunks and counts.</p>
+<p>Run the format tests (Pillow required):</p>
+<pre><code class="language-sh">python3 -m unittest discover -s tools/tests -p test_room_sprite_extraction.py -v
+</code></pre>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

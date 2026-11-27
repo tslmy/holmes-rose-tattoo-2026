@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read-only sprite contour audit</title>
+<meta name="description" content="Read-only sprite contour audit: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html" aria-current="page">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Read-only sprite contour audit</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/sprite-contour-audit.md"><code>docs/sprite-contour-audit.md</code></a>, a working record of the project.</p><p><code>tools/audit_rosetattoo_sprite_contours.py</code> compares an existing upscale tree
+with a proposed support-preserving refined tree. It only reads those trees and
+the optional extracted source tree; it never chooses, copies, changes, or
+installs assets. Each resource is assessed as a whole so a later decision can
+avoid mixing frames within an animation. A flagged resource is <strong>not</strong> an
+automatic fallback decision.</p>
+<h2 id="dependencies-and-use">Dependencies and use</h2>
+<p>Python 3.10+, Pillow, NumPy, and <strong>SciPy</strong> are required. SciPy's compiled
+<code>ndimage.label</code> keeps connected-component work off Python's per-pixel loops;
+there is intentionally no slow pure-Python fallback. These packages are not
+all core project dependencies. Install them into a separate environment, for
+example:</p>
+<pre><code class="language-sh">uv venv /path/to/sprite-audit-venv --python 3.12
+uv pip install --python /path/to/sprite-audit-venv/bin/python pillow numpy scipy
+/path/to/sprite-audit-venv/bin/python -B -m unittest tools.tests.test_sprite_contour_audit -v
+</code></pre>
+<p>From the repository root, an example pilot comparison is:</p>
+<pre><code class="language-sh">/path/to/sprite-audit-venv/bin/python -B tools/audit_rosetattoo_sprite_contours.py \
+  --baseline enhanced/palette-watson26-runtime-20261031 \
+  --candidate enhanced/palette-watson26-support-pilot-20261031 \
+  --source extracted/palette-watson26-source-pilot-20261031 \
+  --report validation/contour-audit-watson-new.json
+</code></pre>
+<p>The report must be a <strong>new</strong> file outside every input tree, in an existing
+directory. <code>validation/</code> is ignored; use a different report name on each run.
+The tool writes a private temporary file in that directory, then publishes the
+completed report with an exclusive hard link; an existing file or symlink is
+never replaced, including in a race. The destination filesystem must support
+hard links. Ordinary errors clean up the temporary file; an abrupt process or
+system termination can leave it behind. Atomic publication is not a guarantee
+of crash-durable storage. Exit status 0 means no flags; 1 means the completed
+report contains suspects or global errors; 2 means an invalid invocation or
+publication failure. Do not equate 0 with a playtest pass.</p>
+<p><code>--source</code> may be omitted, but then matching <code>source_sha256</code> PNG tags are
+only compared with one another, not verified against extracted pixels. A
+present tag is not proof of provenance. The report states the verification
+mode and records problems; <code>decoded_rgba</code> indicates the requested mode, not
+that every source read succeeded. When provided, source may be a superset:
+only the resource paths present in baseline/candidate are examined. Source
+files are paired by their own manifest <code>index</code>, not by a synthesized filename.</p>
+<h2 id="what-is-checked">What is checked</h2>
+<ul>
+<li>Recursively discover resource <code>metadata.json</code> files and PNGs by relative
+resource directory, pair records by index, and flag missing, duplicate,
+reordered, empty, unreferenced, unreadable, or invalid records. Directory
+symlinks are not traversed; file symlinks and unsafe filenames are rejected.
+Errors outside an individual resource are in <code>errors</code> and block a clean
+result even if no resource is individually flagged. Per-scene summary
+metadata is compared separately.</li>
+<li>Compare all baseline/candidate resource metadata except <code>frames</code> and the
+expected <code>alpha_refinement</code> description. Compare frame records including
+index, filename, dimensions, offsets, and other metadata. Require complete
+upscales and positive integral scales. With <code>--source</code>, compare its resource
+and frame metadata to the baseline, allowing for renamed frame files and
+dimensions/offsets scaled by the baseline scale.</li>
+<li>Compare every declared sidecar byte-for-byte; compare against source too
+when supplied. A present but undeclared <code>palette.bin</code> is flagged. This checks
+preserved palette sidecars, not whether the running engine selects or
+interprets the correct palette.</li>
+<li>Check baseline/candidate <code>source_sha256</code> tags are valid and identical. With
+source, recompute SHA-256 over ASCII <code>WIDTHxHEIGHT:</code> followed by the decoded
+RGBA bytes, as the upscaler does. If candidate PNGs contain
+<code>alpha_input_sha256</code>, check it against the complete baseline PNG bytes.</li>
+<li>Require RGBA output images and compare their dimensions and all RGB bytes,
+<strong>including transparent pixels</strong>. Count pixels where <code>(alpha != 0)</code> changes.</li>
+<li>Compute alpha-weighted area as <code>sum(alpha)/255</code> in output-pixel units,
+its signed difference and percentage relative to baseline. A zero baseline
+makes the percentage <code>null</code>. Count threshold crossings separately in both
+directions for <code>alpha &gt;= 128</code>.</li>
+<li>At that threshold, count foreground components with 8-connectivity and
+enclosed background holes with 4-connectivity. Explicit transparent padding
+connects the outside background; that outside component is not a hole,
+including for fully transparent or edge-cropped frames.</li>
+</ul>
+<p>Each JSON resource lists its <code>issues</code>, <code>suspect_frame_indices</code>, frame-level
+metrics, and aggregate <code>metrics</code> over the frames actually compared. A frame is
+suspect on any metadata/provenance/read error, RGB change, nonzero-support
+change, or <strong>any</strong> &gt;=128 threshold crossing. A resource is suspect if it has
+any resource issue or suspect frame. Alpha-only area change without a threshold
+crossing is reported but is not itself flagged: there is no invented area
+threshold. The resource metrics also show threshold-crossing and topology-count
+changes, summed added/removed pixels, area change, and the maximum absolute
+per-frame percentage. Missing/unreadable frames are not included in pixel
+aggregates; check <code>frames_compared</code>, resource issues, and global errors before
+using them.</p>
+<h2 id="hashes-and-stale-reports">Hashes and stale reports</h2>
+<p>New reports retain <code>schema_version: 1</code> and existing fields, and add
+<code>file_hashes_version: 1</code>. Each resource contains <code>file_sha256</code> with <code>baseline</code>
+and <code>candidate</code> objects, and a <code>source</code> object when <code>--source</code> was requested.
+Each object has a <code>metadata</code> SHA-256 for the exact <code>metadata.json</code> bytes and a
+<code>sidecars</code> map from each declared filename to its exact byte SHA-256. Each frame
+has <code>baseline_png_sha256</code> and <code>candidate_png_sha256</code>; a source-backed frame
+also has <code>source_png_sha256</code> when source verification was reached. These are
+lowercase SHA-256 digests of the <strong>entire file</strong>, not decoded pixels or the
+PNG's <code>source_sha256</code> tag. The same bytes are used for decoding/comparison and
+for hashing, so even a PNG metadata change or insignificant JSON whitespace
+change is detectable.</p>
+<p>Hashes are omitted if the file could not be read or hashed, with an issue on
+the corresponding resource or frame. Successfully read but invalid PNG/JSON
+bytes may still have a hash; the decode/parse failure is separately flagged.
+An unpaired frame can have only the available side's hash. Unreferenced files
+are flagged rather than included in per-frame hashes. Scene summary metadata
+is compared but is not included in resource file hashes.</p>
+<p>Before a future selector trusts a report, it must require
+<code>file_hashes_version: 1</code>, reject missing or malformed required hashes and
+read/hash errors, rediscover the complete resource and frame sets, and compare
+fresh hashes for every relevant PNG, resource metadata file and declared
+sidecar, including source files if source verification is relied upon. It must
+also account for global errors, suspect flags and any scene summary metadata;
+this tool does not implement that selector. A report produced by the previous
+script, including one still running from an earlier loaded copy, lacks the
+hash-version marker and must be rerun to a <strong>new</strong> report path. Merely seeing
+<code>schema_version: 1</code> is not sufficient.</p>
+<p>These digests are not signatures or a filesystem snapshot. Files can change
+during the audit or between a later recheck and use; keep the trees immutable
+for both operations. New or deleted resource/summary files must be detected by
+rediscovery, not just by checking previously listed hashes. Hashing does not
+prove that a report was produced by a trusted program or that its images are
+safe in-game.</p>
+<p>Counts alone miss positional and shape changes that preserve component/hole
+counts. Preserving nonzero support and palette bytes also does not verify
+runtime composition, hit ownership, animation timing, visual quality, or
+gameplay. Inspect flagged sequences and perform in-engine tests before rollout;
+this tool cannot prove safety or select a threshold for you.</p>
+<h2 id="pilot-observations-and-performance">Pilot observations and performance</h2>
+<p>On 2026-10-31 the three source-backed comparisons below used Python 3.12.11,
+NumPy 2.5.4, SciPy 1.18.1, and Pillow 13.0.0 on an Apple M2 Max. The pilot
+reports are local ignored files from the earlier script without file hashes;
+they require new runs for freshness checking. The command lines were:</p>
+<pre><code class="language-sh">PY=/private/var/folders/kr/hnndgkzd7wddlz37gv3py84r0000gn/T/opencode/sprite-audit-venv/bin/python
+/usr/bin/time -lp &quot;$PY&quot; -B tools/audit_rosetattoo_sprite_contours.py --baseline enhanced/palette-watson26-runtime-20261031 --candidate enhanced/palette-watson26-support-pilot-20261031 --source extracted/palette-watson26-source-pilot-20261031 --report validation/contour-audit-watson26-terra-v3-20261031.json
+/usr/bin/time -lp &quot;$PY&quot; -B tools/audit_rosetattoo_sprite_contours.py --baseline enhanced/room-remaster-pilot-20261031 --candidate enhanced/room-support-pilot-20261031 --source extracted/room-source-pilot-20261031 --report validation/contour-audit-room26-terra-v3-20261031.json
+/usr/bin/time -lp &quot;$PY&quot; -B tools/audit_rosetattoo_sprite_contours.py --baseline enhanced/canimations-pilot-20261031 --candidate enhanced/canimations-support-pilot-20261031 --source extracted/canimations-source-pilot-20261031 --report validation/contour-audit-canim26-terra-v3-20261031.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Pilot</th>
+<th style="text-align:right">Frames / resources</th>
+<th style="text-align:right">Frames with &gt;=128 crossings</th>
+<th style="text-align:right">Frames with count changes</th>
+<th style="text-align:right">Wall / user CPU</th>
+<th style="text-align:right">Max RSS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Watson</td>
+<td style="text-align:right">95 / 1</td>
+<td style="text-align:right">95</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.28 / 0.99 s</td>
+<td style="text-align:right">71 MiB</td>
+</tr>
+<tr>
+<td>Room</td>
+<td style="text-align:right">128 / 2</td>
+<td style="text-align:right">128</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">1.14 / 0.84 s</td>
+<td style="text-align:right">73 MiB</td>
+</tr>
+<tr>
+<td>cAnim</td>
+<td style="text-align:right">18 / 1</td>
+<td style="text-align:right">18</td>
+<td style="text-align:right">0</td>
+<td style="text-align:right">0.74 / 0.62 s</td>
+<td style="text-align:right">71 MiB</td>
+</tr>
+</tbody>
+</table>
+<p>All 241 compared frames had identical RGB and nonzero support; source hashes,
+metadata and declared sidecars matched. All four resources are therefore flagged
+for review solely due to threshold crossings, not count changes. The processes
+ran concurrently with the tests, include Python/SciPy startup and source PNG
+decoding, and returned 1 as designed. These small warm-cache samples are not a
+benchmark of 87,000 frames. Cost depends on image sizes, PNG decode and storage;
+the program holds the report and discovered filename lists in memory, so
+memory grows with frame count. Time a representative full corpus and inspect
+memory before relying on it for production-scale review.</p>
+<p>After adding file hashes, the same three pilot commands were rerun with new
+report paths <code>validation/contour-audit-{watson26,room26,canim26}-terra-hashes-20261031.json</code>
+(replace the brace expression with each name). The previous report fields
+matched exactly, and all 723 baseline/candidate/source PNG hashes were checked
+against the corresponding files. Concurrent wall times were 1.08 s, 0.90 s,
+and 0.58 s respectively; these small warm-cache samples do not establish
+full-corpus hash overhead or freshness. They do not update any older or
+still-running all-scene reports.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

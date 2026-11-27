@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot lessons: index of the dated trees</title>
+<meta name="description" content="Pilot lessons: index of the dated trees: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html" aria-current="page">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Pilot lessons: index of the dated trees</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/pilot-lessons.md"><code>docs/pilot-lessons.md</code></a>, a working record of the project.</p><p>Iteration 1 left ~25 GB of dated output trees under <code>enhanced/</code>, <code>mods/</code> and
+<code>generated/</code> (all ignored by git). They stay on disk as a record of what was
+tried; deleting any of them goes through the review queue
+(<code>review/queue.md</code>), never a script. This page says what each one is and what
+it showed, drawn from the docs and manifests named in each row. Where a row
+says <em>(name only)</em>, no doc describes it and the purpose is inferred from its
+name and manifest; treat that as a lead, not a finding.</p>
+<p>Sizes are from <code>du -sh</code> on 2026-11-14.</p>
+<h2 id="the-two-lines-of-work">The two lines of work</h2>
+<ol>
+<li><strong>August 2026: diffusion redraws of backgrounds</strong> (A1111 SDXL/ControlNet,
+then FLUX.1-schnell, Z-Image Turbo, an optional GPT Image pass) plus
+&quot;lifelike&quot; character-sheet redraws. Lesson: every model drifted geometry,
+moved or invented objects and garbled signage once strength was high
+enough to look different; only very low strength (FLUX <code>--steps 12 --strength 0.25</code>, 3 real steps) kept text, and that barely changes the
+look. Character sheets could not stand in for per-frame animation.
+(<a href="reproducing.html"><code>reproducing.md</code></a> history, <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/tools/README.md"><code>tools/README.md</code></a>
+calibration notes, <a href="z-image-setup.html"><code>z-image-setup.md</code></a>, dev blog.)</li>
+<li><strong>October 2026: non-diffusion SR + engine work.</strong> Real-ESRGAN 2x on every
+background, room sprite, cAnim and shared sprite, followed by a series of
+small pilots on scene 26 to settle alpha, palette and contour handling,
+ending in the assembled candidate
+<code>mods/rosetattoo-contour-candidate-20261031</code>.
+(<a href="sprite-remaster.html"><code>sprite-remaster.md</code></a>, <a href="sprite-contour-audit.html"><code>sprite-contour-audit.md</code></a>,
+<a href="contour-selection-plan.html"><code>contour-selection-plan.md</code></a>,
+<a href="scene-start-smoke-test.html"><code>scene-start-smoke-test.md</code></a>.)</li>
+</ol>
+<p>Iteration 2's design answers both: diffusion is allowed to move things, but a
+per-room warp absorbs the movement and object/writing gates check it
+(<code>docs/remaster-plan.md</code>); de-dithering and plate-first redraw address the
+noise and lighting mismatch the August runs suffered from.</p>
+<h2 id="generated-august-diffusion-and-assembly-experiments"><code>generated/</code> (August diffusion and assembly experiments)</h2>
+<table>
+<thead>
+<tr>
+<th>Tree</th>
+<th style="text-align:right">Size</th>
+<th>What it is / what it showed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>neural-redraws-cinematic-full</code></td>
+<td style="text-align:right">611M</td>
+<td>A1111 SDXL, profile <code>photographic-cinematic</code>, all 80 scenes at 2x. Strong restyle; geometry and signage drift. Fed <code>playable-overrides-2x-v2..v6</code>.</td>
+</tr>
+<tr>
+<td><code>neural-redraws-faithful-full</code></td>
+<td style="text-align:right">705M</td>
+<td>A1111 SDXL, profile <code>photographic-faithful</code>; manifest records 1 scene in its last run. Lower drift, little visible change.</td>
+</tr>
+<tr>
+<td><code>sdxl-controlnet</code></td>
+<td style="text-align:right">1.1M</td>
+<td>Local SDXL Canny ControlNet spot tests (<code>tools/img2img/sdxl_controlnet.py</code>). <em>(name only)</em></td>
+</tr>
+<tr>
+<td><code>sdxl-cuda-full-2x</code>, <code>sdxl-playable-backgrounds</code></td>
+<td style="text-align:right">150M each</td>
+<td>SDXL ControlNet full 2x run (CUDA) and its playable copy; backgrounds for <code>mods/sdxl-hires-backgrounds</code>. Protect-mask inpainting kept walk zones/hotspots, but the remaster plan records it as rejected for geometry drift.</td>
+</tr>
+<tr>
+<td><code>flux-geometry-locked</code></td>
+<td style="text-align:right">134M</td>
+<td>FLUX.1-schnell low-strength redraw with the hard resource/edge geometry lock (<code>flux_redraw_rosetattoo_backgrounds.py</code>). Kept geometry and text only at strength ≤0.25; ≥0.35 garbled signage and invented people/props.</td>
+</tr>
+<tr>
+<td><code>z-image-turbo</code></td>
+<td style="text-align:right">1.9M</td>
+<td>Z-Image Turbo img2img spot tests. Low-strength visual candidate only: compositing the original mask back over its output visibly damaged the redraw (<a href="z-image-setup.html"><code>z-image-setup.md</code></a>).</td>
+</tr>
+<tr>
+<td><code>openai-image-pass</code></td>
+<td style="text-align:right">4K</td>
+<td>Empty: the optional GPT Image benchmark was never run (needs a paid API key).</td>
+</tr>
+<tr>
+<td><code>character-redraws</code></td>
+<td style="text-align:right">35M</td>
+<td>Identity/profile-driven character sheets (Holmes, Watson, Mycroft, Toby, Wiggins, generic NPC bodies). Profiles must stay distinct; a generic &quot;Victorian detective&quot; prompt loses identity.</td>
+</tr>
+<tr>
+<td><code>animation-redraws</code></td>
+<td style="text-align:right">1.5M</td>
+<td>Pose-matched animation redraws composited from those sheets. A ten-pose sheet is not a substitute for each motion frame; opt-in only in the assembler.</td>
+</tr>
+<tr>
+<td><code>playable-overrides-2x-v2</code> … <code>-v6</code></td>
+<td style="text-align:right">~345M each</td>
+<td>Successive playable assemblies: cinematic SDXL backgrounds + temporal ESRGAN sprites + lifelike sheet sprites (v2-v5) or animation redraws (v6). Exercised the assembler/runtime contract, not quality.</td>
+</tr>
+<tr>
+<td><code>upscale-benchmark-20261031-kGlUy5</code></td>
+<td style="text-align:right">36M</td>
+<td>One-off Real-ESRGAN x4plus benchmark on this Mac (<code>report.md</code> inside): sprites (20 frames in 4.24 s on MPS, 1.6 GB peak), fonts, map crops, guarded full map, scene 5 tiled vs untiled. Untiled 1280x960 map exceeded MPS memory; overlapping tiles worked.</td>
+</tr>
+<tr>
+<td><code>*-audit-root-20261031</code> (4 dirs)</td>
+<td style="text-align:right">0</td>
+<td>Empty roots left by audit runs.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="enhanced-sr-outputs-and-october-pilots"><code>enhanced/</code> (SR outputs and October pilots)</h2>
+<table>
+<thead>
+<tr>
+<th>Tree</th>
+<th style="text-align:right">Size</th>
+<th>What it is / what it showed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sprites</code></td>
+<td style="text-align:right">454M</td>
+<td>First ESRGAN pass over every <code>VGS.LIB</code> resource, items, fonts, map, RES##.VGS stills. Baseline for shared sprites.</td>
+</tr>
+<tr>
+<td><code>sprites-temporal</code></td>
+<td style="text-align:right">232M</td>
+<td>Temporal residual-aggregation pass. Small or inconsistent stability gains on ten streams, some RGB edits at moving edges; <strong>not applied globally</strong>.</td>
+</tr>
+<tr>
+<td><code>sprites-lifelike*</code> (6 dirs: plain, -v2, -v4, -seeded, -seeded-v2, -seeded-v4)</td>
+<td style="text-align:right">34-51M</td>
+<td>Character-sheet redraw variants (seeded = before the temporal pass). Lesson as for <code>generated/character-redraws</code>.</td>
+</tr>
+<tr>
+<td><code>esrgan-hires-backgrounds</code></td>
+<td style="text-align:right">134M</td>
+<td>Real-ESRGAN 2x of all 80 backgrounds: the background set every October pack uses.</td>
+</tr>
+<tr>
+<td><code>room-remaster-20261031</code>, <code>canimations-remaster-20261031</code>, <code>palette-walk-remaster-20261031</code>, <code>shared-remaster-20261031</code></td>
+<td style="text-align:right">1.9G, 2.8G, 1.4G, 255M</td>
+<td>Full 2x soft-alpha ESRGAN of all room sprites (32,697 frames), cAnims (33,189), palette-qualified walks (18,380) and shared sprites. The baselines for the contour audit.</td>
+</tr>
+<tr>
+<td><code>shared-vgs-variants-agent-20261031</code></td>
+<td style="text-align:right">26M</td>
+<td>The five resources whose <code>VGS.LIB</code> and <code>WALK.LIB</code> data differ, keyed by stream hash (<a href="vgs-variants.html"><code>vgs-variants.md</code></a>).</td>
+</tr>
+<tr>
+<td><code>*-contour-staging-20261031</code> (room, canimations, palette-walk, shared, shared-vgs)</td>
+<td style="text-align:right">1.8G, 2.7G, 1.3G, 252M, 26M</td>
+<td><code>refine_rosetattoo_sprite_alpha.py --method scale4-box --radius 0.35 --thin-guard --preserve-support</code> over each baseline: the selected contour direction. Audits found no RGB/support/topology changes except one cAnim frame (<code>scene_044/canim_004</code>), whose whole resource falls back to the baseline.</td>
+</tr>
+<tr>
+<td><code>room-remaster-pilot-20261031</code></td>
+<td style="text-align:right">4.8M</td>
+<td>Scene-26 room-sprite ESRGAN pilot (128 frames): first ordered in-engine replay; lamp, bartender, bar and patron drew in the right order.</td>
+</tr>
+<tr>
+<td><code>room-remaster-pilot-temporal-20261031</code>, <code>room-remaster-tiled-pilot-20261031</code></td>
+<td style="text-align:right">4.4M, 436K</td>
+<td>Scene-26 temporal pass and tiled-inference variants of that pilot. Tiling: negligible difference; temporal: not adopted. <em>(name + sprite-remaster notes)</em></td>
+</tr>
+<tr>
+<td><code>room-support-pilot-20261031</code>, <code>canimations-support-pilot-20261031</code>, <code>palette-watson26-support-pilot-20261031</code></td>
+<td style="text-align:right">4.8M, 980K, 7.3M</td>
+<td><code>--preserve-support</code> contour pilots for scene 26 (room, <code>26HEXIT</code> cAnim, Watson). Audit: all 241 frames kept RGB and support; flagged only for threshold crossings.</td>
+</tr>
+<tr>
+<td><code>canimations-pilot-20261031</code></td>
+<td style="text-align:right">1.0M</td>
+<td>Scene-26 <code>26HEXIT</code> (18 frames) ESRGAN pilot: loaded in order and matched native <code>BEHIND</code> layering in a fixture.</td>
+</tr>
+<tr>
+<td><code>room-contour-pilot-20261031</code>, <code>canimations-contour-pilot-20261031</code>, <code>palette-watson26-contour-pilot-20261031</code>, <code>canim44-contour-pilot-20261031</code></td>
+<td style="text-align:right">0.9-7.3M</td>
+<td>Contour-method pilots before <code>--preserve-support</code>; superseded by the support pilots. <em>(name only)</em></td>
+</tr>
+<tr>
+<td><code>palette-watson26-runtime-20261031</code></td>
+<td style="text-align:right">7.5M</td>
+<td>Watson frames for room 26's palette, the runtime baseline for the Watson audit; 56-index projection matched its sidecar in engine.</td>
+</tr>
+<tr>
+<td><code>palette-walk-alpha-pilot</code>, <code>-guard-pilot</code>, <code>-pilot-frame87</code> (all <code>-20261031</code>)</td>
+<td style="text-align:right">80K each</td>
+<td>Single-frame alpha / thin-guard checks on one walk frame (frame 87). A guarded 0.55-px feather was subtle and changed provenance coverage; not adopted. <em>(partly name only)</em></td>
+</tr>
+</tbody>
+</table>
+<h2 id="mods-assembled-packs"><code>mods/</code> (assembled packs)</h2>
+<table>
+<thead>
+<tr>
+<th>Pack</th>
+<th style="text-align:right">Size</th>
+<th>What it is / what it showed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rosetattoo-contour-candidate-20261031</code></td>
+<td style="text-align:right">6.3G</td>
+<td><strong>The iteration-1 result.</strong> ESRGAN backgrounds + all five audited contour trees: 80 backgrounds, 3,640 resources, 87,656 frames, <code>scene_044/canim_004</code> on baseline alpha. All 80 scenes reached the start marker in the smoke test with haze fallback. Not a natural-entry playthrough.</td>
+</tr>
+<tr>
+<td><code>esrgan-hires-backgrounds</code></td>
+<td style="text-align:right">137M</td>
+<td>Backgrounds-only 2x ESRGAN pack.</td>
+</tr>
+<tr>
+<td><code>esrgan-hires-playable</code></td>
+<td style="text-align:right">364M</td>
+<td>ESRGAN backgrounds + temporal sprites + animation redraws (August assembler).</td>
+</tr>
+<tr>
+<td><code>sdxl-hires-backgrounds</code></td>
+<td style="text-align:right">382M</td>
+<td>SDXL ControlNet backgrounds pack; rejected for drift.</td>
+</tr>
+<tr>
+<td><code>neural-hires-backgrounds-faithful-refined</code></td>
+<td style="text-align:right">180M</td>
+<td>Faithful ControlNet renders where available, Lanczos fallback elsewhere.</td>
+</tr>
+<tr>
+<td><code>flux-geometry-locked</code></td>
+<td style="text-align:right">131M</td>
+<td>FLUX geometry-locked backgrounds pack (no manifest).</td>
+</tr>
+<tr>
+<td><code>room-remaster-pilot-20261031</code></td>
+<td style="text-align:right">368M</td>
+<td>First October pack on the August assembler.</td>
+</tr>
+<tr>
+<td><code>room-remaster-alpha-pilot-20261031</code></td>
+<td style="text-align:right">391M</td>
+<td>+ soft alpha (shared + scene-26 room sprites, 194 resources). Soft and binary alpha render differently at edges.</td>
+</tr>
+<tr>
+<td><code>room-remaster-canim-pilot-20261031</code></td>
+<td style="text-align:right">392M</td>
+<td>+ the <code>26HEXIT</code> cAnim.</td>
+</tr>
+<tr>
+<td><code>room-remaster-identity-pilot-20261031</code></td>
+<td style="text-align:right">419M</td>
+<td>+ VGS variants keyed by stream identity: wrong-name overrides fall back to native.</td>
+</tr>
+<tr>
+<td><code>room-remaster-palette-pilot-20261031</code></td>
+<td style="text-align:right">419M</td>
+<td>+ palette-qualified walks; used for the nine-scene smoke pilot.</td>
+</tr>
+<tr>
+<td><code>room-remaster-watson26-pilot-20261031</code></td>
+<td style="text-align:right">426M</td>
+<td>+ Watson for room 26's palette; 343 lookups hit across four fixture walks.</td>
+</tr>
+<tr>
+<td><code>room-remaster-feather-pilot-20261031</code>, <code>-guard-pilot-20261031</code></td>
+<td style="text-align:right">419M each</td>
+<td>Feathered alpha and thin-guard variants; not adopted. <em>(name + sprite-remaster notes)</em></td>
+</tr>
+<tr>
+<td><code>room-remaster-support-pilot-20261031</code></td>
+<td style="text-align:right">426M</td>
+<td><code>--preserve-support</code> contour trees in engine; this direction was selected.</td>
+</tr>
+<tr>
+<td><code>canim44-baseline-fallback-pilot-20261031</code></td>
+<td style="text-align:right">132M</td>
+<td>Tests the whole-resource fallback for <code>scene_044/canim_004</code> (10 frames).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-carries-into-iteration-2">What carries into iteration 2</h2>
+<ul>
+<li>Diffusion must never be trusted to keep geometry or writing by low strength
+alone: hence object/writing gates and the warp.</li>
+<li>Characters were the weakest part of every August attempt: hence casting
+sheets plus per-frame identity-conditioned edits, judged composited.</li>
+<li>The ESRGAN contour candidate is the fallback for any asset that fails a
+gate; keep <code>mods/rosetattoo-contour-candidate-20261031</code> until a better pack
+passes the smoke test.</li>
+<li>Tiled inference is safe for large images (map) on this Mac's memory.</li>
+<li>The 20261031 scene-26 fixtures (bartender, <code>26HEXIT</code>, Watson walk) are why
+scene 26 and <code>026/000</code> are in the golden set.</li>
+</ul>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

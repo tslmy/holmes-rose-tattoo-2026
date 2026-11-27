@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scene-sprite remaster workflow</title>
+<meta name="description" content="Scene-sprite remaster workflow: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html" aria-current="page">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Scene-sprite remaster workflow</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/sprite-remaster.md"><code>docs/sprite-remaster.md</code></a>, a working record of the project.</p><p>This is the non-diffusion workflow for the room foregrounds and scripted
+animations, in addition to the pre-existing background and shared-sprite
+pipeline. Generated game-derived assets belong in ignored local directories;
+do not commit or distribute them without the appropriate rights.</p>
+<h2 id="extraction">Extraction</h2>
+<p>Install the local ESRGAN dependencies and model as described in
+<a href="esrgan-setup.html"><code>esrgan-setup.md</code></a>. The following commands create new output
+trees; choose unused names to preserve existing work:</p>
+<pre><code class="language-sh">python tools/extract_rosetattoo_room_sprites.py --data-dir scummvm \
+  --output-dir extracted/room-sprites-new
+python tools/extract_rosetattoo_canimations.py --data-dir scummvm \
+  --output-dir extracted/canimations-new
+python tools/extract_rosetattoo_vgs_variants.py --data-dir scummvm \
+  --palette-scene 1 --output-dir extracted/vgs-variants-new
+python tools/extract_rosetattoo_palette_walks.py --data-dir scummvm \
+  --output-dir extracted/palette-walks-new
+</code></pre>
+<p>The first tool exports room image chunks, keyed by scene and one-based room
+image slot. The second exports streamed cAnims, keyed by scene and zero-based
+cAnim index. Frame indices are zero-based in both. On the local PC game copy,
+the extraction found 80 rooms, 2,175 room-image resources (32,697 frames),
+and 767 nonempty cAnim streams (33,189 frames). Counts are an observation of
+that copy, not a substitute for checking another installation's output.</p>
+<p>Room and cAnim RGB values use the room's <strong>initial</strong> palette. Runtime palette
+changes, fades, and other effects are not baked into the PNGs and require
+separate runtime handling or validation.</p>
+<p>The newer renderer uses the installed palette for native indexed fallback
+pixels (including darts' separate palette). When the installed palette is
+entirely black, the presented true-color frame is blackened without discarding
+retained layers; a true-color cursor may remain visible. Intermediate fades
+and arbitrary palette effects still do not recolor cached true-color art.
+Those effects and their restoration need further engine work.</p>
+<p>Shared walk sprites can be palette-dependent even without an animated palette:
+their runtime colors come from the current room, whereas a single extracted
+PNG set uses one reference palette. The opt-in palette-safe renderer checks
+the actual installed palette against a generated projection and falls back to
+native art when none matches. It does not reconstruct arbitrary palette
+effects after the original indices have been discarded. In addition,
+scenes 7, 8, 18, 53 and 68 apply native haze/mask effects after drawing scene
+sprites; the hires compositor does not faithfully reproduce them. The opt-in
+<code>SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1</code> instead renders these five
+rooms with their native scene and bitmap text while leaving other rooms and
+the map enhanced. It preserves the haze rather than modernizing those rooms;
+its targeted transition and UI tests are not a full playthrough. The separate
+<code>native-reference</code> debug view renders the original indexed scene and UI across
+the whole game for comparison. File coverage is not proof of visual correctness.</p>
+<p>Some shared resource names occur in both <code>VGS.LIB</code> and <code>WALK.LIB</code>, with
+different frame data in this game copy. For five affected names, the updated
+engine looks for a variant keyed by the actual decompressed stream and decode
+mode; a missing matching variant falls back to native artwork rather than a
+possibly wrong name-only override. See <a href="vgs-variants.html">VGS variants</a>.
+The palette-qualified extraction and its sidecar format are described in
+<a href="palette-walk-extraction.html">palette-qualified walk sources</a>. It covers
+initial room palettes, not every possible dynamic palette state.</p>
+<p>After both extraction runs finish, verify every decoded frame against its RRM
+stream (this can take time):</p>
+<pre><code class="language-sh">python tools/audit_rosetattoo_extraction.py \
+  --room-source extracted/room-sprites-new \
+  --canim-source extracted/canimations-new \
+  --report validation/extraction-audit.json
+python tools/audit_rosetattoo_palette_walks.py --data-dir scummvm \
+  --source-dir extracted/palette-walks-new
+</code></pre>
+<h2 id="upscale">Upscale</h2>
+<p>Run the local model on each extracted tree. <code>--skip-existing</code> safely resumes
+a matching interrupted run; changing the model, scale or alpha policy requires
+a new output directory. Soft alpha requires a compatible runtime compositor.</p>
+<pre><code class="language-sh">python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/room-sprites-new \
+  --output-dir enhanced/room-sprites-new \
+  --scale 2 --alpha-mode soft --device mps --skip-existing
+python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/canimations-new \
+  --output-dir enhanced/canimations-new \
+  --scale 2 --alpha-mode soft --device mps --skip-existing
+python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/vgs-variants-new \
+  --output-dir enhanced/vgs-variants-new \
+  --scale 2 --alpha-mode soft --device mps --skip-existing
+python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/palette-walks-new \
+  --output-dir enhanced/palette-walks-new \
+  --scale 2 --alpha-mode soft --device mps --skip-existing
+</code></pre>
+<p>First extract the shared resources described in the
+<a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/tools/README.md#cursors-items-character-and-font-sprites"><code>tools reference</code></a>
+to <code>extracted/sprites</code>. Prepare a new source tree that repairs known missing
+palettes and the map's opaque pixels, then upscale it:</p>
+<pre><code class="language-sh">python tools/prepare_rosetattoo_shared_sprites.py \
+  --source-dir extracted/sprites --output-dir extracted/shared-sprites-new
+python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/shared-sprites-new \
+  --output-dir enhanced/shared-sprites-new \
+  --scale 2 --mode auto --alpha-mode soft --device mps \
+  --tile-size 256 --tile-pad 16 --skip-existing
+</code></pre>
+<p>The preparation step uses <code>DARTBD.PAL</code> for darts/hand resources and
+<code>JOURNAL.PAL</code> for the journal. <code>OPIUM.VGS</code> uses room 53's palette; <code>COAT3.VGS</code>,
+paper, interface and loading assets use room 1's palette. These room palettes
+are snapshots, not a guarantee of matching every runtime palette. New
+extraction metadata records the supplied fallback palette.</p>
+<p>Auto mode selects alpha-only bitmap-font resizing; tiling limits GPU memory
+for large frames such as the map. This does not imply that every shared
+resource already has an engine-side override consumer.</p>
+<h2 id="assemble-and-audit">Assemble and audit</h2>
+<p>When every selected run has completed, assemble a <em>new</em> pack. Existing packs
+are never overwritten by the assembler:</p>
+<pre><code class="language-sh">python tools/assemble_rosetattoo_modernized.py \
+  --background-dir mods/esrgan-hires-backgrounds \
+  --sprite-dir enhanced/shared-sprites-new \
+  --sprite-dir enhanced/room-sprites-new \
+  --sprite-dir enhanced/canimations-new \
+  --sprite-dir enhanced/vgs-variants-new \
+  --sprite-dir enhanced/palette-walks-new \
+  --output-dir mods/modernized-new --scale 2
+python tools/audit_rosetattoo_pack.py --pack mods/modernized-new \
+  --sprite-source extracted/shared-sprites-new \
+  --sprite-source extracted/room-sprites-new \
+  --sprite-source extracted/canimations-new \
+  --sprite-source extracted/vgs-variants-new \
+  --sprite-source extracted/palette-walks-new \
+  --verify-source \
+  --report validation/modernized-new-audit.json
+</code></pre>
+<p>When assembling the chosen contour trees, first run the source-backed contour
+audit for each tree. Pass each report to the assembler as
+<code>--contour-audit REPORT BASELINE CANDIDATE SOURCE</code>, with <code>CANDIDATE</code> also
+listed as a <code>--sprite-dir</code>. The assembler revalidates the report's file hashes
+and automatically chooses the baseline for an entire resource when a frame
+changed the measured component/hole count. It rejects other audit errors.
+Keep the input trees unchanged through assembly: the audit and recheck are not
+an atomic filesystem snapshot. Threshold-crossing-only audit results are
+expected for this contour method and still require visual review.</p>
+<p>The audit compares file presence, format and dimensions with the supplied
+extraction manifests; <code>--verify-source</code> also checks the pixel hash embedded in
+newly generated PNGs. Declared resource sidecars are copied through upscaling
+and assembly, then checked against the source bytes. Older outputs without
+pixel hashes cannot pass <code>--verify-source</code>.
+It does <strong>not</strong> prove that the extraction covers all
+game resources or that the engine consumes each asset correctly. Validate in
+game: include moving characters, foreground occlusion, scripted animations,
+scrolling rooms, palette transitions, UI, inventory, map and save/load.
+The optional <a href="scene-start-smoke-test.html">scene-start smoke test</a> launches each
+scene with an isolated save copy and waits for an actual rendered-frame marker.
+All 80 local rooms emitted the marker in the candidate-pack run with the haze
+safety fallback enabled. The dummy SDL backend recorded 35 failed startup
+attempts across 21 scenes before successful retries; its cause is unknown.
+The earlier candidate run without fallback rendered 79/80 scenes, and scene 19
+rendered in a separate retry. Neither run validates natural entrances, story
+flags, actual override use in every scene, or later gameplay.</p>
+<p>For a manual test with a patched <code>scummvm-src/scummvm</code> binary and a <strong>copy</strong>
+of a save in slot 0, for example:</p>
+<pre><code class="language-sh">SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES=&quot;$PWD/mods/modernized-new&quot; \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
+SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
+SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER=edge \
+SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1 \
+./scummvm-src/scummvm --path=&quot;$PWD/scummvm&quot; \
+  --savepath=&quot;$PWD/validation/test-saves&quot; --save-slot=0 \
+  --themepath=&quot;$PWD/scummvm-src/gui/themes&quot; \
+  --extrapath=&quot;$PWD/scummvm-src/gui/themes&quot; \
+  --aspect-ratio --stretch-mode=pixel-perfect \
+  --no-fullscreen --window-size=1280,960 rosetattoo
+</code></pre>
+<p>Create <code>validation/test-saves</code> and copy in a valid <code>rosetattoo.000</code> first;
+ScummVM may write saves to the specified directory during play. The installed
+game remains untouched. <code>rosetattoo</code> must be a configured ScummVM target.
+The optional <code>edge</code> filter smooths perspective-resized hires sprite boundaries
+using premultiplied-alpha interpolation while keeping opaque interiors
+nearest-sampled. <code>bilinear</code> also smooths interiors; omit the environment
+variable to retain legacy nearest-neighbor sampling. None changes native
+gameplay or hotspot geometry. At 2x, some visible stair-stepping remains.
+The edge filter blends gradually between interpolated and nearest RGB near
+full opacity, avoiding a hard color switch observed in a Holmes shoe frame;
+other source-color and opacity changes can still produce visible variation.
+The optional haze fallback in this example is a correctness-first compromise:
+five rooms revert to native scene art and bitmap text until their indexed
+effects can be reproduced safely over enhanced images.</p>
+<h2 id="input-and-rendering-responsiveness">Input and rendering responsiveness</h2>
+<p>The PC Rose Tattoo input path now queues mouse-button transitions and their
+positions until the game consumes them. Previously, a quick press and release
+could both be polled while an animation was drawing and disappear before the
+next input check. An isolated engine fixture reproduced that loss on the old
+build and confirmed ordered press/release delivery for both buttons on the new
+build; a separate map fixture selected an unlocked location with a quick click.
+The queue is cleared wherever the engine explicitly clears input. Other Sherlock
+games and 3DO retain their existing button handling.</p>
+<p>An opaque hires-background copy now uses the matching-format bitmap copy rather
+than a general per-pixel alpha blit. A local 1280×960 copy microbenchmark measured
+2.741 ms before versus 0.283 ms after, with identical output; that is <strong>not</strong> an
+in-game FPS measurement. A matched map composite was pixel-identical before
+and after. The combined build passed 461 CxxTest tests, and all 80 local scene
+starts reached their marker with the candidate pack and native haze fallback;
+33 dummy-SDL startup attempts failed before successful retries.
+These tests do not establish that every dialog, drag, cutscene or desktop input
+path is responsive; the reported GUI freeze and actual perceived FPS still need
+in-game confirmation.</p>
+<p>For the hires overhead map only, the event loop splits its existing 10 ms
+sleep around a pending frame deadline rather than always presenting at the next
+poll. The requested sleep still totals 10 ms and room animation loops retain
+their existing pacing. In a dummy-SDL map fixture, presentation rose from
+about 26.4 to 28.6 frames/second; eight controlled scrolling traversals took
+2.79–2.96 seconds before and 2.91–2.97 seconds after. These short measurements
+are noisy, do not establish exact timing equivalence, and are not desktop FPS.
+Frame-counter cadence while on the map changes toward its intended rate; GUI
+and map behavior still need real playtesting.
+The local measurements and debugger traces are retained under the ignored
+<code>validation/responsiveness-evidence-20261031/</code> directory.</p>
+<p>For this machine's assembled candidate, an isolated launch was prepared under
+<code>validation/contour-candidate-playtest-20261031/</code>. Its slot 0 was copied from
+the validation save; subsequent saves there are separate from the user's
+original saves. To launch that candidate again from the repository root:</p>
+<pre><code class="language-sh">SCUMMVM_SHERLOCK_TATTOO_ASSET_OVERRIDES=&quot;$PWD/mods/rosetattoo-contour-candidate-20261031&quot; \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_SCALE=2 \
+SCUMMVM_SHERLOCK_TATTOO_HIRES_FORMAT=rgba32 \
+SCUMMVM_SHERLOCK_TATTOO_PALETTE_SAFE_SPRITES=1 \
+SCUMMVM_SHERLOCK_TATTOO_SPRITE_FILTER=edge \
+SCUMMVM_SHERLOCK_TATTOO_HAZE_NATIVE_FALLBACK=1 \
+./scummvm-src/scummvm \
+  --config=&quot;$PWD/validation/contour-candidate-playtest-20261031/scummvm.ini&quot; \
+  --path=&quot;$PWD/scummvm&quot; \
+  --savepath=&quot;$PWD/validation/contour-candidate-playtest-20261031/saves&quot; \
+  --themepath=&quot;$PWD/scummvm-src/gui/themes&quot; \
+  --extrapath=&quot;$PWD/scummvm-src/gui/themes&quot; \
+  --gui-theme=builtin --aspect-ratio --stretch-mode=pixel-perfect \
+  --no-fullscreen --window-size=1280,960 --save-slot=0 rosetattoo
+</code></pre>
+<p>The existing temporal pass can stabilize high-frequency residuals across
+similar frames, but arbitrary room image frame indices are not necessarily
+playback order. Treat its output as experimental until tested against actual
+animations; it does not change frame timing or game logic.
+It accepts nested resources and <code>--skip-existing</code>; completed sequences are
+reused only when their input files and temporal settings still match. Soft
+alpha is preserved. Its output manifests can be used as sprite inputs to the
+assembler once the entire selected run is complete.
+An offline comparison of ten scripted streams found small or inconsistent
+changes in a matched-detail stability metric and some RGB edits at moving
+edges. The current pack therefore does not apply the temporal pass globally;
+this comparison does not prove that the original ESRGAN frames never shimmer.</p>
+<p>For edge-smoothing experiments without rerunning ESRGAN, the optional
+<code>tools/refine_rosetattoo_sprite_alpha.py</code> rebuilds alpha from the native frame
+and feathers it by <code>--radius</code> output pixels, while keeping RGB, offsets,
+source hashes and palette sidecars intact. Bitmap-font alpha is left unchanged.
+It writes a separate tree and
+supports <code>--skip-existing</code>. The experimental <code>--thin-guard</code> protects some
+one- and two-pixel strokes and gaps, but is not a topology guarantee. Test a
+small representative set before running it on a whole pack: a larger radius
+can soften or erase small details, and rendering at 2x still limits the
+precision of a silhouette.</p>
+<p>A guarded 0.55-pixel feather was compared with the bilinear renderer on one
+Watson frame: the visual change was subtle, but it expanded native provenance
+coverage and affected compositing at some pixels. It has <strong>not</strong> been adopted
+for the full pack; small features, overlaps and animation need further tests.
+The experimental <code>--method scale4-box --radius 0.35 --thin-guard</code> instead
+infers smoother corners from the binary mask using geometry-only Scale2x
+operations. It changed some tested outline pixels even when total silhouette
+area barely changed; it is not the original higher-resolution contour and is
+not a topology guarantee. Use it only in an isolated visual/motion pilot until
+the effect on thin props, occlusion and frame-to-frame consistency is accepted.
+Adding <code>--preserve-support</code> restricts the result to the original Lanczos
+mask's nonzero-alpha support and requires the input alpha to match that mask.
+This keeps the renderer's nearest-sampled ownership coverage unchanged, but
+does not guarantee unchanged visible opacity, silhouettes or occlusion.
+The geometric contour is the selected direction for the current remaster;
+its broader sprite and animation validation is still in progress.</p>
+<p>For source-backed contour and topology checks, install the optional audit
+dependencies with <code>uv sync --extra esrgan --extra contour-audit</code>; see
+<a href="sprite-contour-audit.html"><code>sprite-contour-audit.md</code></a>. Include both extras when
+you need the model and the audit in the same project environment.</p>
+<p>In the local staged run, a source-backed geometry audit compared all 18,380
+palette-qualified walk frames. RGB bytes and nonzero-alpha support were
+unchanged, and no frame changed its 8-connected foreground component count
+or 4-connected hole count at alpha 128. The largest absolute per-frame
+alpha-weighted area change was 0.403%. All frames nevertheless had threshold
+crossings and were flagged for review by the audit's deliberately strict
+policy. A further 3,390 shared/variant frames likewise had no RGB, support,
+or component/hole-count changes. These counts do not prove unchanged geometry,
+acceptable motion, or gameplay safety.</p>
+<p>The 32,697 staged room-foreground frames likewise had no RGB, nonzero-support,
+or measured alpha-128 component/hole-count changes. The largest relative
+per-frame alpha-area change was 4.04% in a sparse, nearly transparent frame;
+this metric alone does not establish whether small details look right.
+The local candidate assembled from all five audited trees is
+<code>mods/rosetattoo-contour-candidate-20261031</code>: 80 backgrounds, 3,640 sprite
+resources and 87,656 frames. Its post-copy SHA-256 check matched every frame,
+resource manifest and palette sidecar to the selected audit inputs, and every
+background to its assembly input. The original source trees and earlier packs
+remain untouched. A separate decoded-source-hash and sidecar audit passed all
+87,656 frames and 80 background dimensions. A fixture-driven Holmes walk
+against the assembled pack captured 75 ticks with 76/76 logged qualified
+sprite lookups; a separate 18-frame cAnim fixture ran, but did not log its
+override lookups. Neither fixture is a natural-entry playthrough. This
+candidate still needs broader visual and gameplay tests.</p>
+<p>For the 33,189 local scripted-animation frames, the same audit found no RGB
+or support changes, but one frame in <code>scene_044/canim_004</code> changed its
+thresholded hole count. The planned local pack keeps the entire 10-frame
+resource on its original Lanczos alpha, avoiding a mask change midway through
+that animation. This is a conservative fallback, not proof that the remaining
+animations are visually correct.
+<code>assemble_rosetattoo_modernized.py --fallback-sprite scene_044/canim_004 enhanced/canimations-new</code> selects that whole baseline resource when assembling
+from a contour tree; the assembler checks its metadata against the candidate
+and records the fallback in the pack manifest. Repeat the audit for each game
+copy rather than assuming this particular fallback list is universal.</p>
+<h2 id="local-experiment-notes">Local experiment notes</h2>
+<p>On the local M2 Max, a test of 95 Watson frames took 11.38 seconds on MPS;
+20 character frames took 4.24 seconds on MPS versus 25.08 seconds on CPU.
+Times vary with frame dimensions, other GPU work and model warm-up. An
+untiled 1280x960 map exceeded the available MPS allocation; overlapping tiles
+completed a map test in 11.56 seconds. A separate three-frame scene-26 lamp
+test compared 128-pixel tiles with untiled inference: mean RGB difference on
+visible pixels was approximately 0.13/255, with identical alpha masks. These
+are spot checks, not guarantees against seams or animation flicker.</p>
+<p>An initial full extraction audit decoded the source streams again and
+matched all extracted frames for all 80 local PC room files. The audit checks
+asset fidelity to the decoder; it does not replace engine-side playtesting.
+An isolated scene-26 pilot exercised the three lamp frames and 31 bartender
+frames in a running engine; a matched capture showed the character, lamp,
+bartender, bar and foreground patron in the expected order. This does not
+cover all animation frames, palette transitions or game interactions.
+Another isolated fixture invoked the real <code>26HEXIT</code> cAnim stream: all 18
+frames loaded in order and matched the original <code>BEHIND</code> layering. A Watson
+frame comparison confirmed that soft-alpha edges render differently from the
+same RGB image with a thresholded mask. Neither fixture replaces a full
+playthrough or verifies every character and animation.</p>
+<p>A later scene-26 fixture loaded a real palette-qualified Watson frame. Its
+resource identity and 56-index installed-palette projection matched the
+sidecar, and an independent compositing check matched all 62,480 pixels in the
+drawn rectangle. Missing, corrupt and mismatched-palette sidecars fell back to
+native art, including after a prior cache hit. The pilot contained only one
+qualified Watson frame; continuity, normal scene entry and palette effects
+still need in-game testing.</p>
+<p>A subsequent fixture-driven scene-26 walk used all available Watson frames
+for that room palette. Across four runs, 343 observed lookups hit and 51
+distinct frame indices were exercised. One directed path reached standing;
+a return path was interrupted and was not validated to completion. The
+nearest and bilinear captures agreed on frame, position, scale and flip, with
+the sampled table occlusion retained. This is not a natural-entry playthrough
+or a sustained frame-rate benchmark; subtle animation shimmer remains a risk.
+A follow-up compared nearest, bilinear and edge-only filtering over 62
+matched walk-to-standing ticks. The edge-only mode matched nearest on all
+1,036,955 tested opaque output samples and matched bilinear at the tested
+non-opaque positions. Each mode had 63 qualified PNG hits and no fallbacks;
+this is still a single fixture, not proof for every scene or animation.</p>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

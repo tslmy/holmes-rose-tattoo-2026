@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambiguous shared VGS variants</title>
+<meta name="description" content="Ambiguous shared VGS variants: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html" aria-current="page">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Ambiguous shared VGS variants</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/vgs-variants.md"><code>docs/vgs-variants.md</code></a>, a working record of the project.</p><p><code>tools/extract_rosetattoo_vgs_variants.py</code> is a separate command for the five
+shared resources <code>HTUPRIGH.VGS</code>, <code>JTDOWNRG.VGS</code>, <code>JTRIGHT.VGS</code>,
+<code>JTUPRIGH.VGS</code>, and <code>NOHAT.VGS</code>. The original sprite extractor selects the
+first matching library; this command requires and reads <strong>both</strong> <code>VGS.LIB</code>
+and <code>WALK.LIB</code> instead. It uses the existing sprite extractor's archive,
+palette, and normal-frame decoders. Python 3.10+ and Pillow are required.</p>
+<h2 id="extraction-and-audit">Extraction and audit</h2>
+<p>Run from the repository root, with the game data installed under <code>scummvm/</code>.
+Choose a <strong>new</strong> destination with an existing parent directory. The tool
+refuses an existing file, directory, or symlink, refuses overlap with the game
+data directory, and exclusively creates all output files; it never replaces
+an existing extraction. A failed/interrupted run can leave a partial new
+directory: inspect it and choose a different new destination for a retry.</p>
+<p>The following commands were used for this extraction and audit; substitute a
+fresh destination when reproducing them:</p>
+<pre><code class="language-sh">.venv-upscale/bin/python tools/extract_rosetattoo_vgs_variants.py \
+  --data-dir scummvm --palette-scene 1 \
+  --output-dir extracted/shared-vgs-variants-agent-20261031
+
+.venv-upscale/bin/python tools/extract_rosetattoo_vgs_variants.py \
+  --data-dir scummvm --palette-scene 1 \
+  --audit-dir extracted/shared-vgs-variants-agent-20261031
+</code></pre>
+<p>Audit is read-only. It re-reads both archives, recomputes hashes, re-decodes
+every frame and compares directories, manifests, provenance, sizes, offsets,
+and RGBA pixels. It uses the same decoder as extraction: this verifies
+consistency with the installed data, <strong>not</strong> an independent ScummVM decode,
+runtime archive selection, visual quality, or in-game behavior.</p>
+<h2 id="engine-and-upscaler-contract">Engine and upscaler contract</h2>
+<p>The identity is the full lowercase <code>hashlib.md5</code> of the <strong>decompressed VGS
+resource bytes</strong>, using <code>usedforsecurity=False</code>: MD5 here is a content
+identity for engine compatibility, not a security check. Byte-identical
+resources from both archives share a single variant and retain both archive
+provenances in <code>metadata.json</code>; distinct bytes with the same digest are
+rejected rather than silently conflated. The stored and decompressed resource
+hashes and sizes are recorded per archive. No raw game bytes are committed.</p>
+<p>For <code>skipPal=false</code>, <code>animImages=false</code> only, the extracted source tree is:</p>
+<pre><code class="language-text">&lt;resource&gt;_vgs/variants/&lt;32-lowercase-hex-md5&gt;-s0a0/
+  frame_000.png
+  ...
+  metadata.json
+</code></pre>
+<p>The top-level <code>manifest.json</code> summarizes all variants. Metadata includes
+source archives, the digest, decoding flags, palette choice, and frame records
+compatible with the existing upscaler. For example, an unmodified recursive
+upscaler run produces the same nested paths with <code>frame_000@2x.png</code>, etc.
+Do not pass top-level <code>--resources</code> names: those directories do not themselves
+contain frame metadata. The upscaler itself can overwrite existing outputs,
+so reserve an empty output directory with <code>mkdir</code> first and <strong>do not run it</strong>
+if <code>mkdir</code> fails:</p>
+<pre><code class="language-sh">mkdir enhanced/shared-vgs-variants-agent-20261031
+.venv-upscale/bin/python tools/upscale_rosetattoo_sprites.py \
+  --input-dir extracted/shared-vgs-variants-agent-20261031 \
+  --output-dir enhanced/shared-vgs-variants-agent-20261031 \
+  --scale 2 --mode photo --alpha-mode soft --device mps
+</code></pre>
+<p>This command requires the existing ESRGAN dependencies and model checkpoint;
+see <code>docs/esrgan-setup.md</code>. The upscaler generates inferred detail and is not
+pixel-identical to the source. Its output is not installed into any pack by
+this tool. <code>-s0a0</code> must not be used for other loading modes, and the engine
+must actually support digest-qualified variants for these files to be used.
+The run above produced 350 frames in 10 variant directories. All were checked
+for paths, RGBA dimensions, scaled offsets, embedded source-pixel SHA-256, and
+the model SHA-256 <code>4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1</code>.
+These checks do not establish visual quality or correct in-game rendering.</p>
+<p><code>--palette-scene 1</code> uses <code>RES01.RRM</code> as the fallback for resources without an
+embedded palette, as in the existing shared sprite workflow. These five
+installed resources have no embedded palette. This fixed RGB approximation
+cannot reproduce different active room palettes, dynamic palette changes,
+fades, or other runtime effects; matching source identity does not guarantee
+correct colors.</p>
+<h2 id="installed-data-audit">Installed data audit</h2>
+<p>For the installed game data used here, both archive entries differ for every
+resource: <strong>5 resources, 10 variants, 350 frames</strong>, all audited. Each of the
+first four variants has 20 frames per archive; <code>NOHAT</code> has 95 per archive.
+These are content identities for this particular game installation, not
+universal constants for every edition or localization.</p>
+<table>
+<thead>
+<tr>
+<th>Resource</th>
+<th>VGS.LIB decompressed MD5</th>
+<th>WALK.LIB decompressed MD5</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HTUPRIGH.VGS</td>
+<td><code>f1fc49f52b79e268d8285deeb2f0205a</code></td>
+<td><code>1c556aa76b83313cbc35b72c673a33dd</code></td>
+</tr>
+<tr>
+<td>JTDOWNRG.VGS</td>
+<td><code>01d0082f85ea94cd8add3221e8f1fc9c</code></td>
+<td><code>830b73c40d4ee7b21a4d77ca4980960d</code></td>
+</tr>
+<tr>
+<td>JTRIGHT.VGS</td>
+<td><code>cd5e67c69caefccf42422e03a2f43200</code></td>
+<td><code>c59de1cd591db59afbde383cc6eb2a9c</code></td>
+</tr>
+<tr>
+<td>JTUPRIGH.VGS</td>
+<td><code>f3f3a369d447a0fe6d3dab395d35382b</code></td>
+<td><code>61f95194d5c4a7a2d0fc9458a7e3332d</code></td>
+</tr>
+<tr>
+<td>NOHAT.VGS</td>
+<td><code>3f34012e8889b70bdc249172cfd5d3a0</code></td>
+<td><code>7be439a4e52f46602b83a83056733054</code></td>
+</tr>
+</tbody>
+</table>
+<p>Run the focused synthetic tests (the upscaler integration test also needs
+NumPy):</p>
+<pre><code class="language-sh">.venv-upscale/bin/python -m unittest discover -s tools/tests -p test_vgs_variants.py -v
+</code></pre>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scripted headless play-tests</title>
+<meta name="description" content="Scripted headless play-tests: a working document of the Rose Tattoo remaster.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.5' cy='6.5' r='4.2' stroke='%23b3402a' stroke-width='1.6' fill='none'/%3E%3Cpath d='M9.6 9.6l4.6 4.6' stroke='%23b3402a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="doc">
+<header class="site">
+  <a class="home" href="index.html">The Rose Tattoo remaster</a>
+  <details class="pages">
+    <summary>All pages</summary>
+    <ol>
+<li><a href="index.html">The walk-through</a></li>
+<li><a href="bakeoff-results.html">Phase 1 bake-off results</a></li>
+<li><a href="code-archive.html">Code archive: what each removed script did, and where to get it back</a></li>
+<li><a href="contour-selection-plan.html">Contour selection-plan validation</a></li>
+<li><a href="esrgan-setup.html">Local ESRGAN (spandrel) setup</a></li>
+<li><a href="flux-setup.html">FLUX.1 + diffusers (Metal/mps) setup</a></li>
+<li><a href="linear-review-sync.html">Linear &lt;-&gt; review queue sync</a></li>
+<li><a href="local-models.html">Local models: LLM, OpenCode and image backends</a></li>
+<li><a href="pack-archive.html">Pack archive: what each pruned art pack was, and where its samples are</a></li>
+<li><a href="palette-walk-extraction.html">Palette-qualified walk sprite sources</a></li>
+<li><a href="phase3-sprites.html">Phase 3: Sprites</a></li>
+<li><a href="pilot-lessons.html">Pilot lessons: index of the dated trees</a></li>
+<li><a href="playtest-input-script.html" aria-current="page">Scripted headless play-tests</a></li>
+<li><a href="remaster-plan.html">Rose Tattoo remaster: plan (moved to Linear)</a></li>
+<li><a href="reproducing.html">Reproducing this pipeline from scratch</a></li>
+<li><a href="room-sprite-extraction.html">Rose Tattoo room-image extraction</a></li>
+<li><a href="rosetattoo-remaster-dev-blog.html">Remastering a 1996 Sherlock Holmes game with AI</a></li>
+<li><a href="scene-start-smoke-test.html">Rose Tattoo post-load scene-start smoke test</a></li>
+<li><a href="sprite-contour-audit.html">Read-only sprite contour audit</a></li>
+<li><a href="sprite-remaster.html">Scene-sprite remaster workflow</a></li>
+<li><a href="vgs-variants.html">Ambiguous shared VGS variants</a></li>
+<li><a href="z-image-setup.html">Z-Image Turbo setup</a></li>
+    </ol>
+  </details>
+</header>
+<article>
+<h1>Scripted headless play-tests</h1>
+
+<div class="prose">
+<p class="doc-source">Rendered from <a href="https://github.com/tslmy/holmes-rose-tattoo-2026/blob/main/docs/playtest-input-script.md"><code>docs/playtest-input-script.md</code></a>, a working record of the project.</p><p>The scene smoke test (<code>SCUMMVM_SHERLOCK_TATTOO_POSTLOAD_SCENE</code>) only checks
+each room's first frame. Story animations, room transitions and the UI only
+appear after you interact with the game. The patched engine can instead run
+a play-test from a text script. It sends the script's mouse and keyboard
+input as ordinary ScummVM events and writes the frame the window would show
+as PNG files. It needs no window focus, screen recording or OS input, and it
+runs under SDL's dummy video driver.</p>
+<h2 id="engine-requirement">Engine requirement</h2>
+<p>The engine branch <code>claude/sherlock-playtest-input</code> in <code>scummvm-src/</code> adds
+this (<code>engines/sherlock/tattoo/tattoo_playtest.{h,cpp}</code>, with a hook at the
+start of <code>Events::pollEvents()</code>). It is off unless
+<code>SCUMMVM_SHERLOCK_TATTOO_INPUT_SCRIPT</code> is set. Build it as described in the
+scene smoke-test notes:</p>
+<pre><code class="language-sh">./configure --disable-all-engines --enable-engine=sherlock --disable-debug --enable-release
+make -j8
+</code></pre>
+<h2 id="run">Run</h2>
+<pre><code class="language-sh">python3 tools/playtest_rosetattoo.py \
+  --scummvm /absolute/path/to/patched/scummvm \
+  --data-dir scummvm \
+  --save validation/saves/rosetattoo.000 \
+  --pack generated/playable-overrides-2x-remaster-it5 \
+  --scene 3 \
+  --script tools/playtest_scripts/room03_open_wardrobe.txt \
+  --output-dir /new/output/dir
+</code></pre>
+<p>For each attempt, the runner creates a new directory under <code>--output-dir</code>
+holding a copy of the save, a config file, <code>HOME</code>, <code>stdout.log</code> and <code>dumps/</code>.
+It never writes to the save, data or pack. It uses the same renderer settings
+as the smoke test: <code>surfacesdl</code>, RGBA32 at 2x, palette-safe sprites, the edge
+filter and random seed 1. Other options:</p>
+<ul>
+<li><code>--scene N</code> jumps to scene N after loading, using the post-load hook.</li>
+<li><code>--window</code> opens a real window so you can watch.</li>
+<li><code>--env KEY=VALUE</code> passes extra engine settings.</li>
+<li><code>--sdl-retries</code> retries only the dummy backend's intermittent
+<code>SDL_BlitSurface</code> error (default 3).</li>
+</ul>
+<p>The runner writes <code>report.json</code> and exits 0 only when the script reaches
+<code>quit</code> (or its end) with no error.</p>
+<p>The example plays the wardrobe animation <code>03WARD</code> (canim_005) in room 3 and
+produces six dumps: room, verb menu, two mid-animation frames (cAnim frames 4
+and 8), Holmes's description of the interior, and the frame after the text
+is dismissed. Each headless run takes about 15 s.</p>
+<h2 id="script-format">Script format</h2>
+<p>One command per line. <code>#</code> starts a comment. Coordinates are native <strong>screen</strong>
+coordinates (640x480, before the 2x scale, relative to the current scroll).
+The engine multiplies them by the hires scale before sending the events.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wait &lt;ms&gt;</code></td>
+<td>Wait for engine time in milliseconds.</td>
+</tr>
+<tr>
+<td><code>waitframes &lt;n&gt;</code></td>
+<td>Wait for <code>n</code> game frames (30 per second). This is more repeatable than <code>wait</code>.</td>
+</tr>
+<tr>
+<td><code>move &lt;x&gt; &lt;y&gt;</code></td>
+<td>Move the mouse.</td>
+</tr>
+<tr>
+<td><code>click &lt;x&gt; &lt;y&gt;</code></td>
+<td>Left click: move, wait 2 frames, press, wait 2 frames, release, wait 2 frames.</td>
+</tr>
+<tr>
+<td><code>rclick &lt;x&gt; &lt;y&gt;</code></td>
+<td>Right click, timed like <code>click</code>. Over a hotspot it opens the verb menu.</td>
+</tr>
+<tr>
+<td><code>verb &lt;name&gt;</code></td>
+<td>Click the named entry (<code>Open</code>, <code>Look</code>, ...) in the open verb menu. Fails, listing the entries, if the menu is closed or lacks it.</td>
+</tr>
+<tr>
+<td><code>key &lt;name&gt;</code></td>
+<td>Press and release a key: <code>a</code>-<code>z</code>, <code>0</code>-<code>9</code>, <code>f1</code>-<code>f12</code>, <code>escape</code>, <code>return</code>, <code>space</code>, <code>tab</code>, <code>backspace</code>, arrows, <code>home</code>, <code>end</code>, <code>pageup</code>, <code>pagedown</code>.</td>
+</tr>
+<tr>
+<td><code>waitidle [timeout_ms]</code></td>
+<td>Wait until the top-level scene loop has run for 5 frames in a row in standard mode with the cursor visible, no pending scene change, no active cAnim, and Holmes not walking. That excludes talk, menus, text windows, journal and transitions. Default timeout 60000.</td>
+</tr>
+<tr>
+<td><code>waitscene &lt;n&gt; [timeout_ms]</code></td>
+<td>Wait until scene <code>n</code> is loaded and the main loop is accepting input.</td>
+</tr>
+<tr>
+<td><code>waitcanim [timeout_ms]</code></td>
+<td>Wait until a cAnim is playing.</td>
+</tr>
+<tr>
+<td><code>objects</code></td>
+<td>Log the visible hotspots with name, type and screen rectangle, to help you find click targets.</td>
+</tr>
+<tr>
+<td><code>dump &lt;name&gt;</code></td>
+<td>Write <code>&lt;name&gt;.png</code> (letters, digits, <code>-</code>, <code>_</code>, <code>.</code>) and a log line. Requires <code>SCUMMVM_SHERLOCK_TATTOO_DUMP_DIR</code>.</td>
+</tr>
+<tr>
+<td><code>log &lt;text&gt;</code></td>
+<td>Write a log line with the current state.</td>
+</tr>
+<tr>
+<td><code>quit</code></td>
+<td>Quit the game.</td>
+</tr>
+</tbody>
+</table>
+<p>Without <code>quit</code> the game keeps running after the last command. With <code>--window</code>
+you can then take over.</p>
+<p>If a wait times out or a command fails, the engine logs an <code>ERROR</code>, writes
+<code>error_line&lt;N&gt;.png</code>, and quits. Parse errors are reported before the game
+starts.</p>
+<h3 id="output">Output</h3>
+<p><code>dump</code> writes the presented hires composite (<code>Screen::_roseTattooHiresComposite</code>).
+These are the same pixels <code>copyRectToScreen</code> sends to the window, but without
+the mouse cursor, which the backend draws. Without a hires scale it writes the
+native 8-bit screen instead (<code>&quot;source&quot;: &quot;native_screen&quot;</code>).</p>
+<p>Every event is printed to stdout as <code>SHERLOCK_PLAYTEST_&lt;KIND&gt; &lt;json&gt;</code> and
+appended to <code>&lt;dump dir&gt;/playtest.jsonl</code>. The kinds are <code>START</code>, <code>OBJECTS</code>,
+<code>VERB</code>, <code>DUMP</code>, <code>LOG</code>, <code>ERROR</code>, <code>QUIT</code> and <code>END</code>. The state block contains:</p>
+<pre><code class="language-json">{&quot;millis&quot;: 9123, &quot;frame&quot;: 212, &quot;scene&quot;: 3, &quot;go_to_scene&quot;: -1,
+ &quot;holmes&quot;: [259, 309], &quot;holmes_walking&quot;: false,
+ &quot;canim&quot;: {&quot;number&quot;: 5, &quot;name&quot;: &quot;03WARD&quot;, &quot;frame&quot;: 4},
+ &quot;menu_mode&quot;: 0, &quot;idle&quot;: false, &quot;mouse&quot;: [240, 213], &quot;scroll&quot;: [0, 0], &quot;hires_scale&quot;: 2}
+</code></pre>
+<p><code>holmes</code> is in scene coordinates. <code>canim</code> is <code>null</code> when no cAnim is
+playing. <code>menu_mode</code> is the engine's <code>MenuMode</code> value (0 standard, 3 talk,
+20 lab, 21 message).</p>
+<h2 id="limits">Limits</h2>
+<ul>
+<li>Timing follows real engine time, as in normal play. In three runs of the
+example, the mid-animation dumps landed on the same cAnim frames. A busy
+machine could still shift a dump by a frame, so for frame-exact
+comparisons use <code>waitcanim</code> plus <code>waitframes</code>, and check the <code>canim.frame</code>
+logged with each dump.</li>
+<li>The dumps do not include the cursor.</li>
+<li>The dummy backend's intermittent <code>SDL_BlitSurface</code> startup error still
+occurs. The runner retries it.</li>
+</ul>
+<h2 id="canim-suite">cAnim suite</h2>
+<p><code>tools/playtest_canim_suite.py</code> runs one generated script per reachable cAnim trigger and compares packs:</p>
+<pre><code class="language-sh">uv run python tools/playtest_canim_suite.py --scummvm scummvm-src/scummvm --data-dir scummvm \
+  --save validation/saves/rosetattoo.000 --survey-dir work/playtest/survey \
+  --pack before=generated/playable-overrides-2x-remaster-it4 \
+  --pack after=generated/playable-overrides-2x-remaster-it5 --output-dir work/playtest/canims-it5
+</code></pre>
+<p>It needs a survey run per room first (<code>waitidle</code>, <code>objects</code>, <code>quit</code>) under <code>&lt;survey-dir&gt;/room&lt;N&gt;/</code>. A
+trigger is an object <code>uses</code> entry with a verb, no inventory target and a cAnim number (1-based in the room
+file); hotspots off screen in scrolling rooms are skipped. Results: <code>results.json</code> (which cAnim actually
+played per pack) and <code>sheet-NN.jpg</code> pages.</p>
+<h2 id="ui-suite-exits-map-inventory-journal-scrolling-rooms">UI suite: exits, map, inventory, journal, scrolling rooms</h2>
+<p><code>tools/playtest_ui_suite.py</code> generates scripts for what the scene and cAnim checks miss and runs them
+per pack (same <code>--survey-dir</code>, <code>--pack label=dir</code> and sheet output as the cAnim suite, plus <code>--jobs</code>):</p>
+<pre><code class="language-sh">uv run python tools/playtest_ui_suite.py --scummvm scummvm-src/scummvm --data-dir scummvm \
+  --save validation/saves/rosetattoo.000 --survey-dir work/playtest/survey \
+  --pack it5=generated/playable-overrides-2x-remaster-it5 --output-dir work/playtest/ui-it5
+</code></pre>
+<ul>
+<li><strong>exit</strong>: the exit (arrow) zones come from the room file's exit table (<code>Exit::load()</code>, not in the
+extracted metadata). The suite clicks a free floor point of the zone (the engine ignores exits under
+a hotspot), dumps Holmes walking out, then <code>waitscene &lt;dest&gt;</code> and the first, 15th and settled frames
+of the next room; exits to the map (scenes 90/100) dump the map. Zones fully covered by an object
+(<code>room30covr</code>, <code>Exitcover1</code>, ...) are story-gated and skipped.</li>
+<li><strong>door</strong>: object verbs whose use names change scene (<code>*NN</code>), e.g. Door &gt; Open; other points of the
+object are tried when a person or hotspot is under the click.</li>
+<li><strong>scroll</strong>: rooms wider than 640 px; Holmes is walked to each end over free floor. The expected scroll
+is predicted from the engine's rule (it scrolls once Holmes passes screen x 480 / 80 and settles with
+him about 320 px from the edge), so the check accepts ends the free floor cannot reach.</li>
+<li><strong>map</strong>: leave Baker Street for the map, scroll it with the mouse at the screen edges, pick 221B or
+Scotland Yard, dump the close-up and the arrival.</li>
+<li><strong>inventory</strong>: right-click empty floor, <code>verb Inventory</code>, dump, click outside to close.</li>
+<li><strong>journal</strong>: right-click Watson where the save has him (room 24), <code>verb Journal</code>, dump.</li>
+</ul>
+<p>Rooms whose survey shows talk mode after the scene jump are skipped (they ignore all input).
+<code>results.json</code> holds automatic checks per run (expected scene reached, scroll range, near-black dumps,
+script errors); <code>sheet-NN.jpg</code> shows one row per test.</p>
+<p>Result on it5 (<code>work/playtest/ui-findings.md</code>, run <code>work/playtest/ui-it5-r4/</code>): 39 of 54 runs pass.
+Map, inventory, journal frame, 16 room-to-room exits and 12 map exits render cleanly. Bugs found are
+engine-side and pack-independent: a segfault in <code>TattooPerson::setWalking</code> when a talk script walks an
+NPC with no frame (rooms 36, 33), and room 57's exit into scene 80 needing a missing <code>Holm57a.tlk</code>. The
+exits of rooms 18/68 never fire. 15 rooms open in a silent talk mode after the post-load jump.</p>
+<p>Gaps in the script language this suite works around or cannot cover:</p>
+<ul>
+<li><code>key</code> events are pushed with <code>pushEvent()</code>, whose artificial event source does not allow keymapper
+mapping, so keys bound to engine actions (F1 journal, Tab/F3 inventory, Home/End on the map,
+Escape to close windows) do nothing (verified: F1 and Tab left the room unchanged). An
+<code>action &lt;name&gt;</code> command (or sending keys through the mapped path) would fix this.</li>
+<li><code>objects</code> lists room objects but not people, so Watson (journal) and NPCs standing on hotspots cannot
+be located. Listing people (index &gt;= 1000) would fix it.</li>
+<li><code>waitidle</code> does not check <code>menu_mode</code>: it returns while a talk window, a description box or a silent
+talk state is up, and it returns before the room has finished scrolling (the suite adds
+<code>waitframes 45</code> after walks in scrolling rooms).</li>
+<li>Nothing waits for the overhead map: while it is up <code>go_to_scene</code> stays 90/100 and the main loop
+does not run, so <code>waitscene</code>/<code>waitidle</code> never return. The suite samples it with <code>waitframes</code>.</li>
+<li>There is no walk-to-scene-coordinate or scroll command; scrolling is predicted, and is off by up to
+about 100 px in some rooms (room 7).</li>
+</ul>
+
+</div>
+</article>
+<footer class="site">
+  <a href="https://github.com/tslmy/holmes-rose-tattoo-2026">Source on GitHub</a> ·
+  Screenshots and redraws are of <em>The Lost Files of Sherlock Holmes: The Case of the Rose Tattoo</em> (Mythos Software / Electronic Arts, 1996), shown downscaled for commentary. The game's data is not included in the repository.
+</footer>
+<script src="assets/app.js" defer></script>
+</body>
+</html>
