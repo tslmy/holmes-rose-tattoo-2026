@@ -6,6 +6,7 @@
 
     uv run --script site/build.py            # writes site/_build/
     uv run --script site/build.py --no-images
+    uv run --script site/build.py --local-root DIR   # checkout that holds the untracked samples
 
 The article body is site/article.html (hand-written HTML, with <sn>...</sn>
 for side notes, as in the brainux-brainai explainer). Every docs/*.md becomes
@@ -23,6 +24,7 @@ import argparse
 import html
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +46,25 @@ DESCRIPTION = (
 )
 DATE = "2026-11-22"
 
+# Docs published as of the 2026-11-22 snapshot: the commit each one is read from.
+# Docs not listed come from the working tree. None = untracked, read from --local-root.
+DOC_PINS: dict[str, str | None] = {
+    "bakeoff-results": "b33b182",
+    "code-archive": "9d4a24e",
+    "flux-setup": "9d4a24e",
+    "linear-review-sync": None,
+    "pack-archive": "9d4a24e",
+    "phase3-sprites": "cd02682",
+    "reproducing": "9d4a24e",
+    "scene-start-smoke-test": "c671d2b",
+    "sprite-remaster": "c671d2b",
+}
+LOCAL = ROOT  # untracked image sources and docs; set by --local-root
+
+# Figures of the draft dev blog, which links to them outside docs/figures.
+BLOG_FIGURES = "validation/rosetattoo-blog-figures-20261031"
+BLOG_NAMES = ["01-candidate-holmes", "02-background-comparison", "03-palette-pilot", "04-soft-alpha-pilot"]
+
 PA = "work/pack-archive"
 IT = "generated__playable-overrides-2x-remaster"
 # (output name, source, crop box in source pixels or None, max width, resample)
@@ -63,6 +84,7 @@ IMAGES: list[tuple[str, str, tuple[int, int, int, int] | None, int, str]] = [
     ("holmes-esrgan.webp", f"{PA}/enhanced__sprites/svgawalk_vgs/frame_024@2x.png", None, 186, "lanczos"),
     ("holmes-lifelike.webp", f"{PA}/enhanced__sprites-lifelike/svgawalk_vgs/frame_024@2x.png", None, 186, "lanczos"),
     ("holmes-sheet.webp", f"{PA}/generated__character-redraws/references/svgawalk_vgs.png", None, 800, "lanczos"),
+    *((f"blog-{n}.webp", f"{BLOG_FIGURES}/{n}.png", None, 960, "lanczos") for n in BLOG_NAMES),
 ]
 
 
@@ -73,7 +95,14 @@ def build_images() -> list[tuple[str, int, tuple[int, int]]]:
     dest.mkdir(parents=True, exist_ok=True)
     report = []
     for name, src, crop, max_w, mode in IMAGES:
-        im = Image.open(ROOT / src)
+        # An already published image wins: some source packs have since been pruned.
+        built = LOCAL / "site/_build/img" / name
+        if LOCAL != ROOT and built.is_file():
+            shutil.copyfile(built, dest / name)
+            with Image.open(built) as im:
+                report.append((name, built.stat().st_size, im.size))
+            continue
+        im = Image.open(LOCAL / src)
         im = im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB")
         if crop:
             im = im.crop(crop)
@@ -95,11 +124,22 @@ LINEAR_LINK = re.compile(r'<a href="https://linear\.app/[^"]*">([^<]*)</a>')
 LINEAR_BARE = re.compile(r"\(?https://linear\.app/\S+?\)?(?=[\s<:,.]|$)")
 
 
+def doc_text(path: Path) -> str:
+    if path.stem not in DOC_PINS:
+        return path.read_text()
+    commit = DOC_PINS[path.stem]
+    if commit is None:
+        return (LOCAL / "docs" / path.name).read_text()
+    return subprocess.check_output(["git", "show", f"{commit}:docs/{path.name}"], cwd=ROOT, text=True)
+
+
 def doc_pages() -> list[tuple[str, str, Path]]:
     pages = []
-    for p in sorted(DOCS.glob("*.md")):
-        first = next((l for l in p.read_text().splitlines() if l.startswith("# ")), p.stem)
-        pages.append((p.stem, first.lstrip("# ").strip(), p))
+    stems = {p.stem for p in DOCS.glob("*.md")} | set(DOC_PINS)
+    for stem in sorted(stems):
+        p = DOCS / f"{stem}.md"
+        first = next((l for l in doc_text(p).splitlines() if l.startswith("# ")), stem)
+        pages.append((stem, first.lstrip("# ").strip(), p))
     return pages
 
 
@@ -122,9 +162,11 @@ def rewrite_links(body: str) -> str:
         return f'{attr}="{BLOB}{rel.as_posix()}{frag}"'
 
     body = re.sub(r'(href)="([^"]+)"', href, body)
+    for n in BLOG_NAMES:
+        body = body.replace(f'src="../{BLOG_FIGURES}/{n}.png"', f'src="img/blog-{n}.webp"')
     # Images outside docs/figures are game-derived local files: not published.
     body = re.sub(
-        r'<img src="(?!figures/)[^"]*" alt="([^"]*)"[^>]*>',
+        r'<img src="(?!figures/|img/blog-)[^"]*" alt="([^"]*)"[^>]*>',
         lambda m: f'<span class="img-missing">[image not published: {m.group(1)}]</span>',
         body,
     )
@@ -135,8 +177,11 @@ def rewrite_links(body: str) -> str:
 
 
 def render_md(md: MarkdownIt, path: Path) -> str:
-    text = path.read_text()
+    text = doc_text(path)
     text = re.sub(r"\A# .*\n", "", text)  # the title goes in <h1>
+    # The blog's figures are published here, so its pre-publication notes are stale.
+    text = re.sub(r"^> \*\*Draft image note:\*\*.*\n(?:>.*\n)*", "", text, flags=re.M)
+    text = text.replace("*Draft — not yet published*", "*Draft*")
     return rewrite_links(md.render(text))
 
 
@@ -182,6 +227,7 @@ def nav_html(pages: list[tuple[str, str, Path]], current: str) -> str:
 
 SCAN = [
     (re.compile(r"/Users/|/home/\w+"), "home path"),
+    (re.compile(r"\.ssh/|\bssh\s+[\w.-]+@"), "ssh detail"),
     (re.compile(r"[\w.+-]+@(?:gmail|outlook|icloud|hotmail)\.com"), "email"),
     (re.compile(r"linear\.app/"), "Linear URL"),
     (re.compile(r"\b(?:sk|hf|ghp|gho|xox[bp])[-_][A-Za-z0-9]{16,}"), "key-like token"),
@@ -192,7 +238,10 @@ SCAN = [
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-images", action="store_true")
+    ap.add_argument("--local-root", type=Path, default=ROOT)
     args = ap.parse_args()
+    global LOCAL
+    LOCAL = args.local_root.resolve()
 
     if OUT.exists():
         for child in OUT.iterdir():
@@ -231,16 +280,18 @@ def main() -> int:
         print(f"  images: {len(IMAGES)}, {total / 1024:.0f} KB in all")
 
     problems = []
-    for f in OUT.rglob("*.html"):
+    for f in OUT.rglob("*"):
+        if f.suffix not in (".html", ".css", ".js", ".svg"):
+            continue
         text = f.read_text()
         for rx, what in SCAN:
             for m in rx.finditer(text):
                 problems.append(f"{f.relative_to(OUT)}: {what}: {m.group(0)}")
-    used = set(re.findall(r'img/([\w.-]+\.webp)', (OUT / "index.html").read_text()))
+    used = {u for f in OUT.glob("*.html") for u in re.findall(r'src="img/([\w.-]+\.webp)', f.read_text())}
     missing = used - {n for n, *_ in IMAGES}
     print(f"wrote {OUT.relative_to(ROOT)}/: index.html ({notes} side notes) + {len(pages)} doc pages")
     if missing:
-        problems.append(f"index.html uses unknown images: {sorted(missing)}")
+        problems.append(f"pages use unknown images: {sorted(missing)}")
     for p in problems:
         print("PRIVACY/CHECK:", p, file=sys.stderr)
     return 1 if problems else 0
